@@ -21,6 +21,8 @@ from agentic_quant.database import (
     feature_snapshots,
     market_bars,
     strategy_specs,
+    validation_folds,
+    validation_reports,
 )
 from agentic_quant.domain import (
     BacktestResult,
@@ -30,6 +32,7 @@ from agentic_quant.domain import (
     PointInTimeFeatureSnapshot,
     StockBar,
     StrategySpec,
+    WalkForwardValidationReport,
 )
 from agentic_quant.ids import uuid7
 
@@ -389,6 +392,50 @@ class ResearchStore:
                 insert(feature_parity_checks).values(**check.model_dump())
             )
 
+    def record_validation_report(self, report: WalkForwardValidationReport) -> None:
+        with self.engine.begin() as connection:
+            connection.execute(
+                insert(validation_reports).values(
+                    validation_report_id=report.validation_report_id,
+                    symbol=report.symbol,
+                    timeframe=report.timeframe,
+                    strategy_types=list(report.strategy_types),
+                    selection_metric=report.selection_metric,
+                    train_bars=report.train_bars,
+                    test_bars=report.test_bars,
+                    step_bars=report.step_bars,
+                    embargo_bars=report.embargo_bars,
+                    aggregate_metrics=report.model_dump(mode="json")[
+                        "aggregate_metrics"
+                    ],
+                    regime_metrics=report.model_dump(mode="json")["regime_metrics"],
+                    report_hash=report.report_hash,
+                    code_git_sha=report.code_git_sha,
+                    created_at=report.created_at,
+                )
+            )
+            connection.execute(
+                insert(validation_folds),
+                [
+                    {
+                        "validation_report_id": report.validation_report_id,
+                        **fold.model_dump(
+                            exclude={
+                                "selected_train_metrics",
+                                "selected_test_metrics",
+                            },
+                        ),
+                        "selected_train_metrics": fold.selected_train_metrics.model_dump(
+                            mode="json"
+                        ),
+                        "selected_test_metrics": fold.selected_test_metrics.model_dump(
+                            mode="json"
+                        ),
+                    }
+                    for fold in report.folds
+                ],
+            )
+
     def recent_experiments(self, *, limit: int = 50) -> list[dict[str, Any]]:
         statement = (
             select(experiment_runs)
@@ -439,6 +486,54 @@ class ResearchStore:
                 results.append(item)
             return results
 
+    def recent_validation_reports(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        statement = (
+            select(validation_reports)
+            .order_by(validation_reports.c.created_at.desc())
+            .limit(limit)
+        )
+        with self.engine.connect() as connection:
+            results = []
+            for row in connection.execute(statement):
+                item = self._normalize_times(dict(row._mapping), ("created_at",))
+                item["fold_count"] = int(
+                    connection.execute(
+                        select(func.count())
+                        .select_from(validation_folds)
+                        .where(
+                            validation_folds.c.validation_report_id
+                            == item["validation_report_id"]
+                        )
+                    ).scalar_one()
+                )
+                results.append(item)
+            return results
+
+    def validation_report(self, validation_report_id: str) -> dict[str, Any] | None:
+        with self.engine.connect() as connection:
+            report_row = connection.execute(
+                select(validation_reports).where(
+                    validation_reports.c.validation_report_id == validation_report_id
+                )
+            ).one_or_none()
+            if report_row is None:
+                return None
+            report = self._normalize_times(dict(report_row._mapping), ("created_at",))
+            folds = []
+            statement = (
+                select(validation_folds)
+                .where(validation_folds.c.validation_report_id == validation_report_id)
+                .order_by(validation_folds.c.fold_number.asc())
+            )
+            for row in connection.execute(statement):
+                item = self._normalize_times(
+                    dict(row._mapping),
+                    ("train_start", "train_end", "test_start", "test_end"),
+                )
+                folds.append(item)
+            report["folds"] = folds
+            return report
+
     def health_summary(self) -> dict[str, int]:
         with self.engine.connect() as connection:
             return {
@@ -475,6 +570,16 @@ class ResearchStore:
                 "feature_parity_checks": int(
                     connection.execute(
                         select(func.count()).select_from(feature_parity_checks)
+                    ).scalar_one()
+                ),
+                "validation_reports": int(
+                    connection.execute(
+                        select(func.count()).select_from(validation_reports)
+                    ).scalar_one()
+                ),
+                "validation_folds": int(
+                    connection.execute(
+                        select(func.count()).select_from(validation_folds)
                     ).scalar_one()
                 ),
             }

@@ -4,9 +4,9 @@ Last updated: 2026-09-04 PDT
 
 Context format: v1
 
-Current phase: Phase 3B event-driven research baseline implemented; Phase 1B open-session verification pending
+Current phase: Phase 3C walk-forward validation baseline implemented; Phase 1B open-session verification pending
 
-Current documented baseline: C012 — `Add event-driven backtest accounting`
+Current documented baseline: C013 — `Add walk-forward validation baseline`
 
 ## Purpose and authority
 
@@ -53,6 +53,9 @@ A Git commit cannot contain its own content-derived hash without changing that h
 - Phase 3B replaces direct round-trip arithmetic with a deterministic portfolio state
   machine. Ordered signal, order, fill, mark, split, and cash-dividend events are persisted;
   fills use exchange timestamps, explicit costs, and a bar-volume participation cap.
+- Phase 3C adds immutable rolling train/embargo/test reports. Every candidate is evaluated
+  both in and out of sample, with selection degradation, below-median selection rate, and
+  realized-regime summaries retained rather than reporting only the winner.
 - No GitHub remote or cloud host is configured yet.
 
 ### Repository state
@@ -99,8 +102,8 @@ Development service ports bind only to loopback. The local Compose credentials a
 
 - `make check`: passed.
 - Flake8: passed.
-- Strict mypy: passed for 34 source files.
-- Pytest: 38 passed.
+- Strict mypy: passed for 35 source files.
+- Pytest: 40 passed.
 - `make doctor`: passed against the local-lite SQLite profile.
 - `make docker-doctor`: passed against the PostgreSQL-backed Compose profile.
 - PostgreSQL query: passed; the first container replay stored six lineage events.
@@ -116,7 +119,7 @@ Development service ports bind only to loopback. The local Compose credentials a
 - Real primary-source test: 10 entries from Apple's official Newsroom RSS feed passed the same path; identical replay inserted zero documents, versions, catalysts, links, or events.
 - Real SEC test: 20 AAPL filing records produced 19 catalysts and 20 links; identical replay inserted zero new records or events. A bounded 250-record AAPL XBRL facts run also replayed with zero duplicates.
 - Phase 2 fixtures verify primary/secondary source distinction, correction-version retention, SEC filing and XBRL normalization, IR feed parsing, and cross-document catalyst deduplication.
-- Alembic migrations through `20260904_0009` own the Phase 3B schema; a fresh SQLite
+- Alembic migrations through `20260904_0010` own the Phase 3C schema; a fresh SQLite
   upgrade/check/downgrade/re-upgrade cycle passed with no schema diff.
 - `make research-smoke`: passed with 100 deterministic daily bars, three immutable baseline
   experiments, nonzero cost modeling, matching offline/online feature hashes, and ordered
@@ -134,6 +137,11 @@ Development service ports bind only to loopback. The local Compose credentials a
 - PostgreSQL migration `20260904_0009` backfilled legacy trade exit quantities and added the
   portfolio-event ledger. A bounded real AAPL buy-and-hold replay stored 28 ordered events;
   its API sequence began with `signal` and ended with `fill`.
+- PostgreSQL migration `20260904_0010` stored an immutable four-fold AAPL walk-forward
+  report over a bounded 2026-07-01 through 2026-09-03 sample. All 16 underlying train/test
+  candidate runs were retained and both validation APIs returned the complete audit graph.
+  The selected strategies produced a `2.62%` compounded out-of-sample return but only a
+  `25%` positive-fold rate; this is pipeline evidence, not an alpha or promotion claim.
 - Repository secret-pattern scan: passed after fixing a scanner self-match.
 
 ## Product intent and invariant boundaries
@@ -330,6 +338,10 @@ flowchart LR
     BASELINE --> EXPERIMENT["Immutable experiment + trades + events"]
     EXPERIMENT --> DB
     EXPERIMENT --> LEDGER
+    EXPERIMENT --> VALIDATE["Rolling train / embargo / test validation"]
+    VALIDATE --> REPORT["Immutable folds + regime/selection diagnostics"]
+    REPORT --> DB
+    REPORT --> LEDGER
 ```
 
 Alembic migrations own the PostgreSQL/SQLite schema. Redis and MinIO are connected to both ingestion paths. The market stream client authenticates, reconnects with bounded exponential backoff, normalizes trades/quotes/minute bars, and requests historical repair for XNYS-session gaps; a real open-session frame capture remains outstanding. The Phase 2 path versions source documents, retains publication/ingestion/correction time, classifies source trust, resolves issuer entities, normalizes SEC facts, and deterministically links similar multi-source coverage to one catalyst.
@@ -343,7 +355,13 @@ persisted. Signals fill no earlier than the next exchange open. The event-driven
 ledger applies splits and gross cash dividends, records marks/orders/fills, enforces a bar-
 volume participation cap, and charges commission, slippage, and fixed market impact. All
 source/feature/dataset/code hashes are retained. Corporate-action provider ingestion,
-cross-symbol events, advanced fill simulation, and walk-forward validation remain open.
+cross-symbol events, and advanced fill simulation remain open.
+
+The Phase 3C validator runs every declared candidate in chronological rolling training and
+out-of-sample windows separated by an embargo. Test windows cannot overlap. Selection uses
+only training metrics, while every test result is retained for rank and selection-failure
+analysis. Realized test returns define transparent up/down/sideways report buckets; they do
+not feed the strategy. Formal CPCV/PBO and Deflated Sharpe remain open.
 
 ### Target architecture
 
@@ -468,7 +486,8 @@ year or more of data.
 | Research persistence | `src/agentic_quant/research_store.py` | immutable evidence/features/specs/experiments/trades and as-of reads |
 | Reference data | `src/agentic_quant/reference_data.py` | bitemporal corporate-action and historical-universe queries |
 | Research operations | `src/agentic_quant/research_cli.py` | synthetic smoke, stored-data baselines, parity audit, experiment listing |
-| Schema migrations | `migrations/` | Alembic schema history through Phase 3B |
+| Validation engine | `src/agentic_quant/validation.py` | rolling train/embargo/test selection, regime reports, selection diagnostics |
+| Schema migrations | `migrations/` | Alembic schema history through Phase 3C |
 
 ## Current executable risk baseline
 
@@ -505,6 +524,8 @@ Implemented endpoints:
 - `GET /v1/catalysts`
 - `GET /v1/research/experiments`
 - `GET /v1/research/experiments/{experiment_run_id}/events`
+- `GET /v1/research/validations`
+- `GET /v1/research/validations/{validation_report_id}`
 - Development-only read-only Alpaca probe, bar backfill, and option snapshot endpoints.
 - Development-only Alpaca News, SEC filing, and SEC company-facts ingestion endpoints.
 - `POST /v1/commands/pause`
@@ -517,6 +538,7 @@ make bootstrap
 make check
 make doctor
 make research-smoke
+make validation-smoke
 make docker-up
 make docker-doctor
 make docker-event-health
@@ -730,6 +752,22 @@ The Compose stack is currently intended to remain running for local inspection. 
 - This is a single-symbol, long/cash event-driven baseline, not yet a production exchange
   simulator. It adds no broker connectivity or trading authority.
 - Formal record: `docs/adr/0008-event-driven-backtest-ledger.md`.
+
+### D018 — Walk-forward validation before generative strategy research
+
+- Date: 2026-09-04 PDT.
+- The user authorized continuing to the next milestone after the event-driven baseline.
+- Decision: add rolling chronological train/embargo/test evaluation before introducing an
+  LLM strategy generator, so generated candidates will enter an existing rejection system.
+- Every declared candidate is evaluated on both train and test windows. Only the training
+  metric selects the fold winner; all test results remain linked and queryable.
+- Test windows cannot overlap, and every train/test pair requires at least one embargo bar.
+- The first transparent overfitting indicators are train-to-test Sharpe degradation and the
+  rate at which a training winner ranks below the test median. These are not mislabeled as
+  formal PBO or Deflated Sharpe.
+- Regimes are ex-post report labels based on test-window price movement and cannot affect
+  candidate selection or trading decisions.
+- Formal record: `docs/adr/0009-walk-forward-validation.md`.
 
 ## Iteration and commit ledger
 
@@ -1085,7 +1123,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C012 — `Add event-driven backtest accounting`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `be9e94a`
 - Date: 2026-09-04 PDT.
 - User intent: continue into the next research milestone after Phase 3A.2.
 - Scope:
@@ -1121,6 +1159,43 @@ The Compose stack is currently intended to remain running for local inspection. 
   - Multi-bar partial fills, quote/spread modeling, symbol changes, delistings, taxes, and
     advanced validation remain open. Phase 1B is still pending an open market session.
 
+### C013 — `Add walk-forward validation baseline`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-04 PDT.
+- User intent: continue directly into the next research milestone.
+- Scope:
+  - Added immutable walk-forward report and fold contracts plus Alembic revision
+    `20260904_0010`.
+  - Added rolling chronological train/embargo/test orchestration across all declared
+    candidates, with non-overlapping out-of-sample windows.
+  - Persisted every underlying train/test experiment and linked it from its fold rather than
+    discarding losing candidates.
+  - Added selected out-of-sample rank, compounded/mean return, Sharpe degradation,
+    below-median selection rate, strategy-switch count, and up/down/sideways regime reports.
+  - Added `quant-research validate`, `make validation-smoke`, report-list/detail APIs, data
+    health counts, the versioned manifest, runbook, project state, context, and ADR 0009.
+- Architecture/decision impact:
+  - Candidate selection is now separated chronologically from evaluation and produces an
+    immutable audit graph suitable for later ML/LLM-generated strategies.
+  - Regime labels remain reporting-only; no test-period value enters training selection.
+- Validation:
+  - `make check` passed with Flake8, strict mypy across 35 source files, and 40 tests.
+  - Deterministic validation smoke produced four folds and retained all train/test runs; its
+    synthetic metrics remain infrastructure-only.
+  - Fresh SQLite upgrade/check/downgrade/re-upgrade passed through `20260904_0010` with no
+    schema diff; local doctor and the rebuilt PostgreSQL-backed Compose stack passed.
+  - A bounded real AAPL run produced four non-overlapping out-of-sample folds and retained
+    16 train/test candidate experiments. The report-list and report-detail APIs returned the
+    stored report and folds; its `2.62%` compounded selected OOS return paired with only a
+    `25%` positive-fold rate and is explicitly not treated as alpha evidence.
+  - Repository secret scan and final diff checks passed before commit.
+- Expected global state after commit:
+  - The repository can reject unstable baseline selection through bounded walk-forward and
+    realized-regime evidence before any LLM strategy-generation work begins.
+  - Formal CPCV/PBO, Deflated Sharpe, promotion thresholds, larger remote datasets, and
+    reference-data provider selection remain open.
+
 ## Open work
 
 Ordered near-term work:
@@ -1129,8 +1204,8 @@ Ordered near-term work:
 2. Select and integrate licensed corporate-action and historical-universe providers.
 3. Extend replay with multi-bar partial fills, order cancellation, bid/ask spread and quote
    inputs, symbol changes, and delistings.
-4. Add walk-forward/regime reports and overfitting diagnostics, then define explicit
-   candidate/champion promotion thresholds.
+4. Add CPCV/PBO and Deflated Sharpe, then define explicit candidate/champion promotion
+   thresholds after the candidate set and sample-size policy are frozen.
 5. Design remote backfill jobs and identify equity/options sources with suitable historical
    coverage, retention, and licensing; do not require those large downloads for local tests.
 6. Add Redis consumer groups, a transactional outbox, dead-letter replay, provider lag,

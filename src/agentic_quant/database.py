@@ -574,3 +574,57 @@ feature_parity_checks = Table(
     Column("matched", Boolean, nullable=False),
     Column("checked_at", DateTime(timezone=True), nullable=False),
 )
+
+validation_reports = Table(
+    "validation_reports",
+    metadata,
+    Column("validation_report_id", String(36), primary_key=True),
+    Column("symbol", String(24), nullable=False, index=True),
+    Column("timeframe", String(16), nullable=False),
+    Column("strategy_types", JSON, nullable=False),
+    Column("selection_metric", String(40), nullable=False),
+    Column("train_bars", Integer, nullable=False),
+    Column("test_bars", Integer, nullable=False),
+    Column("step_bars", Integer, nullable=False),
+    Column("embargo_bars", Integer, nullable=False),
+    Column("aggregate_metrics", JSON, nullable=False),
+    Column("regime_metrics", JSON, nullable=False),
+    Column("report_hash", String(64), nullable=False, index=True),
+    Column("code_git_sha", String(64), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+)
+
+validation_folds = Table(
+    "validation_folds",
+    metadata,
+    Column("validation_fold_id", String(36), primary_key=True),
+    Column(
+        "validation_report_id",
+        String(36),
+        ForeignKey(
+            "validation_reports.validation_report_id",
+            name="fk_validation_folds_report",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    ),
+    Column("fold_number", Integer, nullable=False),
+    Column("train_start", DateTime(timezone=True), nullable=False),
+    Column("train_end", DateTime(timezone=True), nullable=False),
+    Column("test_start", DateTime(timezone=True), nullable=False),
+    Column("test_end", DateTime(timezone=True), nullable=False),
+    Column("selected_strategy", String(80), nullable=False),
+    Column("selection_metric", String(40), nullable=False),
+    Column("train_experiment_ids", JSON, nullable=False),
+    Column("test_experiment_ids", JSON, nullable=False),
+    Column("selected_train_metrics", JSON, nullable=False),
+    Column("selected_test_metrics", JSON, nullable=False),
+    Column("selected_test_rank", Integer, nullable=False),
+    Column("regime", String(24), nullable=False, index=True),
+    UniqueConstraint(
+        "validation_report_id",
+        "fold_number",
+        name="uq_validation_folds_report_number",
+    ),
+)

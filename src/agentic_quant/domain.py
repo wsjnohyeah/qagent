@@ -65,6 +65,12 @@ class BacktestEventType(StrEnum):
     MARK = "mark"
 
 
+class MarketRegime(StrEnum):
+    UP = "up"
+    DOWN = "down"
+    SIDEWAYS = "sideways"
+
+
 class CorporateActionType(StrEnum):
     SPLIT = "split"
     CASH_DIVIDEND = "cash_dividend"
@@ -310,6 +316,47 @@ class BacktestResult(FrozenModel):
     strategy_spec: StrategySpec
     trades: tuple[BacktestTrade, ...]
     portfolio_events: tuple[BacktestPortfolioEvent, ...] = ()
+
+
+class WalkForwardFold(FrozenModel):
+    validation_fold_id: str
+    fold_number: int = Field(ge=1)
+    train_start: datetime
+    train_end: datetime
+    test_start: datetime
+    test_end: datetime
+    selected_strategy: str
+    selection_metric: str
+    train_experiment_ids: dict[str, str]
+    test_experiment_ids: dict[str, str]
+    selected_train_metrics: BacktestMetrics
+    selected_test_metrics: BacktestMetrics
+    selected_test_rank: int = Field(ge=1)
+    regime: MarketRegime
+
+    @model_validator(mode="after")
+    def windows_are_chronological(self) -> Self:
+        if not self.train_start < self.train_end < self.test_start < self.test_end:
+            raise ValueError("Walk-forward train/embargo/test windows must be chronological")
+        return self
+
+
+class WalkForwardValidationReport(FrozenModel):
+    validation_report_id: str
+    symbol: str
+    timeframe: str
+    strategy_types: tuple[str, ...]
+    selection_metric: str
+    train_bars: int = Field(ge=22)
+    test_bars: int = Field(ge=1)
+    step_bars: int = Field(ge=1)
+    embargo_bars: int = Field(ge=1)
+    folds: tuple[WalkForwardFold, ...] = Field(min_length=1)
+    aggregate_metrics: dict[str, Decimal | int | str]
+    regime_metrics: dict[str, dict[str, Decimal | int | str]]
+    report_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    code_git_sha: str
+    created_at: datetime
 
 
 class FeatureParityCheck(FrozenModel):

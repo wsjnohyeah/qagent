@@ -1,6 +1,6 @@
 # Agentic Quant Trading System
 
-A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton, the read-only **Phase 1** market-data foundation, the completed **Phase 2** event/document pipeline, and a **Phase 3B** event-driven research baseline.
+A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton, the read-only **Phase 1** market-data foundation, the completed **Phase 2** event/document pipeline, and a **Phase 3C** bias-aware research validation baseline.
 
 > Live-money execution is not implemented. `live` is not a valid mode, and setting `LIVE_TRADING_ENABLED=true` makes startup fail.
 
@@ -57,6 +57,10 @@ split, and cash-dividend events. It records actual exchange open/close timestamp
 commission, slippage, fixed market impact, and volume-participation limits, and persists the
 full event stream. Symbol changes and insufficient exit liquidity fail closed.
 
+Phase 3C adds rolling chronological train/embargo/test folds. Every candidate is retained in
+and out of sample; the report records the train-selected strategy, its out-of-sample rank,
+return/Sharpe degradation, selection-failure rate, and performance by realized market regime.
+
 ## Commands
 
 | Command | Purpose |
@@ -67,6 +71,7 @@ full event stream. Symbol changes and insufficient exit liquidity fail closed.
 | `make run` | Start the local Control API/UI with reload |
 | `make demo` | Run the vertical slice in the terminal |
 | `make research-smoke` | Run and persist three deterministic Phase 3 research baselines |
+| `make validation-smoke` | Run bounded walk-forward, regime, and selection-bias checks |
 | `make docker-up` | Start PostgreSQL, Redis, MinIO, and API when Docker is installed |
 | `make docker-doctor` | Verify every container and the PostgreSQL-backed shadow slice |
 | `make docker-alpaca-probe` | Verify SIP/OPRA REST access and SIP WebSocket authentication |
@@ -222,9 +227,18 @@ quant-research run AAPL \
 ```
 
 Use `GET /v1/research/experiments/{experiment_run_id}/events` to inspect the ordered
-portfolio event stream. See `runbooks/research.md` and ADRs 0006–0008 for the exact
+portfolio event stream. See `runbooks/research.md` and ADRs 0006–0009 for the exact
 point-in-time invariants, fill/accounting assumptions, known limitations, and
 research/runtime authority boundary.
+
+Run the deterministic walk-forward health check:
+
+```sh
+make validation-smoke
+```
+
+For stored bars, use `quant-research validate`. Reports and fold lineage are available from
+`GET /v1/research/validations` and `GET /v1/research/validations/{validation_report_id}`.
 
 ## Repository map
 
@@ -255,6 +269,8 @@ AGENTS.md                mandatory operating rules for coding/deployment agents
 - `GET /v1/catalysts`
 - `GET /v1/research/experiments`
 - `GET /v1/research/experiments/{experiment_run_id}/events`
+- `GET /v1/research/validations`
+- `GET /v1/research/validations/{validation_report_id}`
 - `POST /v1/market-data/alpaca/probe` — development only
 - `POST /v1/market-data/alpaca/backfill` — development only
 - `POST /v1/market-data/alpaca/option-snapshot` — development only

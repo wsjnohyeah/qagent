@@ -40,7 +40,7 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert ready.status_code == 200
         assert ready.json()["live_trading_enabled"] is False
         system_status = client.get("/v1/system/status").json()
-        assert system_status["phase"] == "3b-event-driven-backtest"
+        assert system_status["phase"] == "3c-walk-forward-validation"
         assert system_status["data_operating_scope"] == "bounded_correctness_samples"
         assert system_status["development_max_backfill_days"] == 120
         assert system_status["development_max_intraday_backfill_days"] == 7
@@ -60,10 +60,15 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert data_health["feature_snapshots"] == 0
         assert data_health["experiment_runs"] == 0
         assert data_health["backtest_portfolio_events"] == 0
+        assert data_health["validation_reports"] == 0
+        assert data_health["validation_folds"] == 0
         assert data_health["alpaca_configured"] is False
         assert client.get("/v1/research/experiments").json() == []
         missing_events = client.get("/v1/research/experiments/missing/events")
         assert missing_events.status_code == 404
+        assert client.get("/v1/research/validations").json() == []
+        missing_validation = client.get("/v1/research/validations/missing")
+        assert missing_validation.status_code == 404
         oversized_backfill = client.post(
             "/v1/market-data/alpaca/backfill",
             json={

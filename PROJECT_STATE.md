@@ -2,12 +2,12 @@
 
 ## Current
 
-- Phases 0 and 2 are complete; the Phase 3B event-driven research baseline is implemented;
+- Phases 0 and 2 are complete; the Phase 3C research-validation baseline is implemented;
   Phase 1B open-session validation is pending until the next U.S. market session.
 - Local-lite uses Python 3.12, a project-local `uv`, SQLite, and filesystem object storage.
 - The Control API, minimal web console, append-only event ledger, deterministic risk engine, and synthetic vertical slice exist.
 - `live` is not a valid trading mode; `LIVE_TRADING_ENABLED=true` fails configuration validation.
-- Local lint, strict type checking, 38 tests, API readiness, the HTTP vertical slice, and the secret scan pass.
+- Local lint, strict type checking, 40 tests, API readiness, the HTTP vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
 - The full Compose stack is healthy: PostgreSQL 17, Redis 8, MinIO, and the API all passed direct checks; the PostgreSQL-backed shadow slice recorded six lineage events.
 - `context.md` is the required master record for architecture, discussions, iterations, commit contents, and post-commit global state.
@@ -23,8 +23,9 @@
 - Twenty AAPL SEC filing records normalized into 19 deduplicated catalysts; replay inserted zero new records or events.
 - A bounded set of 250 AAPL SEC XBRL company facts normalized successfully; replay inserted zero duplicates.
 - Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
-  experiment runs, backtest trades, corporate actions, historical universe membership, and
-  feature parity checks are stored through Alembic revision `20260904_0009`.
+  experiment runs, backtest trades, corporate actions, historical universe membership,
+  feature parity checks, and walk-forward reports are stored through Alembic revision
+  `20260904_0010`.
 - The Phase 3 runner provides buy-and-hold, long/cash momentum, and long/cash
   mean-reversion baselines with next-bar execution, commission, slippage, metrics, hashes,
   and append-only completion events.
@@ -36,6 +37,9 @@
 - The Phase 3B portfolio engine persists signal/order/fill/mark/action events, uses exact
   exchange open/close timestamps, models splits and gross cash dividends, and applies
   commission, slippage, fixed market impact, and a volume-participation cap.
+- Phase 3C persists rolling train/embargo/test folds, evaluates every candidate both in and
+  out of sample, reports train-to-test degradation and selection failures, and separates
+  selected out-of-sample results into up/down/sideways realized regimes.
 - `.env` explicitly selects `APP_ENV=development`; development daily/news backfills are
   capped at 120 days and one-minute backfills at 7 days by default. The active scope is
   exposed by `/v1/system/status`.
@@ -47,7 +51,8 @@
    correctness verification.
 3. Extend fill realism with multi-bar partial fills, order cancellation, spread/quote data,
    and symbol-change/delisting replay.
-4. Add walk-forward/regime reports and overfitting diagnostics.
+4. Add CPCV, Probability of Backtest Overfitting, Deflated Sharpe, and explicit promotion
+   thresholds after the candidate set and sample-size policy are frozen.
 5. Add Redis consumer groups, durable offsets, a transactional outbox, and dead-letter replay.
 6. Add data-quality reconciliation and provider lag metrics.
 7. Build a labeled corpus to measure cross-provider catalyst dedup precision/recall.
@@ -73,3 +78,5 @@
   offline/online feature parity and fail closed where accounting is unsupported.
 - ADR 0008: persist an event-driven portfolio ledger and model split/dividend accounting,
   next-open/session-close fills, costs, market impact, and liquidity caps.
+- ADR 0009: use non-overlapping rolling out-of-sample windows with an embargo, retain every
+  candidate run, and report selection degradation and realized-regime results.

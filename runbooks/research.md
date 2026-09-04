@@ -82,6 +82,43 @@ Audit offline/online feature parity at an exact point in time:
 The check materializes the feature set once from complete stored history and once from an
 online-equivalent as-of slice, persists both hashes, and exits nonzero on a mismatch.
 
+## Walk-forward validation
+
+Run the bounded deterministic validation smoke:
+
+```sh
+make validation-smoke
+```
+
+Run validation on stored bars:
+
+```sh
+./scripts/compose.sh exec -T api quant-research validate AAPL \
+  --timeframe 1Day \
+  --start 2026-05-01T00:00:00Z \
+  --end 2026-09-03T20:00:00Z \
+  --train-bars 40 \
+  --test-bars 10 \
+  --step-bars 10 \
+  --embargo-bars 1
+```
+
+Each fold evaluates every requested strategy on the training window, selects one using the
+declared metric, and then retains every candidate's out-of-sample run. Test windows cannot
+overlap and at least one bar is embargoed between train and test. The report includes
+compounded and mean selected out-of-sample return, mean out-of-sample Sharpe, worst drawdown,
+train-to-test Sharpe degradation, selected-strategy out-of-sample rank, a below-median
+selection rate, strategy switches, and realized up/down/sideways regime summaries.
+
+This is a bias-detection baseline, not a claim that the selected strategy generalizes.
+Inspect reports with:
+
+```sh
+curl -fsS 'http://127.0.0.1:8000/v1/research/validations?limit=20'
+curl -fsS \
+  'http://127.0.0.1:8000/v1/research/validations/VALIDATION_REPORT_ID'
+```
+
 ## Point-in-time invariants
 
 - `event_time <= as_of` and `available_from <= as_of` for every evidence reference.
@@ -104,6 +141,9 @@ online-equivalent as-of slice, persists both hashes, and exits nonzero on a mism
 - Offline and online-equivalent materialization must hash identically for the same `as_of`.
 - Strategy name/version content is immutable; changed code produces a new version.
 - Every run is retained. Re-running does not overwrite an earlier result.
+- Walk-forward selection uses only the training fold; every candidate's train and test
+  experiment IDs remain linked from the immutable validation fold.
+- Test windows do not overlap, and an explicit embargo separates each train/test pair.
 
 ## Current limitations
 
@@ -116,6 +156,9 @@ online-equivalent as-of slice, persists both hashes, and exits nonzero on a mism
   market-impact assumptions. Multi-bar partial fills, queue position, bid/ask spread,
   cancellations, and intrabar path simulation remain open.
 - Delisted-security acquisition, borrow, options fills, taxes, dynamic market impact,
-  capacity analysis, walk-forward splits, CPCV/PBO, and Deflated Sharpe are not implemented.
+  capacity analysis, CPCV/PBO, and Deflated Sharpe are not implemented.
 - The LLM research orchestrator and predictive ML models are intentionally not connected
   until the validation surface can reject their candidates independently.
+- Full combinatorial purged cross-validation, formal PBO, Deflated Sharpe, and promotion
+  thresholds remain open; the current below-median selection rate is a transparent early
+  warning, not a substitute for those methods.

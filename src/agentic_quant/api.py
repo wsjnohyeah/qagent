@@ -156,7 +156,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "live_trading_enabled": False,
             "new_exposure_paused": application.state.new_exposure_paused,
             "database": "healthy" if ledger.health() else "unhealthy",
-            "phase": "3b-event-driven-backtest",
+            "phase": "3c-walk-forward-validation",
             "data_operating_scope": app_settings.data_operating_scope,
             "development_max_backfill_days": (
                 app_settings.development_max_backfill_days
@@ -226,6 +226,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not events:
             raise HTTPException(status_code=404, detail="portfolio events not found")
         return events
+
+    @application.get("/v1/research/validations")
+    def research_validations(
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> list[dict[str, Any]]:
+        return research_store.recent_validation_reports(limit=limit)
+
+    @application.get("/v1/research/validations/{validation_report_id}")
+    def research_validation(validation_report_id: str) -> dict[str, Any]:
+        report = research_store.validation_report(validation_report_id)
+        if report is None:
+            raise HTTPException(status_code=404, detail="validation report not found")
+        return report
 
     @application.get("/v1/events")
     def events(limit: int = Query(default=50, ge=1, le=500)) -> list[dict[str, Any]]:

@@ -21,6 +21,7 @@ from agentic_quant.research import (
     research_code_sha256,
 )
 from agentic_quant.research_store import ResearchStore
+from agentic_quant.validation import SELECTION_METRICS, WalkForwardValidator
 
 
 def _parse_time(value: str) -> datetime:
@@ -202,6 +203,78 @@ def _run(settings: Settings, args: argparse.Namespace) -> None:
     print(json.dumps(_summary(result), indent=2))
 
 
+def _validate(settings: Settings, args: argparse.Namespace) -> None:
+    _, research_store, _ = _services(settings)
+    strategy_types = tuple(
+        item.strip() for item in args.strategies.split(",") if item.strip()
+    )
+    report = WalkForwardValidator(
+        research_store,
+        EventLedger(settings.database_url),
+        calendar_name=settings.market_calendar,
+    ).run(
+        symbol=args.symbol.upper(),
+        timeframe=args.timeframe,
+        as_of_start=args.start,
+        as_of_end=args.end,
+        code_git_sha=_git_sha(settings),
+        strategy_types=strategy_types,
+        selection_metric=args.selection_metric,
+        train_bars=args.train_bars,
+        test_bars=args.test_bars,
+        step_bars=args.step_bars,
+        embargo_bars=args.embargo_bars,
+        initial_equity=Decimal(str(args.initial_equity)),
+        cost_model=BacktestCostModel(
+            commission_per_share=Decimal(str(args.commission_per_share)),
+            minimum_commission_per_order=Decimal(str(args.minimum_commission)),
+            slippage_bps_per_side=Decimal(str(args.slippage_bps)),
+            market_impact_bps_per_side=Decimal(str(args.market_impact_bps)),
+            max_volume_participation=Decimal(str(args.max_volume_participation)),
+        ),
+    )
+    print(json.dumps(report.model_dump(mode="json"), indent=2))
+
+
+def _validation_smoke(settings: Settings, args: argparse.Namespace) -> None:
+    market_store, research_store, _ = _services(settings)
+    symbol = args.symbol.upper()
+    bars = _synthetic_daily_bars(symbol)
+    market_store.insert_bars(bars, raw_object_id="SYNTHETIC_RESEARCH_SMOKE")
+    report = WalkForwardValidator(
+        research_store,
+        EventLedger(settings.database_url),
+        calendar_name=settings.market_calendar,
+    ).run(
+        symbol=symbol,
+        timeframe="1Day",
+        as_of_start=bars[20].available_from,
+        as_of_end=bars[-1].available_from,
+        code_git_sha=_git_sha(settings),
+        train_bars=30,
+        test_bars=10,
+        step_bars=10,
+        embargo_bars=1,
+    )
+    print(
+        json.dumps(
+            {
+                "status": "COMPLETED",
+                "mode": "deterministic_walk_forward_validation_smoke",
+                "warning": "Synthetic validation checks machinery, not alpha.",
+                "validation_report_id": report.validation_report_id,
+                "report_hash": report.report_hash,
+                "fold_count": len(report.folds),
+                "aggregate_metrics": report.model_dump(mode="json")[
+                    "aggregate_metrics"
+                ],
+                "regime_metrics": report.model_dump(mode="json")["regime_metrics"],
+            },
+            indent=2,
+        )
+    )
+
+
 def _list(settings: Settings, args: argparse.Namespace) -> None:
     _, research_store, _ = _services(settings)
     print(
@@ -236,6 +309,11 @@ def main() -> None:
     )
     smoke.add_argument("--symbol", default="SYNTH")
     smoke.add_argument("--initial-equity", default="100000")
+    validation_smoke = subparsers.add_parser(
+        "validation-smoke",
+        help="Run bounded deterministic walk-forward validation",
+    )
+    validation_smoke.add_argument("--symbol", default="SYNTH")
     run = subparsers.add_parser("run", help="Backtest an approved baseline on stored bars")
     run.add_argument("symbol")
     run.add_argument("--strategy", choices=SUPPORTED_STRATEGIES, required=True)
@@ -257,14 +335,42 @@ def main() -> None:
     parity.add_argument("symbol")
     parity.add_argument("--timeframe", choices=("1Min", "1Day"), default="1Day")
     parity.add_argument("--as-of", required=True, type=_parse_time)
+    validate = subparsers.add_parser(
+        "validate",
+        help="Run chronological train/embargo/test strategy validation",
+    )
+    validate.add_argument("symbol")
+    validate.add_argument("--timeframe", choices=("1Min", "1Day"), default="1Day")
+    validate.add_argument("--start", required=True, type=_parse_time)
+    validate.add_argument("--end", required=True, type=_parse_time)
+    validate.add_argument("--strategies", default=",".join(SUPPORTED_STRATEGIES))
+    validate.add_argument(
+        "--selection-metric",
+        choices=SELECTION_METRICS,
+        default="sharpe_ratio",
+    )
+    validate.add_argument("--train-bars", type=int, default=40)
+    validate.add_argument("--test-bars", type=int, default=10)
+    validate.add_argument("--step-bars", type=int, default=10)
+    validate.add_argument("--embargo-bars", type=int, default=1)
+    validate.add_argument("--initial-equity", default="100000")
+    validate.add_argument("--commission-per-share", default="0.0049")
+    validate.add_argument("--minimum-commission", default="0.99")
+    validate.add_argument("--slippage-bps", default="2.0")
+    validate.add_argument("--market-impact-bps", default="1.0")
+    validate.add_argument("--max-volume-participation", default="0.05")
     args = parser.parse_args()
     settings = Settings()
     if args.command == "smoke":
         _smoke(settings, args)
+    elif args.command == "validation-smoke":
+        _validation_smoke(settings, args)
     elif args.command == "run":
         _run(settings, args)
     elif args.command == "parity":
         _parity(settings, args)
+    elif args.command == "validate":
+        _validate(settings, args)
     else:
         _list(settings, args)
 
