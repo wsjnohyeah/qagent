@@ -188,6 +188,82 @@ ingestion_runs = Table(
     Column("error_code", String(80), nullable=True),
 )
 
+data_quality_reports = Table(
+    "data_quality_reports",
+    metadata,
+    Column("data_quality_report_id", String(36), primary_key=True),
+    Column("ruleset_version", String(80), nullable=False),
+    Column("dataset_type", String(80), nullable=False, index=True),
+    Column("symbol", String(24), nullable=False, index=True),
+    Column("timeframe", String(16), nullable=False),
+    Column("window_start", DateTime(timezone=True), nullable=True),
+    Column("window_end", DateTime(timezone=True), nullable=True),
+    Column("record_count", Integer, nullable=False),
+    Column("data_sha256", String(64), nullable=False, index=True),
+    Column("scope_sha256", String(64), nullable=False),
+    Column("status", String(24), nullable=False, index=True),
+    Column("checks_json", JSON, nullable=False),
+    Column("issue_counts_json", JSON, nullable=False),
+    Column("code_git_sha", String(64), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+    UniqueConstraint(
+        "ruleset_version",
+        "dataset_type",
+        "symbol",
+        "timeframe",
+        "data_sha256",
+        "scope_sha256",
+        name="uq_data_quality_reports_dataset_hash",
+    ),
+)
+
+workflow_jobs = Table(
+    "workflow_jobs",
+    metadata,
+    Column("workflow_job_id", String(36), primary_key=True),
+    Column("job_group_id", String(36), nullable=False, index=True),
+    Column("job_type", String(80), nullable=False, index=True),
+    Column("partition_key", String(160), nullable=False),
+    Column("request_sha256", String(64), nullable=False),
+    Column("payload_json", JSON, nullable=False),
+    Column("status", String(24), nullable=False, index=True),
+    Column("attempt_count", Integer, nullable=False),
+    Column("max_attempts", Integer, nullable=False),
+    Column("cursor_json", JSON, nullable=False),
+    Column("result_json", JSON, nullable=False),
+    Column("error_code", String(120), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("started_at", DateTime(timezone=True), nullable=True),
+    Column("updated_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("completed_at", DateTime(timezone=True), nullable=True),
+    UniqueConstraint(
+        "job_group_id",
+        "partition_key",
+        name="uq_workflow_jobs_group_partition",
+    ),
+)
+
+reference_imports = Table(
+    "reference_imports",
+    metadata,
+    Column("reference_import_id", String(36), primary_key=True),
+    Column("dataset_type", String(80), nullable=False, index=True),
+    Column("source", String(80), nullable=False),
+    Column("source_version", String(120), nullable=False),
+    Column("content_sha256", String(64), nullable=False),
+    Column("records_received", Integer, nullable=False),
+    Column("records_inserted", Integer, nullable=False),
+    Column("status", String(24), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+    UniqueConstraint(
+        "dataset_type",
+        "source",
+        "source_version",
+        "content_sha256",
+        name="uq_reference_imports_content",
+    ),
+)
+
 entities = Table(
     "entities",
     metadata,

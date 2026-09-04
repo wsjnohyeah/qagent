@@ -47,6 +47,23 @@ Use timezone-aware UTC timestamps. Historical bars default to `adjustment=raw` s
 
 Run the same command twice to verify idempotency. The second result should report `records_inserted: 0` unless the provider corrected the payload or returned additional timestamps.
 
+For a larger range, use durable partitions. Re-running the same command skips completed
+partitions and retries failed/interrupted work up to the configured attempt limit:
+
+```sh
+./scripts/compose.sh exec -T api quant-alpaca resumable-backfill AAPL \
+  --start 2025-01-01T00:00:00Z \
+  --end 2025-04-01T00:00:00Z \
+  --timeframe 1Day \
+  --partition-days 30
+./scripts/compose.sh exec -T api quant-alpaca jobs --limit 20
+```
+
+Every completed ingestion and every backtest validates symbol/timeframe identity, timestamp
+ordering and uniqueness, OHLC envelopes, availability time, and missing XNYS intervals.
+Fatal findings create a `FAILED` quality report and stop downstream research. Inspect them at
+`GET /v1/data-quality`; resumable partitions are visible at `GET /v1/workflow-jobs`.
+
 ## Option snapshot ingestion
 
 The default is intentionally bounded to one page:
@@ -87,4 +104,6 @@ The Control Center at `http://127.0.0.1:8000` shows the same high-level state.
 - Invalid or unauthorized entitlements: explicit failed capability; no fallback to a weaker feed.
 - Duplicate historical bars, trades, quotes, or option snapshots: ignored by database uniqueness constraints and not republished.
 - Redis, MinIO, or database unavailable: readiness fails; ingestion does not pretend to be healthy.
+- Invalid OHLC/timing, duplicate timestamps, or missing exchange intervals: raw/normalized
+  evidence remains inspectable, but the ingestion run and downstream research fail closed.
 - Docker Hub timeout during a local build: retry; do not change data-provider settings.

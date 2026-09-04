@@ -71,6 +71,18 @@ class MarketRegime(StrEnum):
     SIDEWAYS = "sideways"
 
 
+class DataQualityStatus(StrEnum):
+    PASSED = "PASSED"
+    FAILED = "FAILED"
+
+
+class WorkflowJobStatus(StrEnum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
 class LLMProviderName(StrEnum):
     OPENAI = "openai"
     META = "meta"
@@ -286,6 +298,7 @@ class BacktestCostModel(FrozenModel):
     commission_per_share: Decimal = Field(default=Decimal("0.0049"), ge=0)
     minimum_commission_per_order: Decimal = Field(default=Decimal("0.99"), ge=0)
     slippage_bps_per_side: Decimal = Field(default=Decimal("2.0"), ge=0)
+    half_spread_bps_per_side: Decimal = Field(default=Decimal("1.0"), ge=0)
     market_impact_bps_per_side: Decimal = Field(default=Decimal("1.0"), ge=0)
     max_volume_participation: Decimal = Field(
         default=Decimal("0.05"),
@@ -445,6 +458,55 @@ class FeatureParityCheck(FrozenModel):
         if self.matched != (self.offline_data_hash == self.online_data_hash):
             raise ValueError("Feature parity flag must agree with the compared hashes")
         return self
+
+
+class DataQualityReport(FrozenModel):
+    data_quality_report_id: str
+    ruleset_version: str
+    dataset_type: str
+    symbol: str
+    timeframe: str
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    record_count: int = Field(ge=0)
+    data_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    scope_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    status: DataQualityStatus
+    checks: dict[str, bool | int | str]
+    issue_counts: dict[str, int]
+    code_git_sha: str
+    created_at: datetime
+
+
+class WorkflowJob(FrozenModel):
+    workflow_job_id: str
+    job_group_id: str
+    job_type: str
+    partition_key: str
+    request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    payload: dict[str, Any]
+    status: WorkflowJobStatus
+    attempt_count: int = Field(ge=0)
+    max_attempts: int = Field(ge=1)
+    cursor: dict[str, Any]
+    result: dict[str, Any]
+    error_code: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    updated_at: datetime
+    completed_at: datetime | None = None
+
+
+class ReferenceImportResult(FrozenModel):
+    reference_import_id: str
+    dataset_type: str
+    source: str
+    source_version: str
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    records_received: int = Field(ge=0)
+    records_inserted: int = Field(ge=0)
+    status: str
+    created_at: datetime
 
 
 class StockBar(FrozenModel):

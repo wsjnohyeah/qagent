@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Engine, func, insert, select, update
+from sqlalchemy import Engine, and_, func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -17,6 +17,10 @@ from agentic_quant.database import (
     raw_objects,
 )
 from agentic_quant.domain import OptionSnapshot, StockBar, StockQuote, StockTrade
+
+
+def _utc(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 class MarketDataStore:
@@ -143,6 +147,44 @@ class MarketDataStore:
             else:
                 raise RuntimeError(f"Unsupported SQL dialect: {self.engine.dialect.name}")
             return tuple(str(value) for value in connection.execute(statement).scalars().all())
+
+    def bars_between(
+        self,
+        *,
+        symbol: str,
+        timeframe: str,
+        start: datetime,
+        end: datetime,
+        source: str,
+        feed: str,
+    ) -> tuple[StockBar, ...]:
+        statement = (
+            select(market_bars)
+            .where(
+                and_(
+                    market_bars.c.symbol == symbol.upper(),
+                    market_bars.c.timeframe == timeframe,
+                    market_bars.c.event_time >= start,
+                    market_bars.c.event_time < end,
+                    market_bars.c.source == source,
+                    market_bars.c.feed == feed,
+                )
+            )
+            .order_by(market_bars.c.event_time.asc())
+        )
+        with self.engine.connect() as connection:
+            rows = connection.execute(statement).all()
+        return tuple(
+            StockBar.model_validate(
+                {
+                    **dict(row._mapping),
+                    "event_time": _utc(row._mapping["event_time"]),
+                    "available_from": _utc(row._mapping["available_from"]),
+                    "ingested_at": _utc(row._mapping["ingested_at"]),
+                }
+            )
+            for row in rows
+        )
 
     def insert_trades(
         self, trades: tuple[StockTrade, ...], raw_object_id: str

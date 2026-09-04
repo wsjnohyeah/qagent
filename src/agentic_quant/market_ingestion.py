@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from pydantic import BaseModel, ConfigDict
 
 from agentic_quant.archive import RawArchive
+from agentic_quant.data_quality import MarketDataQualityService
 from agentic_quant.domain import EventEnvelope, StockBar
 from agentic_quant.ids import uuid7
 from agentic_quant.ledger import EventLedger
@@ -32,12 +33,20 @@ class MarketDataIngestionService:
         store: MarketDataStore,
         ledger: EventLedger,
         publisher: EventPublisher,
+        calendar_name: str = "XNYS",
+        code_git_sha: str = "UNAVAILABLE",
     ) -> None:
         self.provider = provider
         self.archive = archive
         self.store = store
         self.ledger = ledger
         self.publisher = publisher
+        self.code_git_sha = code_git_sha
+        self.data_quality = MarketDataQualityService(
+            store.engine,
+            ledger,
+            calendar_name=calendar_name,
+        )
 
     async def ingest_stock_bars(self, request: StockBarsRequest) -> IngestionSummary:
         requested_at = datetime.now(UTC)
@@ -84,6 +93,22 @@ class MarketDataIngestionService:
                 if page_token in seen_tokens:
                     raise RuntimeError("Provider returned a repeated pagination token")
                 seen_tokens.add(page_token)
+            stored_bars = self.store.bars_between(
+                symbol=request.symbol,
+                timeframe=request.timeframe,
+                start=request.start,
+                end=request.end,
+                source=self.provider.name,
+                feed=request.feed,
+            )
+            self.data_quality.require_bars(
+                stored_bars,
+                symbol=request.symbol,
+                timeframe=request.timeframe,
+                code_git_sha=self.code_git_sha,
+                expected_start=request.start,
+                expected_end=request.end,
+            )
         except Exception as exc:
             self.store.finish_run(
                 ingestion_run_id=run_id,

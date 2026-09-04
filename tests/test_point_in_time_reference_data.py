@@ -337,6 +337,7 @@ def test_event_driven_backtester_accounts_for_split_and_cash_dividend(
             commission_per_share=Decimal("0"),
             minimum_commission_per_order=Decimal("0"),
             slippage_bps_per_side=Decimal("0"),
+            half_spread_bps_per_side=Decimal("0"),
             market_impact_bps_per_side=Decimal("0"),
         ),
     )

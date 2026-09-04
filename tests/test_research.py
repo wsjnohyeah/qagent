@@ -235,6 +235,7 @@ def test_event_driven_entry_respects_volume_participation_cap(
             commission_per_share=Decimal("0"),
             minimum_commission_per_order=Decimal("0"),
             slippage_bps_per_side=Decimal("0"),
+            half_spread_bps_per_side=Decimal("0"),
             market_impact_bps_per_side=Decimal("0"),
             max_volume_participation=Decimal("0.05"),
         ),

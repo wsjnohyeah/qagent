@@ -2,13 +2,13 @@
 
 ## Current
 
-- Phases 0 and 2 are complete; the Phase 3D research-validation gate and front-loaded
-  Phase 4B LLM gateway/Control Center are implemented. Phase 1B open-session validation is
-  pending.
+- Phases 0 and 2 are complete; the Phase 3D research-validation gate, Phase 5A reliable
+  workflow layer, and front-loaded Phase 4B LLM gateway/Control Center are implemented.
+  Phase 1B open-session validation is pending.
 - Local-lite uses Python 3.12, a project-local `uv`, SQLite, and filesystem object storage.
 - The Control API, local model/research web console, append-only event ledger, deterministic risk engine, and synthetic vertical slice exist.
 - `live` is not a valid trading mode; `LIVE_TRADING_ENABLED=true` fails configuration validation.
-- Local lint, strict type checking, 52 tests, API readiness, the HTTP vertical slice, and the secret scan pass.
+- Local lint, strict type checking, 58 tests, API readiness, the HTTP vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
 - The full Compose stack is healthy: PostgreSQL 17, Redis 8, MinIO, and the API all passed direct checks; the PostgreSQL-backed shadow slice recorded six lineage events.
 - `context.md` is the required master record for architecture, discussions, iterations, commit contents, and post-commit global state.
@@ -26,7 +26,7 @@
 - Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
   experiment runs, backtest trades, corporate actions, historical universe membership,
   feature parity checks, and walk-forward reports are stored through Alembic revision
-  `20260904_0014`.
+  `20260904_0016`.
 - The Phase 3 runner provides buy-and-hold, long/cash momentum, and long/cash
   mean-reversion baselines with next-bar execution, commission, slippage, metrics, hashes,
   and append-only completion events.
@@ -44,6 +44,9 @@
 - Phase 3D adds combinatorial selection-risk/PBO diagnostics, Deflated Sharpe, and a
   versioned minimum-sample/performance gate. It can only grant eligibility for human review;
   bounded local evidence remains rejected or insufficient and never promotes automatically.
+- Phase 5A validates bar identity, chronology, OHLC, availability, and exchange intervals
+  before research; models half-spread on both fill sides; imports point-in-time reference
+  batches with source/version hashes; and resumes idempotent date-partitioned backfills.
 - The Phase 4A gateway routes critical research to OpenAI `gpt-5.6-sol` and interactive or
   routine work to Meta `muse-spark-1.3` through versioned configuration. Calls are bounded,
   fail closed without project credentials, and retain immutable hashes, usage, latency,
@@ -59,16 +62,14 @@
 
 ## Next
 
-1. Implement Phase 5A correctness-critical market realism: governed reference-data imports,
-   spread-aware fills, data-quality failure paths, and scalable resumable jobs.
-2. Complete the Phase 4 research orchestrator and calibrated ML layer on top of the gateway.
-3. Capture real SIP trade/quote/bar frames and reconnect/gap repair during the next open session.
-4. Design remote long-horizon backfill jobs; continue using bounded samples for local
+1. Complete the Phase 4 research orchestrator and calibrated ML layer on top of the gateway.
+2. Capture real SIP trade/quote/bar frames and reconnect/gap repair during the next open session.
+3. Size remote long-horizon backfill concurrency and storage; continue using bounded samples for local
    correctness verification.
-5. Extend fill realism with multi-bar partial fills, order cancellation, spread/quote data,
-   and symbol-change/delisting replay.
-6. Add Redis consumer groups, durable offsets, a transactional outbox, and dead-letter replay.
-7. Add authentication, budgets, and session audit before remotely exposing the Control
+4. Extend fill realism with multi-bar partial fills, order cancellation, quote-derived
+   rather than configured spread, and symbol-change/delisting replay.
+5. Add Redis consumer groups, durable offsets, a transactional outbox, and dead-letter replay.
+6. Add authentication, budgets, and session audit before remotely exposing the Control
    Center; then expand its data, strategy, and Decision Inspector views.
 
 ## Blocked
@@ -98,3 +99,5 @@
   overrides as immutable revisions, and provide bounded Auto/OpenAI/Meta research chat.
 - ADR 0012: calculate PBO and Deflated Sharpe on pre-purged OOS folds and apply a versioned,
   fail-closed eligibility gate that cannot promote automatically.
+- ADR 0013: require persisted market-data quality checks, explicit spread cost, governed
+  reference imports, and durable resumable partitions before Phase 6.

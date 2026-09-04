@@ -93,6 +93,7 @@ class EventDrivenPortfolio:
             raise ValueError("Cannot enter while a position is already open")
         execution_bps = (
             self.cost_model.slippage_bps_per_side
+            + self.cost_model.half_spread_bps_per_side
             + self.cost_model.market_impact_bps_per_side
         )
         execution_cost = execution_bps / Decimal("10000")
@@ -142,6 +143,9 @@ class EventDrivenPortfolio:
                 "raw_price": str(raw_price),
                 "commission": str(commission),
                 "slippage_bps": str(self.cost_model.slippage_bps_per_side),
+                "half_spread_bps": str(
+                    self.cost_model.half_spread_bps_per_side
+                ),
                 "market_impact_bps": str(
                     self.cost_model.market_impact_bps_per_side
                 ),
@@ -219,6 +223,7 @@ class EventDrivenPortfolio:
             )
         execution_bps = (
             self.cost_model.slippage_bps_per_side
+            + self.cost_model.half_spread_bps_per_side
             + self.cost_model.market_impact_bps_per_side
         )
         execution_cost = execution_bps / Decimal("10000")
@@ -245,6 +250,9 @@ class EventDrivenPortfolio:
                 "raw_price": str(raw_price),
                 "commission": str(commission),
                 "slippage_bps": str(self.cost_model.slippage_bps_per_side),
+                "half_spread_bps": str(
+                    self.cost_model.half_spread_bps_per_side
+                ),
                 "market_impact_bps": str(
                     self.cost_model.market_impact_bps_per_side
                 ),

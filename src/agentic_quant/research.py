@@ -8,6 +8,7 @@ from pathlib import Path
 from statistics import mean, stdev
 
 from agentic_quant.backtest_engine import EventDrivenPortfolio
+from agentic_quant.data_quality import MarketDataQualityService
 from agentic_quant.domain import (
     BacktestCostModel,
     BacktestMetrics,
@@ -290,6 +291,11 @@ class ResearchBacktester:
         self.features = PointInTimeFeatureBuilder(store)
         self.reference_data = ReferenceDataStore(store.engine)
         self.session_clock = MarketSessionClock(calendar_name)
+        self.data_quality = MarketDataQualityService(
+            store.engine,
+            ledger,
+            calendar_name=calendar_name,
+        )
 
     def run(
         self,
@@ -314,6 +320,12 @@ class ResearchBacktester:
             symbol=symbol,
             timeframe=spec.timeframe,
             as_of_end=as_of_end,
+        )
+        self.data_quality.require_bars(
+            bars,
+            symbol=symbol,
+            timeframe=spec.timeframe,
+            code_git_sha=code_git_sha,
         )
         decision_indices = [
             index

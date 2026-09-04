@@ -17,6 +17,7 @@ from agentic_quant.document_ingestion import (
     FundamentalsIngestionService,
 )
 from agentic_quant.document_store import DocumentStore
+from agentic_quant.data_quality import MarketDataQualityService
 from agentic_quant.domain import EventEnvelope, LLMProviderName, LLMWorkload
 from agentic_quant.event_bus import NullEventPublisher, RedisStreamPublisher
 from agentic_quant.ids import uuid7
@@ -55,6 +56,7 @@ from agentic_quant.providers.synthetic import SyntheticMarketDataProvider
 from agentic_quant.reference_data import ReferenceDataStore
 from agentic_quant.risk import RestrictionRegistry, RiskPolicy
 from agentic_quant.research_store import ResearchStore
+from agentic_quant.workflow import WorkflowJobStore
 
 
 class OperatorCommand(BaseModel):
@@ -133,6 +135,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     research_store = ResearchStore(ledger.engine)
     reference_data_store = ReferenceDataStore(ledger.engine)
     llm_store = LLMStore(ledger.engine)
+    data_quality_service = MarketDataQualityService(
+        ledger.engine,
+        ledger,
+        calendar_name=app_settings.market_calendar,
+    )
+    workflow_job_store = WorkflowJobStore(ledger.engine)
     llm_gateway = build_llm_gateway(app_settings, store=llm_store, ledger=ledger)
 
     @asynccontextmanager
@@ -201,7 +209,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "live_trading_enabled": False,
             "new_exposure_paused": application.state.new_exposure_paused,
             "database": "healthy" if ledger.health() else "unhealthy",
-            "phase": "3d-robust-validation-plus-4b-llm-control-center",
+            "phase": "5a-reliable-workflows-plus-4b-llm-control-center",
             "data_operating_scope": app_settings.data_operating_scope,
             "development_max_backfill_days": (
                 app_settings.development_max_backfill_days
@@ -231,6 +239,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             **research_store.health_summary(),
             **reference_data_store.health_summary(),
             **llm_store.health_summary(),
+            **data_quality_service.health_summary(),
+            **workflow_job_store.health_summary(),
             "raw_archive": "healthy" if application.state.archive.health() else "unhealthy",
             "event_bus": "healthy" if application.state.publisher.health() else "unhealthy",
             "alpaca_configured": bool(
@@ -253,6 +263,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             symbol=symbol,
             limit=limit,
         )
+
+    @application.get("/v1/data-quality")
+    def data_quality_reports(
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> list[dict[str, Any]]:
+        return data_quality_service.recent(limit=limit)
+
+    @application.get("/v1/workflow-jobs")
+    def workflow_jobs(
+        limit: int = Query(default=100, ge=1, le=1_000),
+    ) -> list[dict[str, Any]]:
+        return workflow_job_store.recent(limit=limit)
 
     @application.get("/v1/catalysts")
     def catalysts(limit: int = Query(default=50, ge=1, le=500)) -> list[dict[str, Any]]:
@@ -429,6 +451,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             store=application.state.market_store,
             ledger=ledger,
             publisher=application.state.publisher,
+            calendar_name=app_settings.market_calendar,
+            code_git_sha=app_settings.source_git_sha or "UNAVAILABLE",
         )
         summary = await service.ingest_stock_bars(
             StockBarsRequest(
@@ -531,6 +555,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     store=application.state.market_store,
                     ledger=ledger,
                     publisher=application.state.publisher,
+                    calendar_name=app_settings.market_calendar,
+                    code_git_sha=app_settings.source_git_sha or "UNAVAILABLE",
                 )
                 summary = await service.ingest_stock_bars(
                     StockBarsRequest(

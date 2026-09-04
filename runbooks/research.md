@@ -53,9 +53,21 @@ Inside the Docker/PostgreSQL profile:
 ```
 
 Supported baselines are `buy_and_hold`, `momentum`, and `mean_reversion`. Optional flags
-control initial equity, per-share and minimum commission, per-side slippage, fixed market
-impact, and maximum bar-volume participation. Every effective value is stored with the
-experiment.
+control initial equity, per-share and minimum commission, per-side slippage, half-spread,
+fixed market impact, and maximum bar-volume participation. Every effective value is stored
+with the experiment and every fill event records the spread assumption.
+
+Validate stored bars independently, or import a reviewed point-in-time reference batch:
+
+```sh
+quant-research quality AAPL --timeframe 1Day --end 2026-09-04T00:00:00Z
+quant-research import-reference ./reviewed-reference-batch.json
+```
+
+Reference JSON declares `dataset_type` (`corporate_actions` or `universe_memberships`),
+`source`, `source_version`, and `records`. Every record must carry timezone-aware effective
+and availability timestamps. The content hash and import counts are immutable and replay is
+idempotent.
 
 List recent experiments:
 

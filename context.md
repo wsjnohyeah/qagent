@@ -4,9 +4,9 @@ Last updated: 2026-09-04 PDT
 
 Context format: v1
 
-Current phase: Phase 3D robust validation plus front-loaded Phase 4B LLM Control Center implemented; Phase 1B open-session verification pending
+Current phase: Phase 3D plus Phase 5A reliability and front-loaded Phase 4B LLM Control Center implemented; Phase 1B open-session verification pending
 
-Current documented baseline: C016 — `Add robust research validation gate`
+Current documented baseline: C017 — `Add reliable scalable research workflows`
 
 ## Purpose and authority
 
@@ -62,6 +62,8 @@ A Git commit cannot contain its own content-derived hash without changing that h
 - Phase 3D adds combinatorial selection-risk/PBO diagnostics and Deflated Sharpe to every
   report. A versioned gate can only mark sufficient results eligible for later human review;
   it never promotes automatically, and bounded local samples fail closed.
+- Phase 5A adds persisted fail-closed market-data audits, configured half-spread fill costs,
+  governed point-in-time reference imports, and idempotent resumable backfill partitions.
 - A front-loaded Phase 4B gateway and local Control Center now present one audited contract over OpenAI GPT-5.6 Sol
   and Meta Muse Spark 1.3. Workload routing is versioned and cost-tier-aware; missing project
   credentials fail closed and no model has any monetary authority. Development operators can
@@ -115,8 +117,8 @@ Development service ports bind only to loopback. The local Compose credentials a
 
 - `make check`: passed.
 - Flake8: passed.
-- Strict mypy: passed for 38 source files.
-- Pytest: 52 passed.
+- Strict mypy: passed for 40 source files.
+- Pytest: 58 passed.
 - `make doctor`: passed against the local-lite SQLite profile.
 - `make docker-doctor`: passed against the PostgreSQL-backed Compose profile.
 - PostgreSQL query: passed; the first container replay stored six lineage events.
@@ -132,7 +134,7 @@ Development service ports bind only to loopback. The local Compose credentials a
 - Real primary-source test: 10 entries from Apple's official Newsroom RSS feed passed the same path; identical replay inserted zero documents, versions, catalysts, links, or events.
 - Real SEC test: 20 AAPL filing records produced 19 catalysts and 20 links; identical replay inserted zero new records or events. A bounded 250-record AAPL XBRL facts run also replayed with zero duplicates.
 - Phase 2 fixtures verify primary/secondary source distinction, correction-version retention, SEC filing and XBRL normalization, IR feed parsing, and cross-document catalyst deduplication.
-- Alembic migrations through `20260904_0014` own the Phase 3D/4B schema; a fresh SQLite
+- Alembic migrations through `20260904_0016` own the Phase 3D/4B/5A schema; a fresh SQLite
   upgrade/check/downgrade/re-upgrade cycle passed with no schema diff.
 - `make research-smoke`: passed with 100 deterministic daily bars, three immutable baseline
   experiments, nonzero cost modeling, matching offline/online feature hashes, and ordered
@@ -347,8 +349,11 @@ flowchart LR
     INGEST --> MINIO["MinIO raw archive"]
     INGEST --> DB
     INGEST --> REDIS["Redis Streams"]
+    INGEST --> QUALITY["Fail-closed data quality"]
+    JOBS["Durable partition jobs"] --> INGEST
     CALENDAR["XNYS sessions"] --> DB
     REFDATA["Corporate actions + historical universes"] --> DB
+    REFIMPORT["Governed reference manifests"] --> REFDATA
     DB --> PITEVIDENCE["PIT evidence packets"]
     PITEVIDENCE --> PITFEATURES["PIT feature snapshots"]
     REFDATA --> PITFEATURES
@@ -412,6 +417,13 @@ provider for one invocation. Browser history is bounded and session-local, while
 usage, latency, model, source SHA, and effective routing lineage remain durable. Both write
 and paid-call endpoints fail closed outside development until production authentication and
 budget controls exist.
+
+The Phase 5A reliability layer validates every historical ingestion and backtest dataset
+against `market_data_quality@0.1.0`, including identity, chronology, OHLC, availability, and
+expected exchange intervals. Fills now charge configured half-spread on each side. Reviewed
+corporate-action/universe batches carry source, source-version, availability, and content
+hashes. Long backfills are deterministic date partitions whose durable job state skips
+completed work and retries interrupted work with bounded attempts.
 
 ### Target architecture
 
@@ -525,6 +537,8 @@ year or more of data.
 | Alpaca stream adapter | `src/agentic_quant/providers/alpaca_stream.py` | SIP authentication, subscription, reconnect, normalization |
 | Raw archive | `src/agentic_quant/archive.py` | content-addressed local or MinIO JSON evidence |
 | Market persistence | `src/agentic_quant/market_store.py` | idempotent bars, trades, quotes, options, ingestion runs |
+| Data quality | `src/agentic_quant/data_quality.py` | persisted structural/timing/session checks and fail-closed enforcement |
+| Durable workflow | `src/agentic_quant/workflow.py` | deterministic partition plans, checkpoints, bounded retry, and resume |
 | Event transport | `src/agentic_quant/event_bus.py` | Redis Streams publisher with local no-op fallback |
 | Market calendar | `src/agentic_quant/market_calendar.py` | exact XNYS daily availability and missing-minute detection |
 | Document providers | `src/agentic_quant/providers/documents.py` | Alpaca News, SEC EDGAR, approved-host IR, gated social adapters |
@@ -574,6 +588,8 @@ Implemented endpoints:
 - `POST /v1/demo/run`
 - `POST /v1/demo/market-data`
 - `GET /v1/data-health`
+- `GET /v1/data-quality`
+- `GET /v1/workflow-jobs`
 - `GET /v1/documents/search`
 - `GET /v1/catalysts`
 - `GET /v1/research/experiments`
@@ -908,6 +924,21 @@ The Compose stack is currently intended to remain running for local inspection. 
   selection PBO and computes Deflated Sharpe from fold returns. A versioned deterministic
   gate can only grant eligibility for human review and has no automatic promotion path.
 - Formal record: `docs/adr/0012-robust-validation-and-research-gate.md`.
+
+### D023 — Fail closed on bad market data without treating closures as gaps
+
+- Date: 2026-09-04 PDT.
+- Market-bar ingestion and research must persist a versioned structural/timing audit before
+  downstream use. Fatal identity, chronology, OHLC, availability, or exchange-interval
+  findings stop the workflow; zero volume is retained as a warning.
+- Completeness is evaluated against explicit request bounds and the XNYS calendar. An empty
+  weekend/holiday partition is valid when no interval is expected, while an empty open
+  session or an internal missing bar fails. Assessment scope participates in report identity.
+- Long backfills use deterministic, idempotent SQL partitions. Completed work is skipped;
+  only stale `RUNNING` work is requeued, so a fresh concurrent worker is not silently stolen.
+- Simulation fills charge configured half-spread on entry and exit. Corporate-action and
+  universe batches require reviewed source/version/availability metadata and content hashes.
+- Formal record: `docs/adr/0013-fail-closed-data-quality-and-resumable-workflows.md`.
 
 ## Iteration and commit ledger
 
@@ -1414,7 +1445,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C016 — `Add robust research validation gate`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `cfadc3b`.
 - Date: 2026-09-04 PDT.
 - User intent: proceed autonomously through all implementation prerequisites before Phase 6.
 - Scope:
@@ -1445,23 +1476,55 @@ The Compose stack is currently intended to remain running for local inspection. 
   - No strategy has been promoted; production-scale statistical acceptance remains pending
     future remote data rather than blocking workflow implementation.
 
+### C017 — `Add reliable scalable research workflows`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-04 PDT.
+- User intent: autonomously complete the scale-independent correctness prerequisites before
+  Phase 6 while keeping local data bounded to workflow validation.
+- Scope:
+  - Added persisted fail-closed market-bar audits with request-bound XNYS completeness,
+    deterministic scope/data hashes, and explicit closed-market handling.
+  - Added configurable half-spread to both simulated fill sides and retained the assumption
+    in strategy/backtest lineage.
+  - Added governed, idempotent corporate-action and historical-universe JSON imports with
+    source/version/content audit records.
+  - Added deterministic date-partitioned SQL jobs that skip completed partitions, protect
+    fresh running work, requeue stale work, bound attempts, and emit lifecycle events.
+  - Added CLI/API inspection surfaces, data manifest/runbooks, ADR 0013, and Alembic
+    revisions `20260904_0015`–`20260904_0016`.
+- Architecture/decision impact:
+  - Research now refuses malformed or incomplete expected market data before strategy logic.
+    Normal exchange closures no longer create false failures in partitioned backfills.
+  - Production-scale history can use the same deterministic workflow without requiring a
+    multi-year local download; concurrency and capacity sizing remain deployment work.
+- Validation:
+  - Flake8, strict mypy across 40 source files, and 58 tests passed.
+  - Research and robust-validation smokes passed; synthetic metrics remain explicitly
+    non-alpha evidence and the validation gate returned `INSUFFICIENT_EVIDENCE`.
+  - A pre-existing revision-0015 database with nine quality reports upgraded to 0016 without
+    data loss. Fresh SQLite upgrade/check/downgrade/re-upgrade passed with no schema drift.
+  - Local doctor, rebuilt Docker/PostgreSQL doctor at revision 0016, endpoint probes, secret
+    scan, and diff checks passed.
+- Expected global state after commit:
+  - The reliable data/backfill layer is ready for the Phase 4 analyst and Phase 5 ML system.
+  - Phase 6 shadow runtime remains intentionally unimplemented; no strategy is promoted.
+
 ## Open work
 
 Ordered near-term work:
 
-1. Implement Phase 5A correctness-critical market realism: governed reference-data imports,
-   spread-aware fills, data-quality failure paths, and scalable resumable jobs.
-2. Complete the evidence-bound LLM research orchestrator and calibrated ML layer on top of
+1. Complete the evidence-bound LLM research orchestrator and calibrated ML layer on top of
    the front-loaded gateway.
-3. During the next U.S. market session, finish Phase 1B real frame/reconnect/gap checks.
-4. Design remote backfill jobs and identify equity/options sources with suitable historical
+2. During the next U.S. market session, finish Phase 1B real frame/reconnect/gap checks.
+3. Size remote backfill concurrency and identify equity/options sources with suitable historical
    coverage, retention, and licensing; do not require those large downloads for local tests.
-5. Extend replay with multi-bar partial fills, cancellation, symbol changes, delistings, and
+4. Extend replay with multi-bar partial fills, cancellation, symbol changes, delistings, and
    later capacity calibration on production-scale data.
-6. Add Redis consumer groups, a transactional outbox, dead-letter replay, provider lag,
+5. Add Redis consumer groups, a transactional outbox, dead-letter replay, provider lag,
    sequence-gap, reconciliation, and data-quality dashboards.
-7. Build a labeled corpus and measure cross-provider catalyst dedup precision/recall.
-8. Add authentication/authorization, rate/budget enforcement, and project-data retrieval to
+6. Build a labeled corpus and measure cross-provider catalyst dedup precision/recall.
+7. Add authentication/authorization, rate/budget enforcement, and project-data retrieval to
    turn the local Research Copilot into the citation-bound remote Control Center; create the
    GitHub remote and later validate the guarded cloud pipeline on a selected VPS.
 

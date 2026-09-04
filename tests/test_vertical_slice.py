@@ -40,7 +40,7 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert ready.status_code == 200
         assert ready.json()["live_trading_enabled"] is False
         system_status = client.get("/v1/system/status").json()
-        assert system_status["phase"] == "3d-robust-validation-plus-4b-llm-control-center"
+        assert system_status["phase"] == "5a-reliable-workflows-plus-4b-llm-control-center"
         assert system_status["data_operating_scope"] == "bounded_correctness_samples"
         assert system_status["development_max_backfill_days"] == 120
         assert system_status["development_max_intraday_backfill_days"] == 7
@@ -67,11 +67,20 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert data_health["validation_folds"] == 0
         assert data_health["llm_invocations"] == 0
         assert data_health["llm_routing_revisions"] == 0
+        assert data_health["data_quality_reports"] == 1
+        assert data_health["failed_data_quality_reports"] == 0
+        assert data_health["workflow_jobs"] == 0
+        assert data_health["failed_workflow_jobs"] == 0
+        assert data_health["reference_imports"] == 0
         assert data_health["alpaca_configured"] is False
         assert client.get("/v1/research/experiments").json() == []
         missing_events = client.get("/v1/research/experiments/missing/events")
         assert missing_events.status_code == 404
         assert client.get("/v1/research/validations").json() == []
+        quality_reports = client.get("/v1/data-quality").json()
+        assert len(quality_reports) == 1
+        assert quality_reports[0]["status"] == "PASSED"
+        assert client.get("/v1/workflow-jobs").json() == []
         missing_validation = client.get("/v1/research/validations/missing")
         assert missing_validation.status_code == 404
         routes = client.get("/v1/llm/routes").json()

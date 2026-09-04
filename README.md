@@ -1,6 +1,6 @@
 # Agentic Quant Trading System
 
-A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton, the read-only **Phase 1** market-data foundation, the completed **Phase 2** event/document pipeline, a **Phase 3D** bias-aware research validation gate, and a front-loaded **Phase 4B** dual-provider LLM gateway and local Control Center.
+A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton, the read-only **Phase 1** market-data foundation, the completed **Phase 2** event/document pipeline, a **Phase 3D** bias-aware research validation gate, a **Phase 5A** reliable research-workflow layer, and a front-loaded **Phase 4B** dual-provider LLM gateway and local Control Center.
 
 > Live-money execution is not implemented. `live` is not a valid mode, and setting `LIVE_TRADING_ENABLED=true` makes startup fail.
 
@@ -66,6 +66,10 @@ Deflated Sharpe, and a versioned research gate. The gate may only mark a result 
 human review; it never promotes a strategy automatically, and bounded synthetic evidence is
 expected to fail its minimum-sample requirements.
 
+Phase 5A adds fail-closed market-data checks, explicit half-spread fill cost, governed
+corporate-action/universe imports, and durable resumable backfill partitions. These are
+scale-independent workflow guarantees; they do not require a large local dataset.
+
 Phase 4A adds an audited Responses API gateway for OpenAI GPT-5.6 Sol and Meta Muse Spark
 1.3. Versioned workload routing assigns premium and value-tier models without giving either
 provider access to broker credentials, risk authority, or order submission.
@@ -122,6 +126,11 @@ this distinction does not relax point-in-time, safety, or audit invariants.
 Production overrides `GLOBAL_NEW_EXPOSURE_PAUSED=true`. The red pause operation is distinct from liquidation; this build has no liquidation or live broker endpoint.
 
 Risk values are versioned in `configs/risk_policy.yaml`. Restricted securities are effective-dated in `configs/restricted_securities.yaml`. Changes require tests and review.
+
+Long-horizon market backfills use `quant-alpaca resumable-backfill`; completed date
+partitions are skipped on rerun. `quant-research quality` persists a dataset audit, and
+`quant-research import-reference` accepts reviewed, versioned corporate-action or historical-
+universe JSON batches. See the market-data and research runbooks for their contracts.
 
 ## Full local infrastructure
 
@@ -317,6 +326,8 @@ AGENTS.md                mandatory operating rules for coding/deployment agents
 - `POST /v1/demo/run`
 - `POST /v1/demo/market-data`
 - `GET /v1/data-health`
+- `GET /v1/data-quality`
+- `GET /v1/workflow-jobs`
 - `GET /v1/documents/search`
 - `GET /v1/catalysts`
 - `GET /v1/research/experiments`

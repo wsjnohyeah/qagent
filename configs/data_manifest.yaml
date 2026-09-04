@@ -1,4 +1,4 @@
-version: data_manifest@0.7.0
+version: data_manifest@0.8.0
 providers:
   synthetic:
     enabled: true
@@ -28,7 +28,17 @@ research:
     order_timing: next_bar_open
     exit_timing: declared_session_close
     max_volume_participation_default: 0.05
+    half_spread_bps_per_side_default: 1.0
     fixed_market_impact_bps_per_side_default: 1.0
+  data_quality:
+    ruleset: market_data_quality@0.1.0
+    fail_closed_before_research: true
+    checks: [identity, chronology, ohlc, availability, exchange_intervals]
+  long_horizon_jobs:
+    partitioned: true
+    resumable: true
+    idempotent: true
+    bounded_attempts: true
   validation:
     method: rolling_walk_forward_plus_combinatorial_purged_diagnostics
     minimum_embargo_bars: 1
@@ -42,4 +52,5 @@ research:
   universe_membership:
     effective_intervals_required: true
     availability_timestamp_required: true
+    governed_import_manifest_required: true
   synthetic_smoke_is_alpha_evidence: false

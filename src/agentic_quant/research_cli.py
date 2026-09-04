@@ -6,6 +6,7 @@ import subprocess
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 
 from agentic_quant.config import Settings
 from agentic_quant.domain import BacktestCostModel, BacktestResult, StockBar
@@ -21,6 +22,8 @@ from agentic_quant.research import (
     research_code_sha256,
 )
 from agentic_quant.research_store import ResearchStore
+from agentic_quant.reference_data import GovernedReferenceImporter, ReferenceDataStore
+from agentic_quant.data_quality import MarketDataQualityService
 from agentic_quant.validation import (
     SELECTION_METRICS,
     WalkForwardValidator,
@@ -200,6 +203,7 @@ def _run(settings: Settings, args: argparse.Namespace) -> None:
             commission_per_share=Decimal(str(args.commission_per_share)),
             minimum_commission_per_order=Decimal(str(args.minimum_commission)),
             slippage_bps_per_side=Decimal(str(args.slippage_bps)),
+            half_spread_bps_per_side=Decimal(str(args.half_spread_bps)),
             market_impact_bps_per_side=Decimal(str(args.market_impact_bps)),
             max_volume_participation=Decimal(str(args.max_volume_participation)),
         ),
@@ -236,6 +240,7 @@ def _validate(settings: Settings, args: argparse.Namespace) -> None:
             commission_per_share=Decimal(str(args.commission_per_share)),
             minimum_commission_per_order=Decimal(str(args.minimum_commission)),
             slippage_bps_per_side=Decimal(str(args.slippage_bps)),
+            half_spread_bps_per_side=Decimal(str(args.half_spread_bps)),
             market_impact_bps_per_side=Decimal(str(args.market_impact_bps)),
             max_volume_participation=Decimal(str(args.max_volume_participation)),
         ),
@@ -314,6 +319,43 @@ def _parity(settings: Settings, args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+def _quality(settings: Settings, args: argparse.Namespace) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    store = ResearchStore(ledger.engine)
+    bars = store.load_bars(
+        symbol=args.symbol.upper(),
+        timeframe=args.timeframe,
+        as_of_end=args.end,
+    )
+    report = MarketDataQualityService(
+        ledger.engine,
+        ledger,
+        calendar_name=settings.market_calendar,
+    ).assess_bars(
+        bars,
+        symbol=args.symbol,
+        timeframe=args.timeframe,
+        code_git_sha=_git_sha(settings),
+    )
+    print(json.dumps(report.model_dump(mode="json"), indent=2))
+    if report.status.value == "FAILED":
+        raise SystemExit(1)
+
+
+def _import_reference(settings: Settings, args: argparse.Namespace) -> None:
+    upgrade_database(settings.database_url)
+    payload = json.loads(Path(args.path).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("Reference import root must be an object")
+    ledger = EventLedger(settings.database_url)
+    result = GovernedReferenceImporter(
+        ReferenceDataStore(ledger.engine),
+        ledger,
+    ).import_payload(payload)
+    print(json.dumps(result.model_dump(mode="json"), indent=2))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Point-in-time research and cost-aware backtest operations"
@@ -340,6 +382,7 @@ def main() -> None:
     run.add_argument("--commission-per-share", default="0.0049")
     run.add_argument("--minimum-commission", default="0.99")
     run.add_argument("--slippage-bps", default="2.0")
+    run.add_argument("--half-spread-bps", default="1.0")
     run.add_argument("--market-impact-bps", default="1.0")
     run.add_argument("--max-volume-participation", default="0.05")
     list_runs = subparsers.add_parser("list", help="List recent immutable experiments")
@@ -351,6 +394,18 @@ def main() -> None:
     parity.add_argument("symbol")
     parity.add_argument("--timeframe", choices=("1Min", "1Day"), default="1Day")
     parity.add_argument("--as-of", required=True, type=_parse_time)
+    quality = subparsers.add_parser(
+        "quality",
+        help="Run and persist fail-closed market-bar quality checks",
+    )
+    quality.add_argument("symbol")
+    quality.add_argument("--timeframe", choices=("1Min", "1Day"), default="1Day")
+    quality.add_argument("--end", required=True, type=_parse_time)
+    reference_import = subparsers.add_parser(
+        "import-reference",
+        help="Import a governed corporate-action or universe-membership JSON batch",
+    )
+    reference_import.add_argument("path")
     validate = subparsers.add_parser(
         "validate",
         help="Run chronological train/embargo/test strategy validation",
@@ -373,6 +428,7 @@ def main() -> None:
     validate.add_argument("--commission-per-share", default="0.0049")
     validate.add_argument("--minimum-commission", default="0.99")
     validate.add_argument("--slippage-bps", default="2.0")
+    validate.add_argument("--half-spread-bps", default="1.0")
     validate.add_argument("--market-impact-bps", default="1.0")
     validate.add_argument("--max-volume-participation", default="0.05")
     args = parser.parse_args()
@@ -385,6 +441,10 @@ def main() -> None:
         _run(settings, args)
     elif args.command == "parity":
         _parity(settings, args)
+    elif args.command == "quality":
+        _quality(settings, args)
+    elif args.command == "import-reference":
+        _import_reference(settings, args)
     elif args.command == "validate":
         _validate(settings, args)
     else:

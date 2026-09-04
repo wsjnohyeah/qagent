@@ -87,6 +87,7 @@ def test_walk_forward_validation_preserves_embargo_and_all_candidates(
             commission_per_share=Decimal("0"),
             minimum_commission_per_order=Decimal("0"),
             slippage_bps_per_side=Decimal("0"),
+            half_spread_bps_per_side=Decimal("0"),
             market_impact_bps_per_side=Decimal("0"),
         ),
     )

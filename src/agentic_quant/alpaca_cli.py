@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import subprocess
 from datetime import UTC, datetime
 
 from agentic_quant.archive import build_raw_archive
@@ -18,6 +19,7 @@ from agentic_quant.option_ingestion import OptionDataIngestionService
 from agentic_quant.providers.alpaca import AlpacaConfigurationError, AlpacaMarketDataProvider
 from agentic_quant.providers.alpaca_stream import AlpacaStockStream
 from agentic_quant.providers.base import OptionChainRequest, StockBarsRequest
+from agentic_quant.workflow import ResumableMarketBackfill, WorkflowJobStore
 
 
 def _parse_time(value: str) -> datetime:
@@ -38,6 +40,21 @@ def _provider(settings: Settings) -> AlpacaMarketDataProvider:
         base_url=settings.alpaca_data_base_url,
         calendar_name=settings.market_calendar,
     )
+
+
+def _git_sha(settings: Settings) -> str:
+    if settings.source_git_sha:
+        return settings.source_git_sha
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return "UNAVAILABLE"
+    return result.stdout.strip() if result.returncode == 0 else "UNAVAILABLE"
 
 
 async def _probe(settings: Settings) -> None:
@@ -86,6 +103,8 @@ async def _backfill(settings: Settings, args: argparse.Namespace) -> None:
             store=MarketDataStore(ledger.engine),
             ledger=ledger,
             publisher=publisher,
+            calendar_name=settings.market_calendar,
+            code_git_sha=_git_sha(settings),
         )
         result = await service.ingest_stock_bars(
             StockBarsRequest(
@@ -97,6 +116,60 @@ async def _backfill(settings: Settings, args: argparse.Namespace) -> None:
             )
         )
     print(json.dumps(result.model_dump(mode="json"), indent=2))
+
+
+async def _resumable_backfill(settings: Settings, args: argparse.Namespace) -> None:
+    settings.validate_backfill_window(
+        start=args.start,
+        end=args.end,
+        timeframe=args.timeframe,
+    )
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    publisher = (
+        RedisStreamPublisher(settings.redis_url, settings.redis_stream_name)
+        if settings.redis_url
+        else NullEventPublisher()
+    )
+    store = MarketDataStore(ledger.engine)
+    async with _provider(settings) as provider:
+        service = MarketDataIngestionService(
+            provider=provider,
+            archive=build_raw_archive(settings),
+            store=store,
+            ledger=ledger,
+            publisher=publisher,
+            calendar_name=settings.market_calendar,
+            code_git_sha=_git_sha(settings),
+        )
+        summary = await ResumableMarketBackfill(
+            service=service,
+            jobs=WorkflowJobStore(ledger.engine, ledger),
+        ).run(
+            StockBarsRequest(
+                symbol=args.symbol,
+                start=args.start,
+                end=args.end,
+                timeframe=args.timeframe,
+                feed=settings.alpaca_stock_feed,
+            ),
+            partition_days=args.partition_days,
+            max_attempts=args.max_attempts,
+            max_partitions=args.max_partitions,
+        )
+    print(json.dumps(summary, indent=2))
+
+
+def _jobs(settings: Settings, args: argparse.Namespace) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    print(
+        json.dumps(
+            WorkflowJobStore(ledger.engine).recent(limit=args.limit),
+            indent=2,
+            default=str,
+        )
+    )
 
 
 async def _option_snapshot(settings: Settings, args: argparse.Namespace) -> None:
@@ -158,6 +231,8 @@ async def _stream(settings: Settings, args: argparse.Namespace) -> None:
             store=MarketDataStore(ledger.engine),
             ledger=ledger,
             publisher=publisher,
+            calendar_name=settings.market_calendar,
+            code_git_sha=_git_sha(settings),
         )
         await _consume_stream(
             stream=stream,
@@ -214,6 +289,19 @@ def main() -> None:
     backfill.add_argument("--start", required=True, type=_parse_time)
     backfill.add_argument("--end", required=True, type=_parse_time)
     backfill.add_argument("--timeframe", choices=("1Min", "1Day"), default="1Min")
+    resumable = subparsers.add_parser(
+        "resumable-backfill",
+        help="Run an idempotent partitioned equity-bar backfill",
+    )
+    resumable.add_argument("symbol")
+    resumable.add_argument("--start", required=True, type=_parse_time)
+    resumable.add_argument("--end", required=True, type=_parse_time)
+    resumable.add_argument("--timeframe", choices=("1Min", "1Day"), default="1Day")
+    resumable.add_argument("--partition-days", type=int, default=30)
+    resumable.add_argument("--max-attempts", type=int, default=3)
+    resumable.add_argument("--max-partitions", type=int)
+    jobs = subparsers.add_parser("jobs", help="List recent resumable workflow partitions")
+    jobs.add_argument("--limit", type=int, default=100)
     options = subparsers.add_parser(
         "option-snapshot",
         help="Ingest a read-only option-chain snapshot",
@@ -234,6 +322,10 @@ def main() -> None:
         asyncio.run(_probe(settings))
     elif args.command == "backfill":
         asyncio.run(_backfill(settings, args))
+    elif args.command == "resumable-backfill":
+        asyncio.run(_resumable_backfill(settings, args))
+    elif args.command == "jobs":
+        _jobs(settings, args)
     elif args.command == "option-snapshot":
         asyncio.run(_option_snapshot(settings, args))
     else:
