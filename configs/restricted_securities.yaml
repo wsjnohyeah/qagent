@@ -1,0 +1,12 @@
+version: restricted_securities@0.1.0
+default_unknown_status: restricted
+restricted:
+  - symbol: META
+    reason: employment_or_personal_trading_restriction
+    effective_from: "1970-01-01"
+    effective_to: null
+  - symbol: "*PENNY_OR_ILLIQUID*"
+    reason: policy_class_restriction
+    effective_from: "1970-01-01"
+    effective_to: null
+

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agentic Quant — Phase 0</title>
+  <style>
+    :root { color-scheme: dark; font-family: ui-sans-serif, system-ui, sans-serif; }
+    body { margin: 0; background: #08111f; color: #e6edf7; }
+    main { max-width: 1100px; margin: 0 auto; padding: 48px 24px; }
+    h1 { margin-bottom: 6px; } .muted { color: #90a4bd; }
+    .banner { border: 1px solid #3d7a67; background: #102b28; padding: 14px; border-radius: 10px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap: 14px; margin: 22px 0; }
+    .card { background: #111d2f; border: 1px solid #253651; border-radius: 12px; padding: 18px; }
+    .label { color: #90a4bd; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+    .value { font-size: 22px; margin-top: 8px; }
+    button { background: #3b82f6; color: white; border: 0; padding: 11px 15px; border-radius: 8px; cursor: pointer; margin-right: 8px; }
+    button.danger { background: #b91c1c; } button.secondary { background: #334155; }
+    pre { overflow: auto; background: #060c16; border-radius: 10px; padding: 16px; min-height: 180px; }
+  </style>
+</head>
+<body>
+<main>
+  <p class="label">Trading Control Center</p>
+  <h1>Phase 0 Safety Console</h1>
+  <p class="muted">Synthetic replay only. Live execution does not exist in this build.</p>
+  <div class="banner">The risk engine owns approval and sizing. The demo creates only a shadow record.</div>
+  <section class="grid">
+    <div class="card"><div class="label">Environment</div><div id="environment" class="value">—</div></div>
+    <div class="card"><div class="label">Mode</div><div id="mode" class="value">—</div></div>
+    <div class="card"><div class="label">Database</div><div id="database" class="value">—</div></div>
+    <div class="card"><div class="label">New exposure</div><div id="paused" class="value">—</div></div>
+  </section>
+  <p>
+    <button id="demo">Run synthetic decision</button>
+    <button id="pause" class="danger">Pause new exposure</button>
+    <button id="resume" class="secondary">Resume dev shadow</button>
+  </p>
+  <h2>Decision output</h2>
+  <pre id="output">Ready.</pre>
+</main>
+<script>
+const output = document.querySelector('#output');
+async function status() {
+  const value = await fetch('/v1/system/status').then(r => r.json());
+  document.querySelector('#environment').textContent = value.environment;
+  document.querySelector('#mode').textContent = value.trading_mode;
+  document.querySelector('#database').textContent = value.database;
+  document.querySelector('#paused').textContent = value.new_exposure_paused ? 'PAUSED' : 'ENABLED';
+}
+async function post(url, body) {
+  const response = await fetch(url, {method: 'POST', headers: {'Content-Type':'application/json'}, body: body ? JSON.stringify(body) : undefined});
+  const value = await response.json(); output.textContent = JSON.stringify(value, null, 2); await status();
+}
+document.querySelector('#demo').onclick = () => post('/v1/demo/run');
+document.querySelector('#pause').onclick = () => post('/v1/commands/pause', {reason:'operator console test'});
+document.querySelector('#resume').onclick = () => post('/v1/commands/resume', {reason:'operator console test'});
+status().catch(error => output.textContent = String(error));
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+version: data_manifest@0.1.0
+providers:
+  synthetic:
+    enabled: true
+    purpose: deterministic_phase_0_replay
+  alpaca:
+    enabled: false
+    purpose: phase_1_market_data_and_paper_broker
+    entitlement_status: unverified
+

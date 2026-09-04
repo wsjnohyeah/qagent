@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentic-quant"
+version = "0.1.0"
+description = "Auditable research, shadow-trading, and paper-trading foundation"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "fastapi>=0.116,<1",
+  "httpx>=0.28,<1",
+  "psycopg[binary]>=3.2,<4",
+  "pydantic-settings>=2.10,<3",
+  "pyyaml>=6.0,<7",
+  "redis>=6.4,<8",
+  "sqlalchemy>=2.0,<3",
+  "uvicorn[standard]>=0.35,<1",
+]
+
+[dependency-groups]
+dev = [
+  "flake8>=7.3,<8",
+  "hypothesis>=6.138,<7",
+  "mypy>=1.17,<2",
+  "pytest>=8.4,<10",
+  "pytest-cov>=6.2,<8",
+  "types-pyyaml>=6.0,<7",
+]
+
+[project.scripts]
+quant-api = "agentic_quant.api:run"
+quant-demo = "agentic_quant.demo:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentic_quant"]
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-markers"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+packages = ["agentic_quant"]

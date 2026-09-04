@@ -1,0 +1,9 @@
+version: strategy_registry@0.1.0
+strategies:
+  - id: event_pullback_continuation
+    version: event_pullback_continuation@0.1.0
+    enabled_modes: [research, backtest, shadow]
+    minimum_reward_risk: "1.50"
+    minimum_relative_volume: "2.00"
+    status: baseline
+
