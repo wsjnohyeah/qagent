@@ -9,6 +9,7 @@
 - Local lint, strict type checking, 7 tests, API readiness, the HTTP vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
 - The full Compose stack is healthy: PostgreSQL 17, Redis 8, MinIO, and the API all passed direct checks; the PostgreSQL-backed shadow slice recorded six lineage events.
+- `context.md` is the required master record for architecture, discussions, iterations, commit contents, and post-commit global state.
 
 ## Next
 

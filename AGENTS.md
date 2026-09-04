@@ -1,6 +1,6 @@
 # Agent operating contract
 
-Read `README.md`, `PROJECT_STATE.md`, and `docs/DEPLOYMENT.md` before changing or deploying this repository.
+Read `README.md`, `context.md`, `PROJECT_STATE.md`, and `docs/DEPLOYMENT.md` before changing or deploying this repository.
 
 Non-negotiable rules:
 
@@ -12,6 +12,7 @@ Non-negotiable rules:
 - Preserve point-in-time timestamps and append-only decision lineage.
 - Never deploy a dirty worktree. Run `make check`, `make doctor`, and the secret scan first.
 - Do not claim that a healthy Phase 0 scaffold is a validated trading strategy.
+- Maintain `context.md` as the durable project memory. Before every commit, append its stable commit ID, exact subject, scope, validation, decisions, and expected post-commit global state. Also refresh the current architecture/state sections whenever they change.
 
 Safe setup:
 
@@ -22,4 +23,3 @@ make doctor
 ```
 
 Cloud deployment is allowed only after every prerequisite and safety gate in `docs/DEPLOYMENT.md` is satisfied.
-

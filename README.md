@@ -4,6 +4,8 @@ A safety-first foundation for a cloud-hosted quantitative research, shadow-tradi
 
 > Live-money execution is not implemented. `live` is not a valid mode, and setting `LIVE_TRADING_ENABLED=true` makes startup fail.
 
+Before changing the project, read `context.md`. It is the master project memory containing the current global state, architecture, decisions, iteration history, and per-commit ledger. Every material change and every commit must update it using the maintenance protocol defined there.
+
 ## Start here
 
 The current Mac does not need Docker for the first health check. The local-lite profile uses Python 3.12, SQLite, and local object storage.
@@ -87,6 +89,7 @@ configs/                 versioned risk, restrictions, strategy, data manifest
 tests/                   invariants and end-to-end replay tests
 docs/adr/                architectural decisions
 docs/DEPLOYMENT.md       exact handoff contract for a cloud deployment agent
+context.md               master context, architecture, discussions, iterations, commits
 infra/deploy/            guarded VPS deployment entry point
 PROJECT_STATE.md         Current / Next / Blocked / Decisions
 AGENTS.md                mandatory operating rules for coding/deployment agents
@@ -107,12 +110,12 @@ The production control plane still needs authentication and authorization before
 
 ## Workflow for coding agents
 
-1. Read `AGENTS.md`, this README, `PROJECT_STATE.md`, and relevant ADRs.
+1. Read `AGENTS.md`, this README, `context.md`, `PROJECT_STATE.md`, and relevant ADRs.
 2. Inspect the worktree and preserve unrelated user changes.
 3. Keep work inside the current phase; do not add broker execution before its safety gates.
 4. Add or update invariant and replay tests with every behavior change.
 5. Run `make check`, `make doctor`, and `./scripts/check_no_secrets.sh`.
-6. Update `PROJECT_STATE.md` and add an ADR for architectural decisions.
+6. Update `context.md` for every material iteration and commit; update `PROJECT_STATE.md` and add an ADR when applicable.
 7. Commit only source/config/docs—never runtime data or credentials.
 
 ## GitHub and cloud path
