@@ -2,12 +2,12 @@
 
 ## Current
 
-- Phases 0 and 2 are complete; the Phase 3C research-validation baseline is implemented;
-  Phase 1B open-session validation is pending until the next U.S. market session.
+- Phases 0 and 2 are complete; the Phase 3C research-validation baseline and front-loaded
+  Phase 4A LLM gateway are implemented. Phase 1B open-session validation is pending.
 - Local-lite uses Python 3.12, a project-local `uv`, SQLite, and filesystem object storage.
 - The Control API, minimal web console, append-only event ledger, deterministic risk engine, and synthetic vertical slice exist.
 - `live` is not a valid trading mode; `LIVE_TRADING_ENABLED=true` fails configuration validation.
-- Local lint, strict type checking, 40 tests, API readiness, the HTTP vertical slice, and the secret scan pass.
+- Local lint, strict type checking, 47 tests, API readiness, the HTTP vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
 - The full Compose stack is healthy: PostgreSQL 17, Redis 8, MinIO, and the API all passed direct checks; the PostgreSQL-backed shadow slice recorded six lineage events.
 - `context.md` is the required master record for architecture, discussions, iterations, commit contents, and post-commit global state.
@@ -25,7 +25,7 @@
 - Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
   experiment runs, backtest trades, corporate actions, historical universe membership,
   feature parity checks, and walk-forward reports are stored through Alembic revision
-  `20260904_0010`.
+  `20260904_0012`.
 - The Phase 3 runner provides buy-and-hold, long/cash momentum, and long/cash
   mean-reversion baselines with next-bar execution, commission, slippage, metrics, hashes,
   and append-only completion events.
@@ -40,24 +40,30 @@
 - Phase 3C persists rolling train/embargo/test folds, evaluates every candidate both in and
   out of sample, reports train-to-test degradation and selection failures, and separates
   selected out-of-sample results into up/down/sideways realized regimes.
+- The Phase 4A gateway routes critical research to OpenAI `gpt-5.6-sol` and interactive or
+  routine work to Meta `muse-spark-1.3` through versioned configuration. Calls are bounded,
+  fail closed without project credentials, and retain immutable hashes, usage, latency,
+  status, and output.
+- Both Responses API adapters pass mocked contract tests and bounded live probes using
+  project-specific credentials in ignored `.env`.
 - `.env` explicitly selects `APP_ENV=development`; development daily/news backfills are
   capped at 120 days and one-minute backfills at 7 days by default. The active scope is
   exposed by `/v1/system/status`.
 
 ## Next
 
-1. Capture real SIP trade/quote/bar frames and reconnect/gap repair during the next open session.
-2. Design remote long-horizon backfill jobs; continue using bounded samples for local
-   correctness verification.
-3. Extend fill realism with multi-bar partial fills, order cancellation, spread/quote data,
-   and symbol-change/delisting replay.
-4. Add CPCV, Probability of Backtest Overfitting, Deflated Sharpe, and explicit promotion
+1. Add CPCV, Probability of Backtest Overfitting, Deflated Sharpe, and explicit promotion
    thresholds after the candidate set and sample-size policy are frozen.
-5. Add Redis consumer groups, durable offsets, a transactional outbox, and dead-letter replay.
-6. Add data-quality reconciliation and provider lag metrics.
-7. Build a labeled corpus to measure cross-provider catalyst dedup precision/recall.
-8. Implement the LLM strategy-research orchestrator after independent rejection gates exist.
-9. Add authentication/authorization and expand the Decision Inspector.
+2. Implement Phase 5A correctness-critical market realism: governed reference-data imports,
+   spread-aware fills, data-quality failure paths, and scalable resumable jobs.
+3. Complete the Phase 4 research orchestrator and calibrated ML layer on top of the gateway.
+4. Capture real SIP trade/quote/bar frames and reconnect/gap repair during the next open session.
+5. Design remote long-horizon backfill jobs; continue using bounded samples for local
+   correctness verification.
+6. Extend fill realism with multi-bar partial fills, order cancellation, spread/quote data,
+   and symbol-change/delisting replay.
+7. Add Redis consumer groups, durable offsets, a transactional outbox, and dead-letter replay.
+8. Build the authenticated Trading Control Center and expand the Decision Inspector.
 
 ## Blocked
 
@@ -80,3 +86,5 @@
   next-open/session-close fills, costs, market impact, and liquidity caps.
 - ADR 0009: use non-overlapping rolling out-of-sample windows with an embargo, retain every
   candidate run, and report selection degradation and realized-regime results.
+- ADR 0010: use a provider-neutral Responses API gateway with versioned workload routing,
+  immutable invocation audits, bounded calls, and no automatic cross-provider fallback.

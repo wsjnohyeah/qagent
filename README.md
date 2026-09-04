@@ -1,6 +1,6 @@
 # Agentic Quant Trading System
 
-A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton, the read-only **Phase 1** market-data foundation, the completed **Phase 2** event/document pipeline, and a **Phase 3C** bias-aware research validation baseline.
+A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton, the read-only **Phase 1** market-data foundation, the completed **Phase 2** event/document pipeline, a **Phase 3C** bias-aware research validation baseline, and a front-loaded **Phase 4A** dual-provider LLM gateway.
 
 > Live-money execution is not implemented. `live` is not a valid mode, and setting `LIVE_TRADING_ENABLED=true` makes startup fail.
 
@@ -61,6 +61,10 @@ Phase 3C adds rolling chronological train/embargo/test folds. Every candidate is
 and out of sample; the report records the train-selected strategy, its out-of-sample rank,
 return/Sharpe degradation, selection-failure rate, and performance by realized market regime.
 
+Phase 4A adds an audited Responses API gateway for OpenAI GPT-5.6 Sol and Meta Muse Spark
+1.3. Versioned workload routing assigns premium and value-tier models without giving either
+provider access to broker credentials, risk authority, or order submission.
+
 ## Commands
 
 | Command | Purpose |
@@ -72,6 +76,8 @@ return/Sharpe degradation, selection-failure rate, and performance by realized m
 | `make demo` | Run the vertical slice in the terminal |
 | `make research-smoke` | Run and persist three deterministic Phase 3 research baselines |
 | `make validation-smoke` | Run bounded walk-forward, regime, and selection-bias checks |
+| `make llm-routes` | Inspect workload-to-model routing and project credential readiness |
+| `make llm-probe` | Make one bounded development connectivity call to each configured LLM |
 | `make docker-up` | Start PostgreSQL, Redis, MinIO, and API when Docker is installed |
 | `make docker-doctor` | Verify every container and the PostgreSQL-backed shadow slice |
 | `make docker-alpaca-probe` | Verify SIP/OPRA REST access and SIP WebSocket authentication |
@@ -91,6 +97,9 @@ DEVELOPMENT_MAX_INTRADAY_BACKFILL_DAYS=7
 TRADING_MODE=shadow
 LIVE_TRADING_ENABLED=false
 GLOBAL_NEW_EXPOSURE_PAUSED=false
+LLM_OPENAI_API_KEY=
+LLM_META_API_KEY=
+LLM_ROUTING_PATH=./configs/model_routing.yaml
 ```
 
 `APP_ENV=development` is a bounded correctness environment. Daily/news backfills longer than
@@ -227,7 +236,7 @@ quant-research run AAPL \
 ```
 
 Use `GET /v1/research/experiments/{experiment_run_id}/events` to inspect the ordered
-portfolio event stream. See `runbooks/research.md` and ADRs 0006–0009 for the exact
+portfolio event stream. See `runbooks/research.md` and ADRs 0006–0010 for the exact
 point-in-time invariants, fill/accounting assumptions, known limitations, and
 research/runtime authority boundary.
 
@@ -240,6 +249,31 @@ make validation-smoke
 For stored bars, use `quant-research validate`. Reports and fold lineage are available from
 `GET /v1/research/validations` and `GET /v1/research/validations/{validation_report_id}`.
 
+## Phase 4A: configurable LLM gateway
+
+`configs/model_routing.yaml` is the initial versioned routing source. Critical research,
+strategy generation, and strategy critique route to `gpt-5.6-sol`; interactive explanations
+and routine pipeline tasks route to `muse-spark-1.3`. Model IDs, reasoning effort, output
+limits, and routes are configuration rather than application constants.
+
+Inspect routing without making a paid request:
+
+```sh
+make llm-routes
+```
+
+After adding the project-specific provider keys to ignored `.env`, run bounded probes:
+
+```sh
+work/tools/uv run quant-llm probe --provider openai
+work/tools/uv run quant-llm probe --provider meta
+```
+
+Every attempted call is stored with source Git SHA, route/prompt version, request, routing,
+and input hashes, provider response ID, token usage, latency, status, and output. Input text
+and instructions are not copied into the audit table. Automatic cross-provider fallback is
+disabled so cost and model behavior cannot change silently. See `runbooks/llm_gateway.md`.
+
 ## Repository map
 
 ```text
@@ -250,7 +284,7 @@ docs/adr/                architectural decisions
 docs/DEPLOYMENT.md       exact handoff contract for a cloud deployment agent
 context.md               master context, architecture, discussions, iterations, commits
 infra/deploy/            guarded VPS deployment entry point
-runbooks/                 market-data, event/document, and research operations
+runbooks/                 market-data, event/document, research, and LLM operations
 PROJECT_STATE.md         Current / Next / Blocked / Decisions
 AGENTS.md                mandatory operating rules for coding/deployment agents
 ```
@@ -271,6 +305,10 @@ AGENTS.md                mandatory operating rules for coding/deployment agents
 - `GET /v1/research/experiments/{experiment_run_id}/events`
 - `GET /v1/research/validations`
 - `GET /v1/research/validations/{validation_report_id}`
+- `GET /v1/llm/routes`
+- `GET /v1/llm/invocations`
+- `GET /v1/llm/invocations/{invocation_id}`
+- `POST /v1/llm/probe/{provider}` — development only; incurs a bounded provider call
 - `POST /v1/market-data/alpaca/probe` — development only
 - `POST /v1/market-data/alpaca/backfill` — development only
 - `POST /v1/market-data/alpaca/option-snapshot` — development only

@@ -1,7 +1,7 @@
 SHELL := /bin/sh
 UV := work/tools/uv
 
-.PHONY: bootstrap sync migrate test lint typecheck check doctor run demo research-smoke validation-smoke alpaca-probe docker-up docker-doctor docker-alpaca-probe docker-alpaca-stream docker-event-health docker-down clean
+.PHONY: bootstrap sync migrate test lint typecheck check doctor run demo research-smoke validation-smoke llm-routes llm-probe alpaca-probe docker-up docker-doctor docker-alpaca-probe docker-alpaca-stream docker-event-health docker-down clean
 
 bootstrap:
 	./scripts/bootstrap.sh
@@ -37,6 +37,12 @@ research-smoke:
 
 validation-smoke:
 	DATABASE_URL=sqlite+pysqlite:///./work/research-smoke.db TRADING_MODE=research $(UV) run quant-research validation-smoke
+
+llm-routes:
+	$(UV) run quant-llm routes
+
+llm-probe:
+	$(UV) run quant-llm probe --provider all
 
 alpaca-probe:
 	$(UV) run quant-alpaca probe

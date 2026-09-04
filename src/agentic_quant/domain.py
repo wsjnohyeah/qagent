@@ -71,6 +71,54 @@ class MarketRegime(StrEnum):
     SIDEWAYS = "sideways"
 
 
+class LLMProviderName(StrEnum):
+    OPENAI = "openai"
+    META = "meta"
+
+
+class LLMWorkload(StrEnum):
+    INTERACTIVE_EXPLANATION = "interactive_explanation"
+    ROUTINE_PIPELINE = "routine_pipeline"
+    CRITICAL_RESEARCH = "critical_research"
+    STRATEGY_GENERATION = "strategy_generation"
+    STRATEGY_CRITIQUE = "strategy_critique"
+
+
+class LLMInvocationStatus(StrEnum):
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+class LLMUsage(FrozenModel):
+    input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    total_tokens: int = Field(default=0, ge=0)
+    reasoning_tokens: int = Field(default=0, ge=0)
+
+
+class LLMInvocation(FrozenModel):
+    invocation_id: str
+    workload: LLMWorkload
+    routing_version: str
+    routing_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    code_git_sha: str
+    provider: LLMProviderName
+    model: str
+    reasoning_effort: str
+    prompt_version: str
+    request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    input_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    response_id: str | None = None
+    output_text: str | None = None
+    output_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    usage: LLMUsage = LLMUsage()
+    latency_ms: int = Field(ge=0)
+    status: LLMInvocationStatus
+    error_code: str | None = None
+    created_at: datetime
+    completed_at: datetime
+
+
 class CorporateActionType(StrEnum):
     SPLIT = "split"
     CASH_DIVIDEND = "cash_dividend"

@@ -19,5 +19,6 @@ def settings(tmp_path: Path) -> Settings:
         object_store_root=tmp_path / "objects",
         risk_policy_path=root / "configs/risk_policy.yaml",
         restricted_securities_path=root / "configs/restricted_securities.yaml",
+        llm_openai_api_key=None,
+        llm_meta_api_key=None,
     )
-

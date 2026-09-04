@@ -628,3 +628,28 @@ validation_folds = Table(
         name="uq_validation_folds_report_number",
     ),
 )
+
+llm_invocations = Table(
+    "llm_invocations",
+    metadata,
+    Column("invocation_id", String(36), primary_key=True),
+    Column("workload", String(80), nullable=False, index=True),
+    Column("routing_version", String(80), nullable=False),
+    Column("routing_sha256", String(64), nullable=False),
+    Column("code_git_sha", String(64), nullable=False),
+    Column("provider", String(40), nullable=False, index=True),
+    Column("model", String(120), nullable=False, index=True),
+    Column("reasoning_effort", String(24), nullable=False),
+    Column("prompt_version", String(120), nullable=False),
+    Column("request_sha256", String(64), nullable=False, index=True),
+    Column("input_sha256", String(64), nullable=False),
+    Column("response_id", String(160), nullable=True),
+    Column("output_text", Text, nullable=True),
+    Column("output_sha256", String(64), nullable=True),
+    Column("usage_json", JSON, nullable=False),
+    Column("latency_ms", Integer, nullable=False),
+    Column("status", String(24), nullable=False, index=True),
+    Column("error_code", String(120), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("completed_at", DateTime(timezone=True), nullable=False),
+)

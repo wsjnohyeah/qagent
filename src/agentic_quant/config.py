@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     enable_social_aggregates: bool = False
     social_aggregate_url: str | None = None
     social_aggregate_token: SecretStr | None = None
+    llm_openai_api_key: SecretStr | None = None
+    llm_meta_api_key: SecretStr | None = None
+    llm_routing_path: Path = Path("./configs/model_routing.yaml")
     market_calendar: str = "XNYS"
     development_max_backfill_days: int = Field(default=120, ge=1, le=3_650)
     development_max_intraday_backfill_days: int = Field(default=7, ge=1, le=365)
@@ -86,6 +89,20 @@ class Settings(BaseSettings):
         if self.app_env == AppEnvironment.DEVELOPMENT:
             return "bounded_correctness_samples"
         return "durable_long_horizon"
+
+    @property
+    def openai_configured(self) -> bool:
+        return bool(
+            self.llm_openai_api_key
+            and self.llm_openai_api_key.get_secret_value().strip()
+        )
+
+    @property
+    def meta_model_configured(self) -> bool:
+        return bool(
+            self.llm_meta_api_key
+            and self.llm_meta_api_key.get_secret_value().strip()
+        )
 
     def validate_backfill_window(
         self,

@@ -4,9 +4,9 @@ Last updated: 2026-09-04 PDT
 
 Context format: v1
 
-Current phase: Phase 3C walk-forward validation baseline implemented; Phase 1B open-session verification pending
+Current phase: Phase 3C validation plus front-loaded Phase 4A LLM gateway implemented; Phase 1B open-session verification pending
 
-Current documented baseline: C013 — `Add walk-forward validation baseline`
+Current documented baseline: C014 — `Add configurable dual-provider LLM gateway`
 
 ## Purpose and authority
 
@@ -43,7 +43,10 @@ A Git commit cannot contain its own content-derived hash without changing that h
 - The original synthetic shadow path remains operational and makes no broker call.
 - A read-only Alpaca adapter now retrieves SIP historical stock bars, OPRA option-chain snapshots, and authenticates to the SIP stock WebSocket.
 - Real provider responses flow through content-addressed MinIO raw storage, normalized PostgreSQL tables, the append-only event ledger, and Redis Streams.
-- Alpaca News, SEC EDGAR, and an approved-host IR feed have passed live read-only ingestion. The social aggregate adapter is implemented but disabled by default. No LLM, predictive model, or broker adapter is connected.
+- Alpaca News, SEC EDGAR, and an approved-host IR feed have passed live read-only ingestion.
+  The social aggregate adapter is implemented but disabled by default. The LLM transport and
+  routing layer has passed bounded live OpenAI and Meta probes; no predictive model or broker
+  adapter is connected.
 - Phase 3A persists immutable evidence packets, feature snapshots, strategy specifications,
   experiment runs, and backtest trades. Three deterministic baselines run with next-bar
   execution and nonzero commission/slippage; their output is infrastructure evidence only.
@@ -56,6 +59,9 @@ A Git commit cannot contain its own content-derived hash without changing that h
 - Phase 3C adds immutable rolling train/embargo/test reports. Every candidate is evaluated
   both in and out of sample, with selection degradation, below-median selection rate, and
   realized-regime summaries retained rather than reporting only the winner.
+- A front-loaded Phase 4A gateway now presents one audited contract over OpenAI GPT-5.6 Sol
+  and Meta Muse Spark 1.3. Workload routing is versioned and cost-tier-aware; missing project
+  credentials fail closed and no model has any monetary authority.
 - No GitHub remote or cloud host is configured yet.
 
 ### Repository state
@@ -79,6 +85,9 @@ A Git commit cannot contain its own content-derived hash without changing that h
   Prefer deterministic fixtures and the smallest bounded real samples that exercise provider,
   storage, replay, feature, and backtest invariants. Full-year or multi-year backfills are not
   a routine local development requirement.
+- Development and production must execute the same partitionable, idempotent workflow.
+  Dataset size may change batch size, concurrency, storage, and scheduling, but never the
+  business contracts, point-in-time rules, lineage, or validation path.
 - The ignored local `.env` explicitly sets `APP_ENV=development` and
   `DEVELOPMENT_MAX_BACKFILL_DAYS=120`, with a stricter 7-day one-minute-bar cap;
   `.env.example` documents the same safe defaults.
@@ -102,8 +111,8 @@ Development service ports bind only to loopback. The local Compose credentials a
 
 - `make check`: passed.
 - Flake8: passed.
-- Strict mypy: passed for 35 source files.
-- Pytest: 40 passed.
+- Strict mypy: passed for 38 source files.
+- Pytest: 47 passed.
 - `make doctor`: passed against the local-lite SQLite profile.
 - `make docker-doctor`: passed against the PostgreSQL-backed Compose profile.
 - PostgreSQL query: passed; the first container replay stored six lineage events.
@@ -119,7 +128,7 @@ Development service ports bind only to loopback. The local Compose credentials a
 - Real primary-source test: 10 entries from Apple's official Newsroom RSS feed passed the same path; identical replay inserted zero documents, versions, catalysts, links, or events.
 - Real SEC test: 20 AAPL filing records produced 19 catalysts and 20 links; identical replay inserted zero new records or events. A bounded 250-record AAPL XBRL facts run also replayed with zero duplicates.
 - Phase 2 fixtures verify primary/secondary source distinction, correction-version retention, SEC filing and XBRL normalization, IR feed parsing, and cross-document catalyst deduplication.
-- Alembic migrations through `20260904_0010` own the Phase 3C schema; a fresh SQLite
+- Alembic migrations through `20260904_0012` own the Phase 3C/4A schema; a fresh SQLite
   upgrade/check/downgrade/re-upgrade cycle passed with no schema diff.
 - `make research-smoke`: passed with 100 deterministic daily bars, three immutable baseline
   experiments, nonzero cost modeling, matching offline/online feature hashes, and ordered
@@ -142,6 +151,11 @@ Development service ports bind only to loopback. The local Compose credentials a
   candidate runs were retained and both validation APIs returned the complete audit graph.
   The selected strategies produced a `2.62%` compounded out-of-sample return but only a
   `25%` positive-fold rate; this is pipeline evidence, not an alpha or promotion claim.
+- The dual-provider gateway passed mocked OpenAI/Meta Responses API contract tests, route
+  selection, fail-closed credential handling, and immutable SQL/event audit tests. Bounded
+  live probes returned `LLM_PROVIDER_OK` from both `gpt-5.6-sol` and `muse-spark-1.3` using
+  project-scoped credentials in ignored `.env`; both calls also passed from the rebuilt
+  PostgreSQL-backed Compose API container.
 - Repository secret-pattern scan: passed after fixing a scanner self-match.
 
 ## Product intent and invariant boundaries
@@ -342,6 +356,12 @@ flowchart LR
     VALIDATE --> REPORT["Immutable folds + regime/selection diagnostics"]
     REPORT --> DB
     REPORT --> LEDGER
+    MODELROUTES["Versioned workload/model routing"] --> LLMGW["Provider-neutral LLM gateway"]
+    OPENAI["OpenAI Responses API"] --> LLMGW
+    METAMODEL["Meta Model Responses API"] --> LLMGW
+    LLMGW --> LLMAUDIT["Immutable invocation audit"]
+    LLMAUDIT --> DB
+    LLMAUDIT --> LEDGER
 ```
 
 Alembic migrations own the PostgreSQL/SQLite schema. Redis and MinIO are connected to both ingestion paths. The market stream client authenticates, reconnects with bounded exponential backoff, normalizes trades/quotes/minute bars, and requests historical repair for XNYS-session gaps; a real open-session frame capture remains outstanding. The Phase 2 path versions source documents, retains publication/ingestion/correction time, classifies source trust, resolves issuer entities, normalizes SEC facts, and deterministically links similar multi-source coverage to one catalyst.
@@ -362,6 +382,13 @@ out-of-sample windows separated by an embargo. Test windows cannot overlap. Sele
 only training metrics, while every test result is retained for rank and selection-failure
 analysis. Realized test returns define transparent up/down/sideways report buckets; they do
 not feed the strategy. Formal CPCV/PBO and Deflated Sharpe remain open.
+
+The front-loaded Phase 4A gateway gives OpenAI and Meta one internal Responses-style
+contract. `configs/model_routing.yaml` sends critical research/generation/critique to the
+premium OpenAI route and interactive explanation/routine pipelines to the value Meta route.
+Every attempt is bounded and audited; raw inputs are hashed rather than copied into the audit
+row. No generative strategy loop is connected yet, and neither model can reach runtime risk,
+portfolio, execution, or broker components.
 
 ### Target architecture
 
@@ -487,7 +514,10 @@ year or more of data.
 | Reference data | `src/agentic_quant/reference_data.py` | bitemporal corporate-action and historical-universe queries |
 | Research operations | `src/agentic_quant/research_cli.py` | synthetic smoke, stored-data baselines, parity audit, experiment listing |
 | Validation engine | `src/agentic_quant/validation.py` | rolling train/embargo/test selection, regime reports, selection diagnostics |
-| Schema migrations | `migrations/` | Alembic schema history through Phase 3C |
+| LLM gateway | `src/agentic_quant/llm.py` | versioned workload routing and bounded OpenAI/Meta Responses calls |
+| LLM persistence | `src/agentic_quant/llm_store.py` | immutable source/config lineage, output, usage, latency, and status |
+| LLM routing | `configs/model_routing.yaml` | premium/value model assignments and bounded provider settings |
+| Schema migrations | `migrations/` | Alembic schema history through front-loaded Phase 4A |
 
 ## Current executable risk baseline
 
@@ -526,6 +556,10 @@ Implemented endpoints:
 - `GET /v1/research/experiments/{experiment_run_id}/events`
 - `GET /v1/research/validations`
 - `GET /v1/research/validations/{validation_report_id}`
+- `GET /v1/llm/routes`
+- `GET /v1/llm/invocations`
+- `GET /v1/llm/invocations/{invocation_id}`
+- `POST /v1/llm/probe/{provider}`, restricted to development
 - Development-only read-only Alpaca probe, bar backfill, and option snapshot endpoints.
 - Development-only Alpaca News, SEC filing, and SEC company-facts ingestion endpoints.
 - `POST /v1/commands/pause`
@@ -539,6 +573,7 @@ make check
 make doctor
 make research-smoke
 make validation-smoke
+make llm-routes
 make docker-up
 make docker-doctor
 make docker-event-health
@@ -768,6 +803,42 @@ The Compose stack is currently intended to remain running for local inspection. 
 - Regimes are ex-post report labels based on test-window price movement and cannot affect
   candidate selection or trading decisions.
 - Formal record: `docs/adr/0009-walk-forward-validation.md`.
+
+### D019 — One scalable workflow across development and production
+
+- Date: 2026-09-04 PDT.
+- The user clarified that the product under construction is the workflow itself, not a local
+  research result tied to the current bounded dataset.
+- Decision: development and production use the same domain contracts, point-in-time rules,
+  idempotency, lineage, and orchestration. Environment changes affect only data windows,
+  partitions, concurrency, durable infrastructure, scheduling, and capacity.
+- Local fixtures and bounded real samples establish functional correctness. Synthetic volume
+  tests and later remote runs establish throughput; multi-year production data establishes
+  statistical reliability and calibrates market-impact/capacity assumptions.
+- New workflows must be resumable and partitionable rather than loading an unrestricted
+  history into memory or requiring one monolithic job.
+
+### D020 — Front-load configurable OpenAI and Meta connectivity
+
+- Date: 2026-09-04 PDT.
+- The user selected two model tiers: OpenAI `gpt-5.6-sol` for highest-quality critical
+  analysis and Meta `muse-spark-1.3` for lower-cost interactive explanations and routine
+  pipeline work. Workload assignments must later be editable in the Control Center.
+- Decision: implement the provider-neutral gateway before the full Phase 4 orchestrator so
+  Phases 3D, 5A, and 4 can proceed without another transport-design checkpoint.
+- Routes are versioned in `configs/model_routing.yaml`; model IDs, reasoning effort, token
+  limits, timeouts, retries, and cost tier are configuration rather than application logic.
+- Automatic provider fallback is disabled. It would silently alter cost and model behavior;
+  any future fallback or route change must be explicit, authenticated, and versioned.
+- Local LLM credentials must use project-specific `.env` variables. The gateway deliberately
+  ignores a machine-wide generic `OPENAI_API_KEY` so unrelated computer configuration cannot
+  be consumed accidentally.
+- The user supplied separate OpenAI and Meta Model API credentials. They are stored only in
+  ignored `.env`; no credential value is copied into Git, logs, the database, or this context.
+- All calls are bounded and auditable, while LLMs remain isolated from portfolio, risk,
+  execution, and broker credentials. Full strategy generation still waits for its typed
+  orchestration and independent rejection gates.
+- Formal record: `docs/adr/0010-configurable-dual-provider-llm-gateway.md`.
 
 ## Iteration and commit ledger
 
@@ -1161,7 +1232,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C013 — `Add walk-forward validation baseline`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `6d1bdfa`.
 - Date: 2026-09-04 PDT.
 - User intent: continue directly into the next research milestone.
 - Scope:
@@ -1196,25 +1267,64 @@ The Compose stack is currently intended to remain running for local inspection. 
   - Formal CPCV/PBO, Deflated Sharpe, promotion thresholds, larger remote datasets, and
     reference-data provider selection remain open.
 
+### C014 — `Add configurable dual-provider LLM gateway`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-04 PDT.
+- User intent: front-load OpenAI and Meta model connectivity so later research phases can be
+  completed without another provider-integration pause; keep workload allocation configurable.
+- Scope:
+  - Added a provider-neutral Responses API client for OpenAI `gpt-5.6-sol` and Meta
+    `muse-spark-1.3`, with bounded timeouts, retries, and output limits.
+  - Added versioned premium/value workload routing, deliberately without automatic fallback.
+  - Added immutable LLM invocation storage and ledger events for request/input hashes,
+    provider/model, prompt/route versions, output, usage, latency, and failure status through
+    Alembic revisions `20260904_0011`–`20260904_0012`.
+  - Added project-scoped credential settings, CLI route/probe/audit commands, read-only API
+    inspection, development-only probe endpoints, tests, runbook, ADR, and agent handoff docs.
+- Architecture/decision impact:
+  - Development and production share one provider-neutral gateway and routing contract;
+    configuration selects models and workload allocation without changing workflow code.
+  - The gateway is transport and audit infrastructure only. Models receive no broker
+    credentials and have no risk, promotion, portfolio, or execution authority.
+  - Project keys use `LLM_OPENAI_API_KEY` and `LLM_META_API_KEY`; generic machine-wide model
+    environment variables are intentionally ignored.
+- Validation:
+  - `make check` passed with Flake8, strict mypy across 38 source files, and 47 tests.
+  - Mocked OpenAI and Meta request/response contracts, bounded retry behavior, route
+    selection, persistence, event audit, and fail-closed credential handling passed.
+  - A fresh SQLite upgrade/check/downgrade/re-upgrade passed through `20260904_0012` with no
+    schema diff. Local doctor, rebuilt Docker/PostgreSQL doctor, route API, secret scan, and
+    diff checks passed; PostgreSQL is at revision `20260904_0012`.
+  - Project-scoped live probes succeeded from both the host and rebuilt Compose API against
+    OpenAI `gpt-5.6-sol` and Meta `muse-spark-1.3`. The first Meta call authenticated but
+    exhausted the original 32-token probe limit; the corrected 128-token probe completed and
+    reported reasoning usage. Probe reasoning effort and total timeout are explicitly bounded.
+- Expected global state after commit:
+  - Phase 3D and Phase 5A can proceed while the stable gateway remains ready for the later
+    evidence-bound Phase 4 research orchestrator.
+  - Both selected model providers are reachable through project-scoped configuration; the
+    full evidence-bound strategy orchestrator remains intentionally unimplemented.
+
 ## Open work
 
 Ordered near-term work:
 
-1. During the next U.S. market session, finish Phase 1B real frame/reconnect/gap checks.
-2. Select and integrate licensed corporate-action and historical-universe providers.
-3. Extend replay with multi-bar partial fills, order cancellation, bid/ask spread and quote
-   inputs, symbol changes, and delistings.
-4. Add CPCV/PBO and Deflated Sharpe, then define explicit candidate/champion promotion
+1. Add CPCV/PBO and Deflated Sharpe, then define explicit candidate/champion promotion
    thresholds after the candidate set and sample-size policy are frozen.
+2. Implement Phase 5A correctness-critical market realism: governed reference-data imports,
+   spread-aware fills, data-quality failure paths, and scalable resumable jobs.
+3. Complete the evidence-bound LLM research orchestrator and calibrated ML layer on top of
+   the front-loaded gateway.
+4. During the next U.S. market session, finish Phase 1B real frame/reconnect/gap checks.
 5. Design remote backfill jobs and identify equity/options sources with suitable historical
    coverage, retention, and licensing; do not require those large downloads for local tests.
-6. Add Redis consumer groups, a transactional outbox, dead-letter replay, provider lag,
+6. Extend replay with multi-bar partial fills, cancellation, symbol changes, delistings, and
+   later capacity calibration on production-scale data.
+7. Add Redis consumer groups, a transactional outbox, dead-letter replay, provider lag,
    sequence-gap, reconciliation, and data-quality dashboards.
-7. Build a labeled corpus and measure cross-provider catalyst dedup precision/recall.
-8. Implement the LLM strategy-research orchestrator only after the experiment and validation
-   contracts can independently reject its candidates.
-9. Add calibrated ML baselines and a deterministic ensemble/experiment scheduler.
-10. Add authentication/authorization, build the remote Trading Control Center and
+8. Build a labeled corpus and measure cross-provider catalyst dedup precision/recall.
+9. Add authentication/authorization, build the remote Trading Control Center and
     citation-bound conversational research copilot, create the GitHub remote, and later
     validate the guarded cloud pipeline on a selected VPS.
 

@@ -16,10 +16,17 @@ from agentic_quant.document_ingestion import (
     FundamentalsIngestionService,
 )
 from agentic_quant.document_store import DocumentStore
-from agentic_quant.domain import EventEnvelope
+from agentic_quant.domain import EventEnvelope, LLMProviderName, LLMWorkload
 from agentic_quant.event_bus import NullEventPublisher, RedisStreamPublisher
 from agentic_quant.ids import uuid7
 from agentic_quant.ledger import EventLedger
+from agentic_quant.llm import (
+    LLMConfigurationError,
+    LLMProviderError,
+    LLMRequest,
+    build_llm_gateway,
+)
+from agentic_quant.llm_store import LLMStore
 from agentic_quant.market_ingestion import MarketDataIngestionService
 from agentic_quant.market_store import MarketDataStore
 from agentic_quant.migrations import upgrade_database
@@ -93,6 +100,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     document_store = DocumentStore(ledger.engine)
     research_store = ResearchStore(ledger.engine)
     reference_data_store = ReferenceDataStore(ledger.engine)
+    llm_store = LLMStore(ledger.engine)
+    llm_gateway = build_llm_gateway(app_settings, store=llm_store, ledger=ledger)
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):  # type: ignore[no-untyped-def]
@@ -110,8 +119,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         application.state.document_store = document_store
         application.state.research_store = research_store
         application.state.reference_data_store = reference_data_store
+        application.state.llm_store = llm_store
+        application.state.llm_gateway = llm_gateway
         application.state.new_exposure_paused = app_settings.global_new_exposure_paused
         yield
+        await llm_gateway.aclose()
         ledger.engine.dispose()
 
     application = FastAPI(
@@ -169,6 +181,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 else None
             ),
             "phase_1b_open_session_validation": "pending",
+            "llm_routing_version": llm_gateway.routing.version,
+            "openai_configured": app_settings.openai_configured,
+            "meta_model_configured": app_settings.meta_model_configured,
             "alpaca_configured": bool(
                 app_settings.alpaca_api_key and app_settings.alpaca_api_secret
             ),
@@ -181,6 +196,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             **document_store.health_summary(),
             **research_store.health_summary(),
             **reference_data_store.health_summary(),
+            **llm_store.health_summary(),
             "raw_archive": "healthy" if application.state.archive.health() else "unhealthy",
             "event_bus": "healthy" if application.state.publisher.health() else "unhealthy",
             "alpaca_configured": bool(
@@ -239,6 +255,57 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if report is None:
             raise HTTPException(status_code=404, detail="validation report not found")
         return report
+
+    @application.get("/v1/llm/routes")
+    def llm_routes() -> dict[str, Any]:
+        return llm_gateway.status()
+
+    @application.get("/v1/llm/invocations")
+    def llm_invocations(
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> list[dict[str, Any]]:
+        return llm_store.recent(limit=limit)
+
+    @application.get("/v1/llm/invocations/{invocation_id}")
+    def llm_invocation(invocation_id: str) -> dict[str, Any]:
+        invocation = llm_store.get(invocation_id)
+        if invocation is None:
+            raise HTTPException(status_code=404, detail="LLM invocation not found")
+        return invocation
+
+    @application.post("/v1/llm/probe/{provider}")
+    async def llm_probe(provider: LLMProviderName) -> dict[str, Any]:
+        require_development()
+        workload = (
+            LLMWorkload.CRITICAL_RESEARCH
+            if provider == LLMProviderName.OPENAI
+            else LLMWorkload.INTERACTIVE_EXPLANATION
+        )
+        try:
+            invocation = await llm_gateway.complete(
+                LLMRequest(
+                    workload=workload,
+                    prompt_version="llm_probe@0.1.0",
+                    instructions=(
+                        "You are a deterministic API connectivity probe. "
+                        "Do not call tools."
+                    ),
+                    input_text="Reply with exactly LLM_PROVIDER_OK.",
+                    max_output_tokens=128,
+                    reasoning_effort=(
+                        "low"
+                        if provider == LLMProviderName.OPENAI
+                        else "minimal"
+                    ),
+                    timeout_seconds=60,
+                ),
+                provider_override=provider,
+            )
+        except LLMConfigurationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except LLMProviderError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return invocation.model_dump(mode="json")
 
     @application.get("/v1/events")
     def events(limit: int = Query(default=50, ge=1, le=500)) -> list[dict[str, Any]]:

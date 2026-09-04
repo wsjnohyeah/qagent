@@ -45,6 +45,9 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert system_status["development_max_backfill_days"] == 120
         assert system_status["development_max_intraday_backfill_days"] == 7
         assert system_status["phase_1b_open_session_validation"] == "pending"
+        assert system_status["llm_routing_version"] == "llm_routing@0.1.0"
+        assert system_status["openai_configured"] is False
+        assert system_status["meta_model_configured"] is False
         demo = client.post("/v1/demo/run")
         assert demo.status_code == 200
         correlation_id = demo.json()["correlation_id"]
@@ -62,6 +65,7 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert data_health["backtest_portfolio_events"] == 0
         assert data_health["validation_reports"] == 0
         assert data_health["validation_folds"] == 0
+        assert data_health["llm_invocations"] == 0
         assert data_health["alpaca_configured"] is False
         assert client.get("/v1/research/experiments").json() == []
         missing_events = client.get("/v1/research/experiments/missing/events")
@@ -69,6 +73,15 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert client.get("/v1/research/validations").json() == []
         missing_validation = client.get("/v1/research/validations/missing")
         assert missing_validation.status_code == 404
+        routes = client.get("/v1/llm/routes").json()
+        assert routes["routes"]["critical_research"] == "openai"
+        assert routes["routes"]["interactive_explanation"] == "meta"
+        assert routes["automatic_fallback"] is False
+        assert client.get("/v1/llm/invocations").json() == []
+        missing_invocation = client.get("/v1/llm/invocations/missing")
+        assert missing_invocation.status_code == 404
+        missing_llm_credentials = client.post("/v1/llm/probe/openai")
+        assert missing_llm_credentials.status_code == 503
         oversized_backfill = client.post(
             "/v1/market-data/alpaca/backfill",
             json={
