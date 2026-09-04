@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     alpaca_stock_stream_base_url: str = "wss://stream.data.alpaca.markets/v2"
     alpaca_stock_feed: str = "sip"
     alpaca_option_feed: str = "opra"
+    market_calendar: str = "XNYS"
     api_host: str = "127.0.0.1"
     api_port: int = Field(default=8000, ge=1, le=65535)
 

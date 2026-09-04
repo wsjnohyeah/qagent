@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import Engine, func, insert, select, update
@@ -245,3 +245,15 @@ class MarketDataStore:
             "option_snapshots": int(option_count),
             "latest_bar_event_time": last_event,
         }
+
+    def latest_bar_event_time(self, *, symbol: str, source: str, feed: str) -> datetime | None:
+        statement = select(func.max(market_bars.c.event_time)).where(
+            (market_bars.c.symbol == symbol.upper())
+            & (market_bars.c.source == source)
+            & (market_bars.c.feed == feed)
+        )
+        with self.engine.connect() as connection:
+            value = connection.execute(statement).scalar_one()
+        if not isinstance(value, datetime):
+            return None
+        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)

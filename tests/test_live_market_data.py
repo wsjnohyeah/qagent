@@ -9,6 +9,7 @@ from agentic_quant.archive import FileRawArchive
 from agentic_quant.config import Settings
 from agentic_quant.ledger import EventLedger
 from agentic_quant.live_ingestion import LiveMarketDataService
+from agentic_quant.market_calendar import MarketGapDetector
 from agentic_quant.market_store import MarketDataStore
 from agentic_quant.migrations import upgrade_database
 from agentic_quant.providers.alpaca_stream import normalize_stream_message
@@ -108,3 +109,15 @@ def test_live_frame_archives_persists_publishes_and_deduplicates(
     assert health["market_quotes"] == 1
     assert health["market_bars"] == 1
     assert health["raw_objects"] == 1
+
+
+def test_gap_detector_uses_exchange_sessions() -> None:
+    detector = MarketGapDetector()
+    assert detector.observe("AAPL", datetime(2026, 9, 3, 14, 30, tzinfo=UTC)) is None
+    gap = detector.observe("AAPL", datetime(2026, 9, 3, 14, 33, tzinfo=UTC))
+    assert gap is not None
+    assert gap.missing_minutes == 2
+    assert gap.missing_from == datetime(2026, 9, 3, 14, 31, tzinfo=UTC)
+
+    # The overnight close-to-open boundary is not an intraday data gap.
+    assert detector.observe("AAPL", datetime(2026, 9, 4, 13, 30, tzinfo=UTC)) is None

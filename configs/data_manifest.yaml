@@ -1,4 +1,4 @@
-version: data_manifest@0.1.0
+version: data_manifest@0.2.0
 providers:
   synthetic:
     enabled: true
@@ -10,3 +10,4 @@ providers:
     stock_feed: sip
     option_feed: opra
     execution_enabled: false
+market_calendar: XNYS

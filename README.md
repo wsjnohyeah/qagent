@@ -121,7 +121,7 @@ Capture a bounded live SIP stream during market hours:
 SYMBOLS=SPY,AAPL SECONDS=60 MAX_FRAMES=100 make docker-alpaca-stream
 ```
 
-Every accepted provider response is content-addressed in MinIO, normalized into PostgreSQL with uniqueness constraints, recorded in the event ledger, and published to Redis Streams. Replaying identical historical data does not create duplicate normalized records or events.
+Every accepted provider response is content-addressed in MinIO, normalized into PostgreSQL with uniqueness constraints, recorded in the event ledger, and published to Redis Streams. Replaying identical historical data does not create duplicate normalized records or events. The live collector uses the official XNYS exchange calendar to detect missing minutes within a trading session and requests a bounded REST repair.
 
 ## Repository map
 

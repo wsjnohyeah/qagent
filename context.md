@@ -80,7 +80,7 @@ Development service ports bind only to loopback. The local Compose credentials a
 - `make check`: passed.
 - Flake8: passed.
 - Strict mypy: passed for 10 source files.
-- Pytest: 13 passed.
+- Pytest: 14 passed.
 - `make doctor`: passed against the local-lite SQLite profile.
 - `make docker-doctor`: passed against the PostgreSQL-backed Compose profile.
 - PostgreSQL query: passed; the first container replay stored six lineage events.
@@ -91,7 +91,7 @@ Development service ports bind only to loopback. The local Compose credentials a
 - Alpaca entitlements: SIP historical REST, OPRA option snapshot REST, and SIP WebSocket authentication passed.
 - Real historical test: 391 AAPL one-minute bars inserted, zero duplicates after identical replay.
 - Real options test: 10 AAPL option snapshots inserted from one bounded page, zero duplicates after replay.
-- Live trade/quote/bar normalization and persistence: synthetic frames passed; real frames await an open market session.
+- Live trade/quote/bar normalization, persistence, and XNYS-session gap detection: synthetic frames passed; real frames await an open market session.
 - Repository secret-pattern scan: passed after fixing a scanner self-match.
 
 ## Product intent and invariant boundaries
@@ -132,7 +132,7 @@ flowchart LR
     INGEST --> REDIS["Redis Streams"]
 ```
 
-Alembic migrations own the PostgreSQL/SQLite schema. Redis and MinIO are connected to the Phase 1 ingestion path. The live stream client authenticates and normalizes trades, quotes, and minute bars; a real open-session frame capture remains outstanding.
+Alembic migrations own the PostgreSQL/SQLite schema. Redis and MinIO are connected to the Phase 1 ingestion path. The live stream client authenticates, reconnects with bounded exponential backoff, normalizes trades/quotes/minute bars, and requests historical repair for XNYS-session gaps; a real open-session frame capture remains outstanding.
 
 ### Target architecture
 
@@ -202,6 +202,7 @@ flowchart TB
 | Raw archive | `src/agentic_quant/archive.py` | content-addressed local or MinIO JSON evidence |
 | Market persistence | `src/agentic_quant/market_store.py` | idempotent bars, trades, quotes, options, ingestion runs |
 | Event transport | `src/agentic_quant/event_bus.py` | Redis Streams publisher with local no-op fallback |
+| Market calendar | `src/agentic_quant/market_calendar.py` | XNYS sessions and missing-minute detection |
 | Schema migrations | `migrations/` | Alembic schema history through Phase 1 |
 
 ## Current executable risk baseline
@@ -366,7 +367,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C003 — `Add read-only Alpaca market-data foundation`
 
-- Git hash: resolve with `git log --grep='Add read-only Alpaca market-data foundation'` after commit.
+- Git hash: `f31f3b6`
 - Date: 2026-09-03 PDT.
 - User intent: begin Phase 1 by connecting the paid Alpaca data subscription and verifying the data pipeline end to end.
 - Scope:
@@ -397,12 +398,35 @@ The Compose stack is currently intended to remain running for local inspection. 
   - SIP streaming is authenticated and the live frame path is implemented, but real frame persistence remains unverified until market hours.
   - Gap repair, durable consumer groups/outbox, and broader data-quality monitoring remain open.
 
+### C004 — `Add market-session gap repair`
+
+- Git hash: resolve with `git log --grep='Add market-session gap repair'` after commit.
+- Date: 2026-09-03 PDT.
+- User intent: continue Phase 1 after real Alpaca credentials and entitlements were validated.
+- Scope:
+  - Added `exchange-calendars` and a configurable `XNYS` market calendar.
+  - Added same-session missing-minute detection that does not treat overnight/weekend boundaries as gaps.
+  - Wired detected live-bar gaps to bounded Alpaca REST backfill in the live collector.
+  - Added the market-data operations runbook and surfaced Phase 1 data state in the Control Center.
+  - Hardened provider transport retries and production migration execution.
+- Architecture/decision impact:
+  - Exchange sessions, not naive weekday or wall-clock logic, now govern intraday gap detection.
+  - Automatic repair remains read-only and writes through the same raw/archive/normalize/event path.
+- Validation:
+  - Fourteen tests, lint, strict typing, fresh migration upgrade/check/downgrade, Docker doctor, and secret scan passed.
+  - SIP/OPRA entitlement and SIP WebSocket subscription probes passed after the final container rebuild.
+  - A bounded five-second after-hours stream completed cleanly with zero frames, as expected while the market was closed.
+  - Real open-session reconnect and gap-repair behavior remains a time-dependent validation gate.
+- Expected global state after commit:
+  - Phase 1 code covers historical equity bars, option snapshots, live stock stream parsing, reconnects, and gap repair.
+  - Historical and snapshot paths are externally verified; live frame persistence remains pending market hours.
+
 ## Open work
 
 Ordered near-term work:
 
 1. Capture real SIP trades/quotes/bars during an open market session and validate reconnect behavior.
-2. Add market-session-aware gap detection and automatic REST repair.
+2. Exercise live reconnect and automatic gap repair during an open market session.
 3. Add Redis consumer groups, a transactional outbox, and dead-letter replay.
 4. Add provider lag, sequence-gap, bar/trade reconciliation, and data-quality dashboards.
 5. Confirm Alpaca retention/licensing and determine the long-history options vendor.

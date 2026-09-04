@@ -66,7 +66,7 @@ During a U.S. market session:
 SYMBOLS=SPY,AAPL SECONDS=60 MAX_FRAMES=100 make docker-alpaca-stream
 ```
 
-The command authenticates to the configured feed, subscribes to trades, quotes, and minute bars, archives each accepted frame, persists normalized records, and publishes events to Redis. It exits when either limit is reached.
+The command authenticates to the configured feed, subscribes to trades, quotes, and minute bars, archives each accepted frame, persists normalized records, and publishes events to Redis. It exits when either limit is reached. An XNYS-calendar-aware detector identifies missing minutes inside a session and requests a REST backfill for the missing interval.
 
 Real live-frame persistence remains an explicit validation gate. Authentication alone is not evidence that frames were received.
 
@@ -83,7 +83,7 @@ The Control Center at `http://127.0.0.1:8000` shows the same high-level state.
 ## Failure behavior
 
 - Missing credentials: command fails before a provider request.
-- HTTP transport errors, 429 responses, and server errors: bounded exponential retry.
+- HTTP transport errors, 429 responses, server errors, and stream disconnects: bounded exponential retry/reconnect.
 - Invalid or unauthorized entitlements: explicit failed capability; no fallback to a weaker feed.
 - Duplicate historical bars, trades, quotes, or option snapshots: ignored by database uniqueness constraints and not republished.
 - Redis, MinIO, or database unavailable: readiness fails; ingestion does not pretend to be healthy.

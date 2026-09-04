@@ -11,6 +11,7 @@ from agentic_quant.event_bus import NullEventPublisher, RedisStreamPublisher
 from agentic_quant.ledger import EventLedger
 from agentic_quant.live_ingestion import LiveMarketDataService
 from agentic_quant.market_ingestion import MarketDataIngestionService
+from agentic_quant.market_calendar import MarketGapDetector
 from agentic_quant.market_store import MarketDataStore
 from agentic_quant.migrations import upgrade_database
 from agentic_quant.option_ingestion import OptionDataIngestionService
@@ -134,6 +135,7 @@ async def _stream(settings: Settings, args: argparse.Namespace) -> None:
         ledger=ledger,
         publisher=publisher,
         feed=settings.alpaca_stock_feed,
+        gap_detector=MarketGapDetector(settings.market_calendar),
     )
     stream = AlpacaStockStream(
         api_key=settings.alpaca_api_key.get_secret_value(),
@@ -142,18 +144,58 @@ async def _stream(settings: Settings, args: argparse.Namespace) -> None:
         base_url=settings.alpaca_stock_stream_base_url,
     )
     totals = {"frames": 0, "messages_received": 0, "records_inserted": 0}
+    async with _provider(settings) as backfill_provider:
+        backfill_service = MarketDataIngestionService(
+            provider=backfill_provider,
+            archive=build_raw_archive(settings),
+            store=MarketDataStore(ledger.engine),
+            ledger=ledger,
+            publisher=publisher,
+        )
+        await _consume_stream(
+            stream=stream,
+            service=service,
+            backfill_service=backfill_service,
+            symbols=args.symbols,
+            seconds=args.seconds,
+            max_frames=args.max_frames,
+            totals=totals,
+            feed=settings.alpaca_stock_feed,
+        )
+    print(json.dumps({**totals, "status": "COMPLETED"}, indent=2))
+
+
+async def _consume_stream(
+    *,
+    stream: AlpacaStockStream,
+    service: LiveMarketDataService,
+    backfill_service: MarketDataIngestionService,
+    symbols: str,
+    seconds: int,
+    max_frames: int,
+    totals: dict[str, int],
+    feed: str,
+) -> None:
     try:
-        async with asyncio.timeout(args.seconds):
-            async for frame in stream.frames(args.symbols.split(",")):
+        async with asyncio.timeout(seconds):
+            async for frame in stream.frames(symbols.split(",")):
                 summary = service.ingest_frame(frame)
                 totals["frames"] += 1
                 totals["messages_received"] += summary.messages_received
                 totals["records_inserted"] += summary.records_inserted
-                if args.max_frames and totals["frames"] >= args.max_frames:
+                for gap in summary.gaps:
+                    await backfill_service.ingest_stock_bars(
+                        StockBarsRequest(
+                            symbol=gap.symbol,
+                            start=gap.missing_from,
+                            end=gap.missing_to,
+                            feed=feed,
+                        )
+                    )
+                if max_frames and totals["frames"] >= max_frames:
                     break
     except TimeoutError:
         pass
-    print(json.dumps({**totals, "status": "COMPLETED"}, indent=2))
 
 
 def main() -> None:
