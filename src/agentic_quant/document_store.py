@@ -438,6 +438,85 @@ class DocumentStore:
                 for row in connection.execute(statement)
             ]
 
+    def research_documents_as_of(
+        self,
+        *,
+        symbol: str,
+        as_of: datetime,
+        since: datetime,
+        limit: int = 12,
+    ) -> list[dict[str, Any]]:
+        """Return the newest version that was actually available by the research cutoff."""
+        if as_of.tzinfo is None or since.tzinfo is None:
+            raise ValueError("Research document bounds must be timezone-aware")
+        if since >= as_of:
+            raise ValueError("Research document start must be before as_of")
+        latest_available = (
+            select(
+                source_document_versions.c.document_id,
+                func.max(source_document_versions.c.ingested_at).label(
+                    "latest_ingested_at"
+                ),
+            )
+            .where(source_document_versions.c.ingested_at <= as_of)
+            .group_by(source_document_versions.c.document_id)
+            .subquery()
+        )
+        statement = (
+            select(
+                source_documents.c.document_id,
+                source_documents.c.provider,
+                source_documents.c.canonical_url,
+                source_documents.c.source_kind,
+                source_documents.c.source_tier,
+                source_documents.c.publisher,
+                source_documents.c.published_at,
+                source_document_versions.c.version_id,
+                source_document_versions.c.content_sha256,
+                source_document_versions.c.title,
+                source_document_versions.c.summary,
+                source_document_versions.c.body_text,
+                source_document_versions.c.ingested_at,
+            )
+            .join(
+                document_symbols,
+                document_symbols.c.document_id == source_documents.c.document_id,
+            )
+            .join(
+                latest_available,
+                latest_available.c.document_id == source_documents.c.document_id,
+            )
+            .join(
+                source_document_versions,
+                and_(
+                    source_document_versions.c.document_id
+                    == latest_available.c.document_id,
+                    source_document_versions.c.ingested_at
+                    == latest_available.c.latest_ingested_at,
+                ),
+            )
+            .where(
+                and_(
+                    document_symbols.c.symbol == symbol.upper(),
+                    source_documents.c.published_at >= since,
+                    source_documents.c.published_at <= as_of,
+                )
+            )
+            .order_by(
+                source_documents.c.published_at.desc(),
+                source_documents.c.document_id.asc(),
+            )
+            .limit(limit)
+        )
+        with self.engine.connect() as connection:
+            return [
+                self._normalize_row_times(
+                    dict(row._mapping),
+                    ("published_at", "ingested_at"),
+                )
+                for row in connection.execute(statement)
+            ]
+
     def recent_catalysts(self, *, limit: int = 50) -> list[dict[str, Any]]:
         statement = catalysts.select().order_by(catalysts.c.event_time.desc()).limit(limit)
         with self.engine.connect() as connection:

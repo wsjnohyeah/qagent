@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     llm_openai_api_key: SecretStr | None = None
     llm_meta_api_key: SecretStr | None = None
     llm_routing_path: Path = Path("./configs/model_routing.yaml")
+    llm_budget_path: Path = Path("./configs/llm_budget.yaml")
     research_promotion_policy_path: Path = Path(
         "./configs/research_promotion_policy.yaml"
     )

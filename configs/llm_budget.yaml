@@ -1,0 +1,46 @@
+version: llm_budget@0.1.0
+
+# These are conservative operator estimates used only for pre-call budget reservation.
+# They are not provider invoices; review them against current contracts before production.
+pricing_usd_per_million_tokens:
+  openai:
+    input: "5.00"
+    output: "20.00"
+  meta:
+    input: "0.50"
+    output: "2.00"
+
+reservation:
+  # One input token per UTF-8 byte intentionally over-reserves for a fail-closed ceiling.
+  input_bytes_per_token: 1
+
+limits:
+  project_daily:
+    max_tokens: 500000
+    max_estimated_cost_usd: "20.00"
+  project_monthly:
+    max_tokens: 5000000
+    max_estimated_cost_usd: "200.00"
+  provider_daily:
+    openai:
+      max_tokens: 300000
+      max_estimated_cost_usd: "18.00"
+    meta:
+      max_tokens: 400000
+      max_estimated_cost_usd: "5.00"
+  workload_daily:
+    interactive_explanation:
+      max_tokens: 150000
+      max_estimated_cost_usd: "5.00"
+    routine_pipeline:
+      max_tokens: 150000
+      max_estimated_cost_usd: "5.00"
+    critical_research:
+      max_tokens: 200000
+      max_estimated_cost_usd: "15.00"
+    strategy_generation:
+      max_tokens: 200000
+      max_estimated_cost_usd: "15.00"
+    strategy_critique:
+      max_tokens: 200000
+      max_estimated_cost_usd: "15.00"

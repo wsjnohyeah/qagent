@@ -1,4 +1,4 @@
-version: data_manifest@0.8.0
+version: data_manifest@0.9.0
 providers:
   synthetic:
     enabled: true
@@ -54,3 +54,12 @@ research:
     availability_timestamp_required: true
     governed_import_manifest_required: true
   synthetic_smoke_is_alpha_evidence: false
+intelligence:
+  analysis_schema: research_analysis@0.1.0
+  graph_schema: ai_infrastructure_graph@0.1.0
+  point_in_time_document_versions: true
+  citations_required_for_claims: true
+  unknown_citations_fail_closed: true
+  insufficient_evidence_abstains_before_llm_call: true
+  budget_policy: llm_budget@0.1.0
+  llm_has_execution_authority: false

@@ -40,7 +40,9 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert ready.status_code == 200
         assert ready.json()["live_trading_enabled"] is False
         system_status = client.get("/v1/system/status").json()
-        assert system_status["phase"] == "5a-reliable-workflows-plus-4b-llm-control-center"
+        assert system_status["phase"] == (
+            "4c-evidence-bound-analyst-plus-5a-reliable-workflows"
+        )
         assert system_status["data_operating_scope"] == "bounded_correctness_samples"
         assert system_status["development_max_backfill_days"] == 120
         assert system_status["development_max_intraday_backfill_days"] == 7
@@ -67,6 +69,9 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert data_health["validation_folds"] == 0
         assert data_health["llm_invocations"] == 0
         assert data_health["llm_routing_revisions"] == 0
+        assert data_health["llm_budget_windows"] == 0
+        assert data_health["llm_budget_reservations"] == 0
+        assert data_health["research_analyses"] == 0
         assert data_health["data_quality_reports"] == 1
         assert data_health["failed_data_quality_reports"] == 0
         assert data_health["workflow_jobs"] == 0
@@ -110,6 +115,11 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert len(history) == 1
         assert history[0]["reason"] == "API route revision test"
         assert client.get("/v1/llm/invocations").json() == []
+        budget = client.get("/v1/llm/budget").json()
+        assert budget["policy_version"] == "llm_budget@0.1.0"
+        assert budget["windows"] == []
+        assert client.get("/v1/intelligence/analyses").json() == []
+        assert client.get("/v1/decision-inspector/missing").status_code == 404
         missing_invocation = client.get("/v1/llm/invocations/missing")
         assert missing_invocation.status_code == 404
         missing_llm_credentials = client.post("/v1/llm/probe/openai")

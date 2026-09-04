@@ -70,9 +70,14 @@ Phase 5A adds fail-closed market-data checks, explicit half-spread fill cost, go
 corporate-action/universe imports, and durable resumable backfill partitions. These are
 scale-independent workflow guarantees; they do not require a large local dataset.
 
-Phase 4A adds an audited Responses API gateway for OpenAI GPT-5.6 Sol and Meta Muse Spark
+Phase 4 adds an audited Responses API gateway for OpenAI GPT-5.6 Sol and Meta Muse Spark
 1.3. Versioned workload routing assigns premium and value-tier models without giving either
 provider access to broker credentials, risk authority, or order submission.
+
+The evidence-bound analyst retrieves only document versions known at the requested cutoff,
+requires structured research-only output and exact citations, abstains on inadequate
+evidence, and records a Decision Inspector lineage graph. Atomic token/estimated-cost budget
+reservations stop over-budget calls before they reach a provider.
 
 Phase 4B exposes that gateway in the local Control Center. The operator can create immutable
 workload-routing revisions and chat through `Auto`, OpenAI, or Meta while preserving model,
@@ -335,11 +340,15 @@ AGENTS.md                mandatory operating rules for coding/deployment agents
 - `GET /v1/research/validations`
 - `GET /v1/research/validations/{validation_report_id}`
 - `GET /v1/llm/routes`
+- `GET /v1/llm/budget`
 - `PUT /v1/llm/routes` — development only; creates an immutable complete routing revision
 - `GET /v1/llm/routes/history`
 - `POST /v1/llm/chat` — development only; incurs a bounded provider call
 - `GET /v1/llm/invocations`
 - `GET /v1/llm/invocations/{invocation_id}`
+- `POST /v1/intelligence/analyze` — development only; evidence-bound paid analysis
+- `GET /v1/intelligence/analyses`
+- `GET /v1/decision-inspector/{analysis_id}`
 - `POST /v1/llm/probe/{provider}` — development only; incurs a bounded provider call
 - `POST /v1/market-data/alpaca/probe` — development only
 - `POST /v1/market-data/alpaca/backfill` — development only

@@ -21,12 +21,22 @@ from agentic_quant.data_quality import MarketDataQualityService
 from agentic_quant.domain import EventEnvelope, LLMProviderName, LLMWorkload
 from agentic_quant.event_bus import NullEventPublisher, RedisStreamPublisher
 from agentic_quant.ids import uuid7
+from agentic_quant.intelligence import (
+    EvidenceBoundResearchAnalyst,
+    IntelligenceStore,
+    ResearchEvidenceRetriever,
+)
 from agentic_quant.ledger import EventLedger
 from agentic_quant.llm import (
     LLMConfigurationError,
     LLMProviderError,
     LLMRequest,
     build_llm_gateway,
+)
+from agentic_quant.llm_budget import (
+    LLMBudgetExceededError,
+    LLMBudgetManager,
+    load_llm_budget_policy,
 )
 from agentic_quant.llm_store import LLMStore
 from agentic_quant.market_ingestion import MarketDataIngestionService
@@ -128,6 +138,13 @@ class LLMChatRequest(BaseModel):
         return self
 
 
+class ResearchAnalysisRequest(BaseModel):
+    symbol: str = Field(min_length=1, max_length=24, pattern=r"^[A-Za-z.\-]+$")
+    as_of: datetime
+    feature_snapshot_id: str = Field(min_length=1, max_length=36)
+    horizon: str = Field(default="5 trading days", min_length=1, max_length=40)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     app_settings = settings or Settings()
     ledger = EventLedger(app_settings.database_url)
@@ -135,13 +152,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     research_store = ResearchStore(ledger.engine)
     reference_data_store = ReferenceDataStore(ledger.engine)
     llm_store = LLMStore(ledger.engine)
+    intelligence_store = IntelligenceStore(ledger.engine, ledger)
     data_quality_service = MarketDataQualityService(
         ledger.engine,
         ledger,
         calendar_name=app_settings.market_calendar,
     )
     workflow_job_store = WorkflowJobStore(ledger.engine)
-    llm_gateway = build_llm_gateway(app_settings, store=llm_store, ledger=ledger)
+    llm_budget_manager = LLMBudgetManager(
+        ledger.engine,
+        load_llm_budget_policy(app_settings.llm_budget_path),
+    )
+    llm_gateway = build_llm_gateway(
+        app_settings,
+        store=llm_store,
+        ledger=ledger,
+        budget_manager=llm_budget_manager,
+    )
+    evidence_retriever = ResearchEvidenceRetriever(document_store)
+    research_analyst = EvidenceBoundResearchAnalyst(
+        llm_gateway,
+        intelligence_store,
+        code_git_sha=app_settings.source_git_sha or "UNAVAILABLE",
+    )
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):  # type: ignore[no-untyped-def]
@@ -161,6 +194,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         application.state.reference_data_store = reference_data_store
         application.state.llm_store = llm_store
         application.state.llm_gateway = llm_gateway
+        application.state.intelligence_store = intelligence_store
         application.state.new_exposure_paused = app_settings.global_new_exposure_paused
         yield
         await llm_gateway.aclose()
@@ -209,7 +243,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "live_trading_enabled": False,
             "new_exposure_paused": application.state.new_exposure_paused,
             "database": "healthy" if ledger.health() else "unhealthy",
-            "phase": "5a-reliable-workflows-plus-4b-llm-control-center",
+            "phase": "4c-evidence-bound-analyst-plus-5a-reliable-workflows",
             "data_operating_scope": app_settings.data_operating_scope,
             "development_max_backfill_days": (
                 app_settings.development_max_backfill_days
@@ -239,6 +273,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             **research_store.health_summary(),
             **reference_data_store.health_summary(),
             **llm_store.health_summary(),
+            **llm_budget_manager.health_summary(),
+            **intelligence_store.health_summary(),
             **data_quality_service.health_summary(),
             **workflow_job_store.health_summary(),
             "raw_archive": "healthy" if application.state.archive.health() else "unhealthy",
@@ -316,6 +352,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def llm_routes() -> dict[str, Any]:
         return llm_gateway.status()
 
+    @application.get("/v1/llm/budget")
+    def llm_budget() -> dict[str, Any]:
+        return llm_budget_manager.summary()
+
     @application.put("/v1/llm/routes")
     def update_llm_routes(request: LLMRouteUpdate) -> dict[str, Any]:
         require_development()
@@ -370,6 +410,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         except LLMConfigurationError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except LLMBudgetExceededError as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
         except LLMProviderError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         return invocation.model_dump(mode="json")
@@ -386,6 +428,46 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if invocation is None:
             raise HTTPException(status_code=404, detail="LLM invocation not found")
         return invocation
+
+    @application.post("/v1/intelligence/analyze")
+    async def research_analysis(request: ResearchAnalysisRequest) -> dict[str, Any]:
+        require_development()
+        if request.as_of.tzinfo is None:
+            raise HTTPException(status_code=422, detail="as_of must include a timezone")
+        snapshot = research_store.feature_snapshot(request.feature_snapshot_id)
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail="feature snapshot not found")
+        try:
+            bundle = evidence_retriever.retrieve(
+                feature_snapshot=snapshot,
+                as_of=request.as_of,
+            )
+            record = await research_analyst.analyze(
+                bundle,
+                horizon=request.horizon,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except LLMConfigurationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except LLMBudgetExceededError as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
+        except LLMProviderError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return record.model_dump(mode="json")
+
+    @application.get("/v1/intelligence/analyses")
+    def research_analyses_endpoint(
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> list[dict[str, Any]]:
+        return intelligence_store.recent(limit=limit)
+
+    @application.get("/v1/decision-inspector/{analysis_id}")
+    def decision_inspector(analysis_id: str) -> dict[str, Any]:
+        graph = intelligence_store.decision_graph(analysis_id)
+        if graph is None:
+            raise HTTPException(status_code=404, detail="research analysis not found")
+        return graph
 
     @application.post("/v1/llm/probe/{provider}")
     async def llm_probe(provider: LLMProviderName) -> dict[str, Any]:
@@ -417,6 +499,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         except LLMConfigurationError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except LLMBudgetExceededError as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
         except LLMProviderError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         return invocation.model_dump(mode="json")

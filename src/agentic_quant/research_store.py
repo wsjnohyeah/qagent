@@ -313,6 +313,19 @@ class ResearchStore:
             row = connection.execute(select(feature_snapshots).where(identity)).one()
         return self._feature_snapshot_from_row(dict(row._mapping))
 
+    def feature_snapshot(
+        self,
+        feature_snapshot_id: str,
+    ) -> PointInTimeFeatureSnapshot | None:
+        statement = select(feature_snapshots).where(
+            feature_snapshots.c.feature_snapshot_id == feature_snapshot_id
+        )
+        with self.engine.connect() as connection:
+            row = connection.execute(statement).one_or_none()
+        if row is None:
+            return None
+        return self._feature_snapshot_from_row(dict(row._mapping))
+
     def record_strategy_spec(self, spec: StrategySpec) -> StrategySpec:
         identity = and_(
             strategy_specs.c.name == spec.name,

@@ -4,9 +4,9 @@ Last updated: 2026-09-04 PDT
 
 Context format: v1
 
-Current phase: Phase 3D plus Phase 5A reliability and front-loaded Phase 4B LLM Control Center implemented; Phase 1B open-session verification pending
+Current phase: Phase 4 evidence-bound analyst plus Phase 5A reliability implemented; Phase 5 ML registry in progress; Phase 1B open-session verification pending
 
-Current documented baseline: C017 — `Add reliable scalable research workflows`
+Current documented baseline: C018 — `Add evidence-bound LLM research analyst`
 
 ## Purpose and authority
 
@@ -68,6 +68,10 @@ A Git commit cannot contain its own content-derived hash without changing that h
   and Meta Muse Spark 1.3. Workload routing is versioned and cost-tier-aware; missing project
   credentials fail closed and no model has any monetary authority. Development operators can
   save immutable route revisions and chat through Auto or either explicit provider.
+- Phase 4 retrieves only evidence versions available by `as_of`, reserves LLM budget before
+  each provider call, requires typed research-only output and exact citations, abstains when
+  independent evidence is missing, and exposes the full lineage as Decision Inspector graph
+  `ai_infrastructure_graph@0.1.0`.
 - No GitHub remote or cloud host is configured yet.
 
 ### Repository state
@@ -118,7 +122,7 @@ Development service ports bind only to loopback. The local Compose credentials a
 - `make check`: passed.
 - Flake8: passed.
 - Strict mypy: passed for 40 source files.
-- Pytest: 58 passed.
+- Pytest: 62 passed.
 - `make doctor`: passed against the local-lite SQLite profile.
 - `make docker-doctor`: passed against the PostgreSQL-backed Compose profile.
 - PostgreSQL query: passed; the first container replay stored six lineage events.
@@ -134,7 +138,7 @@ Development service ports bind only to loopback. The local Compose credentials a
 - Real primary-source test: 10 entries from Apple's official Newsroom RSS feed passed the same path; identical replay inserted zero documents, versions, catalysts, links, or events.
 - Real SEC test: 20 AAPL filing records produced 19 catalysts and 20 links; identical replay inserted zero new records or events. A bounded 250-record AAPL XBRL facts run also replayed with zero duplicates.
 - Phase 2 fixtures verify primary/secondary source distinction, correction-version retention, SEC filing and XBRL normalization, IR feed parsing, and cross-document catalyst deduplication.
-- Alembic migrations through `20260904_0016` own the Phase 3D/4B/5A schema; a fresh SQLite
+- Alembic migrations through `20260904_0017` own the Phase 3D/4/5A schema; a fresh SQLite
   upgrade/check/downgrade/re-upgrade cycle passed with no schema diff.
 - `make research-smoke`: passed with 100 deterministic daily bars, three immutable baseline
   experiments, nonzero cost modeling, matching offline/online feature hashes, and ordered
@@ -370,6 +374,7 @@ flowchart LR
     REPORT --> DB
     REPORT --> LEDGER
     MODELROUTES["Reviewed YAML routing base"] --> LLMGW["Provider-neutral LLM gateway"]
+    BUDGET["Atomic token + estimated-cost budgets"] --> LLMGW
     UI --> LLMCONTROL["Dev route editor + Research Copilot"]
     LLMCONTROL --> ROUTEREVS["Immutable routing revisions"]
     ROUTEREVS --> LLMGW
@@ -379,6 +384,11 @@ flowchart LR
     LLMGW --> LLMAUDIT["Immutable invocation audit"]
     LLMAUDIT --> DB
     LLMAUDIT --> LEDGER
+    DB --> RETRIEVE["Point-in-time evidence retrieval"]
+    RETRIEVE --> ANALYST["Structured citation-bound analyst"]
+    LLMGW --> ANALYST
+    ANALYST --> INSPECTOR["Decision Inspector graph"]
+    ANALYST --> DB
 ```
 
 Alembic migrations own the PostgreSQL/SQLite schema. Redis and MinIO are connected to both ingestion paths. The market stream client authenticates, reconnects with bounded exponential backoff, normalizes trades/quotes/minute bars, and requests historical repair for XNYS-session gaps; a real open-session frame capture remains outstanding. The Phase 2 path versions source documents, retains publication/ingestion/correction time, classifies source trust, resolves issuer entities, normalizes SEC facts, and deterministically links similar multi-source coverage to one catalyst.
@@ -416,7 +426,16 @@ The Research Copilot can use that automatic interactive route or explicitly sele
 provider for one invocation. Browser history is bounded and session-local, while output,
 usage, latency, model, source SHA, and effective routing lineage remain durable. Both write
 and paid-call endpoints fail closed outside development until production authentication and
-budget controls exist.
+authorization exist.
+
+Phase 4 adds a point-in-time evidence retriever and an evidence-bound analyst. It selects
+the latest source-document version actually ingested by the requested cutoff, combines it
+with the exact feature snapshot and later ML forecast, and treats retrieved text as untrusted
+data. `research_analysis@0.1.0` accepts only research recommendations; non-abstaining claims
+must cite exact bundle IDs, malformed or invented citations are retained as rejected output,
+and missing independent evidence causes a zero-cost abstention. `llm_budget@0.1.0` atomically
+reserves conservative token and estimated-cost ceilings across project/provider/workload
+windows. The Decision Inspector renders the stored evidence-to-call-to-analysis graph.
 
 The Phase 5A reliability layer validates every historical ingestion and backtest dataset
 against `market_data_quality@0.1.0`, including identity, chronology, OHLC, availability, and
@@ -555,7 +574,9 @@ year or more of data.
 | LLM gateway | `src/agentic_quant/llm.py` | versioned workload routing and bounded OpenAI/Meta Responses calls |
 | LLM persistence | `src/agentic_quant/llm_store.py` | immutable route revisions, source/config lineage, output, usage, latency, and status |
 | LLM routing | `configs/model_routing.yaml` | premium/value model assignments and bounded provider settings |
-| Schema migrations | `migrations/` | Alembic schema history through front-loaded Phase 4B |
+| LLM budgets | `src/agentic_quant/llm_budget.py`, `configs/llm_budget.yaml` | atomic reservation/settlement and versioned token/cost ceilings |
+| Research intelligence | `src/agentic_quant/intelligence.py` | point-in-time retrieval, structured analyst, citation checks, abstention, Decision Inspector graph |
+| Schema migrations | `migrations/` | Alembic schema history through completed Phase 4 |
 
 ## Current executable risk baseline
 
@@ -597,11 +618,15 @@ Implemented endpoints:
 - `GET /v1/research/validations`
 - `GET /v1/research/validations/{validation_report_id}`
 - `GET /v1/llm/routes`
+- `GET /v1/llm/budget`
 - `PUT /v1/llm/routes`, restricted to development; appends a complete route revision
 - `GET /v1/llm/routes/history`
 - `POST /v1/llm/chat`, restricted to development; makes a bounded paid call
 - `GET /v1/llm/invocations`
 - `GET /v1/llm/invocations/{invocation_id}`
+- `POST /v1/intelligence/analyze`, restricted to development; makes a budgeted paid call
+- `GET /v1/intelligence/analyses`
+- `GET /v1/decision-inspector/{analysis_id}`
 - `POST /v1/llm/probe/{provider}`, restricted to development
 - Development-only read-only Alpaca probe, bar backfill, and option snapshot endpoints.
 - Development-only Alpaca News, SEC filing, and SEC company-facts ingestion endpoints.
@@ -939,6 +964,22 @@ The Compose stack is currently intended to remain running for local inspection. 
 - Simulation fills charge configured half-spread on entry and exit. Corporate-action and
   universe batches require reviewed source/version/availability metadata and content hashes.
 - Formal record: `docs/adr/0013-fail-closed-data-quality-and-resumable-workflows.md`.
+
+### D024 — LLM analysis is evidence-bound, budgeted, and advisory
+
+- Date: 2026-09-04 PDT.
+- The LLM participates as a research orchestrator, but its provider response is untrusted
+  until the application validates the schema, as-of cutoff, symbol, and every citation.
+- Retrieval uses the newest document version known by the cutoff, never a later correction.
+  Evidence text is explicitly data rather than instructions and is bounded before prompting.
+- Non-abstaining claims require exact bundle citation IDs. Unknown citations or malformed
+  output are durable rejections; missing independent evidence creates an abstention without
+  incurring a provider call.
+- All provider calls first reserve atomic daily/monthly project, provider, and workload
+  budgets. USD values are conservative planning estimates, not claims about provider bills.
+- Decision Inspector v1 is a lineage graph, not a decision authority. The LLM still cannot
+  promote models, approve risk, size positions, submit orders, or access broker credentials.
+- Formal record: `docs/adr/0014-evidence-bound-llm-analysis-and-budgeting.md`.
 
 ## Iteration and commit ledger
 
@@ -1478,7 +1519,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C017 — `Add reliable scalable research workflows`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `a53f6af`.
 - Date: 2026-09-04 PDT.
 - User intent: autonomously complete the scale-independent correctness prerequisites before
   Phase 6 while keeping local data bounded to workflow validation.
@@ -1510,12 +1551,48 @@ The Compose stack is currently intended to remain running for local inspection. 
   - The reliable data/backfill layer is ready for the Phase 4 analyst and Phase 5 ML system.
   - Phase 6 shadow runtime remains intentionally unimplemented; no strategy is promoted.
 
+### C018 — `Add evidence-bound LLM research analyst`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-04 PDT.
+- User intent: continue autonomously through Phase 5 so LLM and ML can participate in
+  strategy research without bypassing deterministic safety and evidence controls.
+- Scope:
+  - Added point-in-time document-version retrieval and immutable evidence bundles combining
+    the exact feature snapshot with bounded external evidence.
+  - Added strict `research_analysis@0.1.0` output, exact citation validation, rejection of
+    malformed/hallucinated output, and zero-cost deterministic abstention.
+  - Added `llm_budget@0.1.0`, atomic project/provider/workload token and estimated-cost
+    reservations, settlement/release accounting, and a pre-provider budget breaker.
+  - Persisted analyses and exposed recent results, budget state, and
+    `ai_infrastructure_graph@0.1.0` Decision Inspector lineage through the API.
+  - Added Alembic revision `20260904_0017`, tests, ADR 0014, runbook, manifest, README,
+    project-state, and master-context updates.
+- Architecture/decision impact:
+  - Successful provider output is no longer sufficient for use: the application validates
+    time, identity, schema, citations, and evidence coverage before accepting an analysis.
+  - The analyst remains research-only and has no direct path to promotion, risk, portfolio,
+    execution, or broker credentials.
+- Validation:
+  - Flake8, strict mypy across 42 source files, and 62 tests passed.
+  - Point-in-time correction exclusion, valid citation acceptance, fabricated-citation
+    rejection, no-evidence abstention, atomic budget settlement, and pre-call budget denial
+    passed with deterministic provider fixtures.
+  - Fresh SQLite migration/check/downgrade/re-upgrade, rebuilt Docker/PostgreSQL doctor at
+    revision 0017, budget/analysis endpoint probes, and secret scan passed.
+  - The persistent local-lite database contained the final 0016 schema under an earlier 0015
+    development stamp. After direct schema/count verification, its stamp was corrected to
+    0016 and the non-destructive 0017 upgrade completed; local doctor then passed.
+- Expected global state after commit:
+  - Phase 4 is complete and provides a bounded, auditable integration point for Phase 5 ML
+    forecasts. Phase 5 model training/registry remains next; Phase 6 remains untouched.
+
 ## Open work
 
 Ordered near-term work:
 
-1. Complete the evidence-bound LLM research orchestrator and calibrated ML layer on top of
-   the front-loaded gateway.
+1. Complete the calibrated ML ranking and champion/challenger registry, then feed its
+   forecasts into the evidence-bound analyst.
 2. During the next U.S. market session, finish Phase 1B real frame/reconnect/gap checks.
 3. Size remote backfill concurrency and identify equity/options sources with suitable historical
    coverage, retention, and licensing; do not require those large downloads for local tests.
@@ -1524,9 +1601,9 @@ Ordered near-term work:
 5. Add Redis consumer groups, a transactional outbox, dead-letter replay, provider lag,
    sequence-gap, reconciliation, and data-quality dashboards.
 6. Build a labeled corpus and measure cross-provider catalyst dedup precision/recall.
-7. Add authentication/authorization, rate/budget enforcement, and project-data retrieval to
-   turn the local Research Copilot into the citation-bound remote Control Center; create the
-   GitHub remote and later validate the guarded cloud pipeline on a selected VPS.
+7. Add authentication/authorization, rate limiting, and session audit before remote Control
+   Center exposure; create the GitHub remote and later validate the guarded cloud pipeline on
+   a selected VPS.
 
 ## Blocked or unresolved decisions
 

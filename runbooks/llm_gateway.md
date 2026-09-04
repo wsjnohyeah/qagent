@@ -97,3 +97,42 @@ The development-only HTTP probes are `POST /v1/llm/probe/openai` and
   invocation and never changes the global route.
 - Provider keys never enter prompts, events, API responses, logs, Git, or model-visible tools.
 - The gateway is confined to the research plane and has no path to risk or execution.
+
+## Budget breaker
+
+`configs/llm_budget.yaml` defines versioned project, provider, and workload ceilings. Before
+an upstream call, the gateway atomically reserves a conservative UTF-8-byte-based input
+ceiling plus the maximum output tokens. A successful call settles actual token usage and an
+estimated USD amount; a provider failure releases the reservation.
+
+Inspect the current windows without making a paid call:
+
+```sh
+curl -fsS http://127.0.0.1:8000/v1/llm/budget
+```
+
+The USD figures are operator planning estimates and must be reviewed against provider
+contracts before production. Exhaustion returns HTTP 429 before the provider is called.
+
+## Evidence-bound research analysis
+
+The Phase 4 analyst accepts a persisted point-in-time feature snapshot, retrieves only
+document versions available at exactly that cutoff, and sends a bounded evidence bundle to
+the configured critical-research model. For example:
+
+```sh
+curl -fsS -X POST http://127.0.0.1:8000/v1/intelligence/analyze \
+  -H 'content-type: application/json' \
+  -d '{"symbol":"AAPL","as_of":"2026-09-03T20:00:00Z","feature_snapshot_id":"REPLACE_ME","horizon":"5 trading days"}'
+```
+
+The output must validate against `research_analysis@0.1.0`. Claims may cite only exact IDs
+from the supplied bundle. Unknown citations or malformed JSON produce a durable `REJECTED`
+record; insufficient independent evidence produces `ABSTAINED` without an LLM call.
+
+Inspect recent records and provenance:
+
+```sh
+curl -fsS http://127.0.0.1:8000/v1/intelligence/analyses
+curl -fsS http://127.0.0.1:8000/v1/decision-inspector/ANALYSIS_ID
+```

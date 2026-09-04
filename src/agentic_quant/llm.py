@@ -25,6 +25,7 @@ from agentic_quant.domain import (
 )
 from agentic_quant.ids import uuid7
 from agentic_quant.ledger import EventLedger
+from agentic_quant.llm_budget import LLMBudgetExceededError, LLMBudgetManager
 from agentic_quant.llm_store import LLMStore
 
 
@@ -313,6 +314,7 @@ class LLMGateway:
         providers: dict[LLMProviderName, LLMProvider],
         store: LLMStore,
         ledger: EventLedger | None = None,
+        budget_manager: LLMBudgetManager | None = None,
         code_git_sha: str = "UNAVAILABLE",
     ) -> None:
         self.routing = routing
@@ -320,6 +322,7 @@ class LLMGateway:
         self.providers = providers
         self.store = store
         self.ledger = ledger
+        self.budget_manager = budget_manager
         self.code_git_sha = code_git_sha
 
     async def __aenter__(self) -> Self:
@@ -488,9 +491,43 @@ class LLMGateway:
             raise LLMConfigurationError(
                 f"{provider_name.value} is selected but its API key is not configured"
             )
+        effective_max_output_tokens = min(
+            request.max_output_tokens or config.max_output_tokens,
+            config.max_output_tokens,
+        )
+        if self.budget_manager is not None:
+            try:
+                self.budget_manager.reserve(
+                    invocation_id=invocation_id,
+                    provider=provider_name,
+                    workload=request.workload,
+                    input_text=request.input_text,
+                    instructions=request.instructions,
+                    max_output_tokens=effective_max_output_tokens,
+                    now=created_at,
+                )
+            except LLMBudgetExceededError as exc:
+                invocation = self._failed_invocation(
+                    invocation_id=invocation_id,
+                    request=request,
+                    provider=provider_name,
+                    config=config,
+                    reasoning_effort=reasoning_effort,
+                    request_sha256=request_sha256,
+                    input_sha256=input_sha256,
+                    created_at=created_at,
+                    started=started,
+                    error_code=f"budget_exceeded:{exc.scope}"[:120],
+                    routing_version=routing_version,
+                    routing_sha256=routing_sha256,
+                )
+                self._record(invocation)
+                raise
         try:
             result = await provider.complete(request)
         except LLMProviderError as exc:
+            if self.budget_manager is not None:
+                self.budget_manager.release(invocation_id=invocation_id)
             invocation = self._failed_invocation(
                 invocation_id=invocation_id,
                 request=request,
@@ -510,6 +547,10 @@ class LLMGateway:
                 routing_sha256=routing_sha256,
             )
             self._record(invocation)
+            raise
+        except Exception:
+            if self.budget_manager is not None:
+                self.budget_manager.release(invocation_id=invocation_id)
             raise
         completed_at = datetime.now(UTC)
         invocation = LLMInvocation(
@@ -533,6 +574,12 @@ class LLMGateway:
             created_at=created_at,
             completed_at=completed_at,
         )
+        if self.budget_manager is not None:
+            self.budget_manager.settle(
+                invocation_id=invocation_id,
+                usage=result.usage,
+                now=completed_at,
+            )
         self._record(invocation)
         return invocation
 
@@ -608,6 +655,7 @@ def build_llm_gateway(
     *,
     store: LLMStore,
     ledger: EventLedger | None = None,
+    budget_manager: LLMBudgetManager | None = None,
     code_git_sha: str | None = None,
 ) -> LLMGateway:
     routing = load_llm_routing_config(settings.llm_routing_path)
@@ -631,5 +679,6 @@ def build_llm_gateway(
         providers=providers,
         store=store,
         ledger=ledger,
+        budget_manager=budget_manager,
         code_git_sha=code_git_sha or settings.source_git_sha or "UNAVAILABLE",
     )

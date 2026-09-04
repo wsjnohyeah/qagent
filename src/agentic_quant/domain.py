@@ -101,6 +101,19 @@ class LLMInvocationStatus(StrEnum):
     FAILED = "FAILED"
 
 
+class ResearchAnalysisStatus(StrEnum):
+    COMPLETED = "COMPLETED"
+    ABSTAINED = "ABSTAINED"
+    REJECTED = "REJECTED"
+
+
+class ResearchRecommendation(StrEnum):
+    RESEARCH_LONG = "RESEARCH_LONG"
+    RESEARCH_SHORT = "RESEARCH_SHORT"
+    HOLD = "HOLD"
+    ABSTAIN = "ABSTAIN"
+
+
 class LLMRoutingRevision(FrozenModel):
     routing_revision_id: str
     base_routing_version: str
@@ -149,6 +162,85 @@ class LLMInvocation(FrozenModel):
     error_code: str | None = None
     created_at: datetime
     completed_at: datetime
+
+
+class ResearchEvidenceItem(FrozenModel):
+    citation_id: str = Field(min_length=1, max_length=180)
+    evidence_type: str = Field(min_length=1, max_length=60)
+    event_time: datetime
+    available_from: datetime
+    source: str = Field(min_length=1, max_length=240)
+    text: str = Field(min_length=1, max_length=4_000)
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ResearchEvidenceBundle(FrozenModel):
+    symbol: str
+    as_of: datetime
+    feature_snapshot_id: str
+    forecast_id: str | None = None
+    items: tuple[ResearchEvidenceItem, ...] = Field(min_length=1, max_length=40)
+    evidence_bundle_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def evidence_is_point_in_time_safe_and_unique(self) -> Self:
+        if self.as_of.tzinfo is None:
+            raise ValueError("Research evidence as_of must be timezone-aware")
+        if any(
+            item.event_time > self.as_of or item.available_from > self.as_of
+            for item in self.items
+        ):
+            raise ValueError("Research evidence bundle contains future information")
+        citation_ids = [item.citation_id for item in self.items]
+        if len(citation_ids) != len(set(citation_ids)):
+            raise ValueError("Research evidence citation IDs must be unique")
+        return self
+
+
+class AnalystClaim(FrozenModel):
+    claim: str = Field(min_length=1, max_length=1_000)
+    citations: tuple[str, ...] = Field(min_length=1, max_length=12)
+
+
+class StructuredResearchAnalysis(FrozenModel):
+    schema_version: str = Field(pattern=r"^research_analysis@[0-9]+\.[0-9]+\.[0-9]+$")
+    symbol: str
+    as_of: datetime
+    horizon: str = Field(min_length=1, max_length=40)
+    recommendation: ResearchRecommendation
+    confidence: Decimal = Field(ge=0, le=1)
+    thesis: str = Field(min_length=1, max_length=2_000)
+    claims: tuple[AnalystClaim, ...] = Field(default=(), max_length=12)
+    risk_factors: tuple[str, ...] = Field(default=(), max_length=12)
+    ml_assessment: str | None = Field(default=None, max_length=1_000)
+    abstain_reason: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def recommendation_has_required_support(self) -> Self:
+        if self.recommendation == ResearchRecommendation.ABSTAIN:
+            if not self.abstain_reason:
+                raise ValueError("ABSTAIN requires abstain_reason")
+        elif not self.claims:
+            raise ValueError("Non-abstaining analysis requires cited claims")
+        return self
+
+
+class ResearchAnalysisRecord(FrozenModel):
+    analysis_id: str
+    symbol: str
+    as_of: datetime
+    status: ResearchAnalysisStatus
+    schema_version: str
+    prompt_version: str
+    evidence_bundle: ResearchEvidenceBundle
+    feature_snapshot_id: str
+    forecast_id: str | None = None
+    llm_invocation_id: str | None = None
+    analysis: StructuredResearchAnalysis | None = None
+    citation_validation: dict[str, Any]
+    rejection_reason: str | None = None
+    code_git_sha: str
+    created_at: datetime
 
 
 class CorporateActionType(StrEnum):
