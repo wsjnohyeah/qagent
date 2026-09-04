@@ -4,9 +4,9 @@ Last updated: 2026-09-03 PDT
 
 Context format: v1
 
-Current phase: Phase 2 — event and document pipeline (in progress); Phase 1B open-session verification pending
+Current phase: Phase 2 complete; Phase 1B open-session verification pending
 
-Current committed baseline: `1d075ec Add market-session gap repair`
+Current committed baseline: `5645928 Add point-in-time event document pipeline`
 
 ## Purpose and authority
 
@@ -34,13 +34,13 @@ A Git commit cannot contain its own content-derived hash without changing that h
 
 ### Product state
 
-- The repository contains a completed Phase 0 safety foundation, a Phase 1 read-only market-data foundation with open-session verification pending, and an in-progress Phase 2 event/document pipeline. It is not a profitable or production-ready trading system.
+- The repository contains completed Phase 0 safety and Phase 2 event/document foundations, plus a Phase 1 read-only market-data foundation with open-session verification pending. It is not a profitable or production-ready trading system.
 - Supported conceptual modes are `research`, `backtest`, `shadow`, and `paper`.
 - The executable settings intentionally omit `live`; `LIVE_TRADING_ENABLED=true` fails validation.
 - The original synthetic shadow path remains operational and makes no broker call.
 - A read-only Alpaca adapter now retrieves SIP historical stock bars, OPRA option-chain snapshots, and authenticates to the SIP stock WebSocket.
 - Real provider responses flow through content-addressed MinIO raw storage, normalized PostgreSQL tables, the append-only event ledger, and Redis Streams.
-- Alpaca News is connected; SEC EDGAR, approved-host IR, and disabled-by-default social aggregate adapters are implemented. No LLM, predictive model, or broker adapter is connected.
+- Alpaca News, SEC EDGAR, and an approved-host IR feed have passed live read-only ingestion. The social aggregate adapter is implemented but disabled by default. No LLM, predictive model, or broker adapter is connected.
 - No GitHub remote or cloud host is configured yet.
 
 ### Repository state
@@ -94,6 +94,7 @@ Development service ports bind only to loopback. The local Compose credentials a
 - Live trade/quote/bar normalization, persistence, and XNYS-session gap detection: synthetic frames passed; real frames await an open market session.
 - Real news test: 10 AAPL-related articles passed Alpaca News → MinIO → PostgreSQL → Redis; identical replay inserted zero documents, versions, catalysts, links, or events.
 - Real primary-source test: 10 entries from Apple's official Newsroom RSS feed passed the same path; identical replay inserted zero documents, versions, catalysts, links, or events.
+- Real SEC test: 20 AAPL filing records produced 19 catalysts and 20 links; identical replay inserted zero new records or events. A bounded 250-record AAPL XBRL facts run also replayed with zero duplicates.
 - Phase 2 fixtures verify primary/secondary source distinction, correction-version retention, SEC filing and XBRL normalization, IR feed parsing, and cross-document catalyst deduplication.
 - Alembic migrations through `20260904_0006` own the Phase 2 schema, including issuer aliases and exact document-symbol tags.
 - Repository secret-pattern scan: passed after fixing a scanner self-match.
@@ -352,6 +353,16 @@ The Compose stack is currently intended to remain running for local inspection. 
   must not invent this identity.
 - Formal record: `docs/adr/0005-event-document-provenance.md`.
 
+### D011 — SEC fair-access identity and live verification
+
+- Date: 2026-09-03 PDT.
+- The user supplied a contact email for the SEC-required HTTP User-Agent after its purpose
+  and transmission behavior were explained.
+- The contact identity is stored only in ignored `.env`; its value is excluded from Git,
+  logs, and this context.
+- Live SEC filing and company-facts ingestion is now verified. This completes the Phase 2
+  exit criteria locally; it does not authorize trading or make catalyst dedup a strategy.
+
 ## Iteration and commit ledger
 
 ### C001 — `Bootstrap safety-first Phase 0 environment`
@@ -498,21 +509,47 @@ The Compose stack is currently intended to remain running for local inspection. 
     an approved issuer feed; social remains intentionally disabled.
   - No LLM, predictive strategy, broker submission, or live-money path is introduced.
 
+### C006 — `Verify live SEC event ingestion`
+
+- Git hash: resolve with `git log --grep='Verify live SEC event ingestion'` after commit.
+- Date: 2026-09-03 PDT.
+- User intent: configure the SEC fair-access contact identity and finish real Phase 2
+  validation.
+- Scope:
+  - Kept the supplied SEC contact identity exclusively in ignored `.env`.
+  - Marked Phase 2 complete in runtime and operator documentation.
+  - Recorded real SEC filing/company-facts validation and refreshed current project state.
+- Architecture/decision impact:
+  - No architecture change; the existing SEC primary-source path was exercised against the
+    public service.
+- Validation:
+  - Twenty AAPL 8-K/10-K/10-Q documents were stored as primary sources and linked into 19
+    catalysts; identical replay inserted zero documents, versions, catalysts, or links.
+  - A bounded 250-record AAPL SEC XBRL run inserted 250 normalized facts; identical replay
+    inserted zero.
+  - The live Postgres state contained 40 source documents, 60 immutable versions, 39
+    catalysts, and 250 corporate facts after all Phase 2 exercises.
+  - Docker doctor passed with API, PostgreSQL, Redis, and MinIO healthy.
+- Expected global state after commit:
+  - Phase 2 is complete against its MVP exit criteria.
+  - Phase 1B remains pending for the next open U.S. market session.
+  - Phase 3 point-in-time feature work is the next implementation milestone after that
+    scheduled validation.
+
 ## Open work
 
 Ordered near-term work:
 
-1. Configure a compliant SEC User-Agent and run live filing/company-facts ingestion.
-2. Select official issuer IR feeds and evaluate real cross-provider catalyst deduplication.
-3. During the next U.S. market session, finish Phase 1B real frame/reconnect/gap checks.
-4. Add Redis consumer groups, a transactional outbox, and dead-letter replay.
-5. Add provider lag, sequence-gap, bar/trade reconciliation, and data-quality dashboards.
+1. During the next U.S. market session, finish Phase 1B real frame/reconnect/gap checks.
+2. Implement Phase 3 point-in-time features and offline/online parity tests.
+3. Add Redis consumer groups, a transactional outbox, and dead-letter replay.
+4. Add provider lag, sequence-gap, bar/trade reconciliation, and data-quality dashboards.
+5. Build a labeled corpus and measure cross-provider catalyst dedup precision/recall.
 6. Confirm Alpaca retention/licensing and determine the long-history options vendor.
-7. Implement Phase 3 point-in-time features and offline/online parity tests.
-8. Add authentication and authorization before any remote Control API exposure.
-9. Add baseline strategies and realistic fill simulation before predictive ML.
-10. Expand the UI into the full Trading Control Center and Decision Inspector.
-11. Create a GitHub remote and later validate the cloud pipeline on a selected VPS.
+7. Add authentication and authorization before any remote Control API exposure.
+8. Add baseline strategies and realistic fill simulation before predictive ML.
+9. Expand the UI into the full Trading Control Center and Decision Inspector.
+10. Create a GitHub remote and later validate the cloud pipeline on a selected VPS.
 
 ## Blocked or unresolved decisions
 
@@ -520,8 +557,6 @@ Ordered near-term work:
 - VPS/cloud provider, region, instance size, and domain/TLS approach.
 - Secure secret-delivery mechanism for the VPS and CI.
 - Historical options, premium news/fundamentals, and compliant social-data vendors/budgets.
-- A monitored contact identity for compliant SEC fair-access requests.
-- Approved issuer IR feed URLs for live primary-source validation.
 - Final restricted-security list beyond META/work-related names.
 - Reconciled paper account size and percentage-versus-dollar risk limits.
 - Minimum shadow/paper sample sizes and promotion gates.

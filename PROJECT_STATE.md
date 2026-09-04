@@ -2,7 +2,7 @@
 
 ## Current
 
-- Phase 0 is complete; Phase 1B open-session validation is pending; Phase 2 is in progress.
+- Phases 0 and 2 are complete; Phase 1B open-session validation is pending until the next U.S. market session.
 - Local-lite uses Python 3.12, a project-local `uv`, SQLite, and filesystem object storage.
 - The Control API, minimal web console, append-only event ledger, deterministic risk engine, and synthetic vertical slice exist.
 - `live` is not a valid trading mode; `LIVE_TRADING_ENABLED=true` fails configuration validation.
@@ -19,14 +19,16 @@
 - Alpaca News, SEC EDGAR, approved-host IR, and disabled-by-default social aggregate adapters exist.
 - A real 10-article Alpaca News page passed MinIO/PostgreSQL/Redis ingestion; replay inserted zero new records or events.
 - Ten Apple Newsroom primary-source entries passed the same path; replay inserted zero new records or events.
+- Twenty AAPL SEC filing records normalized into 19 deduplicated catalysts; replay inserted zero new records or events.
+- A bounded set of 250 AAPL SEC XBRL company facts normalized successfully; replay inserted zero duplicates.
 
 ## Next
 
-1. Configure a compliant SEC User-Agent and verify filing/company-facts ingestion live.
-2. Select and verify official issuer IR feeds, then measure cross-provider catalyst dedup.
-3. Capture real SIP trade/quote/bar frames and reconnect/gap repair during the next open session.
-4. Add Redis consumer groups, durable offsets, a transactional outbox, and dead-letter replay.
-5. Add data-quality reconciliation and provider lag metrics.
+1. Capture real SIP trade/quote/bar frames and reconnect/gap repair during the next open session.
+2. Begin Phase 3 with the point-in-time feature registry and offline/online parity tests.
+3. Add Redis consumer groups, durable offsets, a transactional outbox, and dead-letter replay.
+4. Add data-quality reconciliation and provider lag metrics.
+5. Build a labeled corpus to measure cross-provider catalyst dedup precision/recall.
 6. Add authentication/authorization before any production Control API exposure.
 7. Expand the Decision Inspector into the full frontend.
 
@@ -35,8 +37,6 @@
 - Cloud deployment needs the user's GitHub repository, VPS/provider, domain/TLS plan, and secret delivery mechanism.
 - Paper submission remains blocked until the inherited percentage and dollar risk limits are reconciled.
 - Real-time frame persistence cannot be externally verified until an open U.S. market session, although WebSocket authentication and synthetic frame persistence pass.
-- Live SEC verification needs a real operator/contact email in `SEC_USER_AGENT`.
-- Real IR validation needs a confirmed issuer-controlled feed URL and hostname.
 
 ## Decisions
 

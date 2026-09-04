@@ -39,6 +39,9 @@ def test_api_health_and_demo(settings: Settings) -> None:
         ready = client.get("/health/ready")
         assert ready.status_code == 200
         assert ready.json()["live_trading_enabled"] is False
+        system_status = client.get("/v1/system/status").json()
+        assert system_status["phase"] == "2-complete"
+        assert system_status["phase_1b_open_session_validation"] == "pending"
         demo = client.post("/v1/demo/run")
         assert demo.status_code == 200
         correlation_id = demo.json()["correlation_id"]

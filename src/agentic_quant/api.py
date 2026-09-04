@@ -149,7 +149,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "live_trading_enabled": False,
             "new_exposure_paused": application.state.new_exposure_paused,
             "database": "healthy" if ledger.health() else "unhealthy",
-            "phase": "2-in-progress",
+            "phase": "2-complete",
             "phase_1b_open_session_validation": "pending",
             "alpaca_configured": bool(
                 app_settings.alpaca_api_key and app_settings.alpaca_api_secret

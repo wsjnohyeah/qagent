@@ -1,6 +1,6 @@
 # Agentic Quant Trading System
 
-A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton, the read-only **Phase 1** market-data foundation, and an in-progress **Phase 2** point-in-time event/document pipeline.
+A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton, the read-only **Phase 1** market-data foundation, and the completed **Phase 2** point-in-time event/document pipeline.
 
 > Live-money execution is not implemented. `live` is not a valid mode, and setting `LIVE_TRADING_ENABLED=true` makes startup fail.
 
