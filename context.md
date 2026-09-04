@@ -6,7 +6,7 @@ Context format: v1
 
 Current phase: Phase 3A research foundation implemented; Phase 1B open-session verification pending
 
-Current documented baseline: C008 — `Add point-in-time research foundation`
+Current documented baseline: C009 — `Record local validation and remote UI scope`
 
 ## Purpose and authority
 
@@ -66,6 +66,10 @@ A Git commit cannot contain its own content-derived hash without changing that h
 - The corporate install does not expose `docker` on the normal shell `PATH`. `scripts/compose.sh` discovers the Docker Desktop binaries automatically.
 - VS Code application name on this host: `VS Code @ FB`.
 - New software may require explicit approval through the company's UI. An agent must stop and tell the user which package/action needs approval when a policy block occurs; it must not bypass the control.
+- Local development is for correctness verification, not production-scale data acquisition.
+  Prefer deterministic fixtures and the smallest bounded real samples that exercise provider,
+  storage, replay, feature, and backtest invariants. Full-year or multi-year backfills are not
+  a routine local development requirement.
 
 ### Running local services
 
@@ -344,7 +348,7 @@ flowchart TB
       HARD_RISK["Deterministic risk engine"]
       EXEC["Shadow / paper executor"]
       CONTROL["Authenticated Control API"]
-      WEB["Trading Control Center"]
+      WEB["Trading Control Center + research copilot"]
     end
     subgraph State
       POSTGRES["PostgreSQL / optional pgvector"]
@@ -378,6 +382,32 @@ flowchart TB
 There is intentionally no direct edge from the LLM to portfolio, risk, execution, or the
 broker. Research feedback may loop from validation to the LLM; crossing into runtime requires
 a versioned candidate, independent validation, and explicit promotion.
+
+### Target Web Control Center
+
+The remotely deployed application is expected to provide one authenticated interface with:
+
+- a data explorer for normalized market data, filings, news, catalysts, feature snapshots,
+  freshness, gaps, source provenance, and raw-object lineage;
+- an LLM analysis workspace showing citation-bound interpretations, evidence used, model and
+  prompt versions, uncertainty, disagreements, and prior-analysis outcomes;
+- a strategy lab showing `StrategySpec` contents, ML forecasts, backtest/validation results,
+  trades, costs, regime breakdowns, candidate/champion comparisons, and promotion state;
+- a conversational research copilot through which the user can ask the LLM to explain the
+  latest data, analysis, strategy outputs, risks, and why a candidate passed or failed;
+- an operations view for ingestion health, experiment jobs, shadow/paper status, alerts,
+  audit lineage, pause controls, and deployment readiness.
+
+The conversational interface is explanatory and research-oriented. It must answer from
+versioned, time-scoped project data with citations and must not receive credentials or gain a
+direct command path to portfolio, risk, execution, or broker services. Authentication,
+authorization, session auditing, prompt-injection defenses, and safe tool capability gates are
+prerequisites before this UI is exposed remotely.
+
+Long-horizon data acquisition and compute-heavy research belong on the remote server after its
+storage, scheduling, observability, and data-license controls are configured. Local development
+should prove the same code paths with compact datasets; tests must not depend on downloading a
+year or more of data.
 
 ### Implemented component map
 
@@ -596,6 +626,25 @@ The Compose stack is currently intended to remain running for local inspection. 
   hash, source Git SHA, dataset hash, feature IDs, cost model, metrics, and trades.
 - Formal record: `docs/adr/0006-point-in-time-research-foundation.md`.
 
+### D014 — Bounded local validation and remote research interface
+
+- Date: 2026-09-04 PDT.
+- The user clarified that local development does not require complete one-year-or-longer
+  backfills. Local work should validate pipeline correctness and operability using
+  deterministic fixtures and bounded real samples.
+- Decision: production-scale and long-horizon backfill jobs belong on the future remote
+  server, where storage capacity, scheduling, monitoring, retention, and licensing can be
+  managed explicitly. Local tests must remain fast and independent of large downloads.
+- The AAPL/SPY history already present locally remains ignored runtime data and may be useful
+  for bounded exploratory checks, but it is not a precedent or requirement for future local
+  development and will not be expanded automatically.
+- The future remote Web Control Center must expose data/provenance, LLM analyses, strategy
+  and experiment analyses, risk/operational state, and a conversational LLM research
+  interface that can explain the latest data and strategy outputs with citations.
+- The conversational LLM remains outside the monetary control path. Remote exposure requires
+  authentication, authorization, session/audit logging, prompt-injection defenses, and
+  explicit tool capability gates.
+
 ## Iteration and commit ledger
 
 ### C001 — `Bootstrap safety-first Phase 0 environment`
@@ -803,7 +852,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C008 — `Add point-in-time research foundation`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `826854d`
 - Date: 2026-09-04 PDT.
 - User intent: proceed with Phase 3A and build the point-in-time feature/backtest research
   vertical slice.
@@ -852,6 +901,33 @@ The Compose stack is currently intended to remain running for local inspection. 
   - Phase 1B remains pending until the U.S. market is open. LLM/ML strategy generation,
     final validation gates, paper broker submission, and live-money execution remain absent.
 
+### C009 — `Record local validation and remote UI scope`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-04 PDT.
+- User intent: keep local development focused on pipeline correctness rather than large
+  historical backfills, and preserve the intended remote Web/LLM interaction model.
+- Scope:
+  - Added the bounded-local-data operating rule and assigned long-horizon backfills to the
+    future remote environment.
+  - Defined the target Web Control Center surfaces for data, provenance, LLM analysis,
+    strategy/experiment analysis, operations, and conversational explanation.
+  - Recorded security boundaries for the conversational LLM and clarified the status of the
+    already-downloaded local AAPL/SPY sample.
+- Architecture/decision impact:
+  - Data scale becomes an environment responsibility: compact correctness fixtures locally,
+    governed long-horizon jobs remotely.
+  - The target UI explicitly includes a citation-bound research copilot but provides no
+    direct path to risk, execution, credentials, or broker services.
+- Validation:
+  - Documentation consistency and staged diff reviewed.
+  - `make check` passed with Flake8, strict mypy across 32 source files, and 26 tests.
+  - `make doctor`, repository secret scan, and `git diff --check` passed.
+- Expected global state after commit:
+  - Runtime behavior and stored data are unchanged.
+  - Future agents will not treat large local backfills as a development prerequisite and
+    will preserve the complete remote UI/research-copilot product requirement.
+
 ## Open work
 
 Ordered near-term work:
@@ -862,16 +938,17 @@ Ordered near-term work:
 3. Add offline/online feature parity and a production-grade event-driven fill simulator.
 4. Add walk-forward/regime reports and overfitting diagnostics, then define explicit
    candidate/champion promotion thresholds.
-5. Expand the real research universe beyond AAPL/SPY and identify a long-history options
-   data source with suitable retention and licensing.
+5. Design remote backfill jobs and identify equity/options sources with suitable historical
+   coverage, retention, and licensing; do not require those large downloads for local tests.
 6. Add Redis consumer groups, a transactional outbox, dead-letter replay, provider lag,
    sequence-gap, reconciliation, and data-quality dashboards.
 7. Build a labeled corpus and measure cross-provider catalyst dedup precision/recall.
 8. Implement the LLM strategy-research orchestrator only after the experiment and validation
    contracts can independently reject its candidates.
 9. Add calibrated ML baselines and a deterministic ensemble/experiment scheduler.
-10. Add authentication/authorization, expand the Trading Control Center, create the GitHub
-    remote, and later validate the guarded cloud pipeline on a selected VPS.
+10. Add authentication/authorization, build the remote Trading Control Center and
+    citation-bound conversational research copilot, create the GitHub remote, and later
+    validate the guarded cloud pipeline on a selected VPS.
 
 ## Blocked or unresolved decisions
 
