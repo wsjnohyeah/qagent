@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     llm_openai_api_key: SecretStr | None = None
     llm_meta_api_key: SecretStr | None = None
     llm_routing_path: Path = Path("./configs/model_routing.yaml")
+    research_promotion_policy_path: Path = Path(
+        "./configs/research_promotion_policy.yaml"
+    )
     market_calendar: str = "XNYS"
     development_max_backfill_days: int = Field(default=120, ge=1, le=3_650)
     development_max_intraday_backfill_days: int = Field(default=7, ge=1, le=365)

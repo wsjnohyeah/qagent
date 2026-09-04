@@ -1,6 +1,6 @@
 # Agentic Quant Trading System
 
-A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton, the read-only **Phase 1** market-data foundation, the completed **Phase 2** event/document pipeline, a **Phase 3C** bias-aware research validation baseline, and a front-loaded **Phase 4B** dual-provider LLM gateway and local Control Center.
+A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton, the read-only **Phase 1** market-data foundation, the completed **Phase 2** event/document pipeline, a **Phase 3D** bias-aware research validation gate, and a front-loaded **Phase 4B** dual-provider LLM gateway and local Control Center.
 
 > Live-money execution is not implemented. `live` is not a valid mode, and setting `LIVE_TRADING_ENABLED=true` makes startup fail.
 
@@ -61,6 +61,11 @@ Phase 3C adds rolling chronological train/embargo/test folds. Every candidate is
 and out of sample; the report records the train-selected strategy, its out-of-sample rank,
 return/Sharpe degradation, selection-failure rate, and performance by realized market regime.
 
+Phase 3D adds combinatorial selection-risk diagnostics, Probability of Backtest Overfitting,
+Deflated Sharpe, and a versioned research gate. The gate may only mark a result eligible for
+human review; it never promotes a strategy automatically, and bounded synthetic evidence is
+expected to fail its minimum-sample requirements.
+
 Phase 4A adds an audited Responses API gateway for OpenAI GPT-5.6 Sol and Meta Muse Spark
 1.3. Versioned workload routing assigns premium and value-tier models without giving either
 provider access to broker credentials, risk authority, or order submission.
@@ -105,6 +110,7 @@ GLOBAL_NEW_EXPOSURE_PAUSED=false
 LLM_OPENAI_API_KEY=
 LLM_META_API_KEY=
 LLM_ROUTING_PATH=./configs/model_routing.yaml
+RESEARCH_PROMOTION_POLICY_PATH=./configs/research_promotion_policy.yaml
 ```
 
 `APP_ENV=development` is a bounded correctness environment. Daily/news backfills longer than
@@ -241,7 +247,7 @@ quant-research run AAPL \
 ```
 
 Use `GET /v1/research/experiments/{experiment_run_id}/events` to inspect the ordered
-portfolio event stream. See `runbooks/research.md` and ADRs 0006–0010 for the exact
+portfolio event stream. See `runbooks/research.md` and ADRs 0006–0012 for the exact
 point-in-time invariants, fill/accounting assumptions, known limitations, and
 research/runtime authority boundary.
 
@@ -251,7 +257,8 @@ Run the deterministic walk-forward health check:
 make validation-smoke
 ```
 
-For stored bars, use `quant-research validate`. Reports and fold lineage are available from
+For stored bars, use `quant-research validate`. Reports include PBO, Deflated Sharpe, and the
+versioned fail-closed research gate. Fold lineage is available from
 `GET /v1/research/validations` and `GET /v1/research/validations/{validation_report_id}`.
 
 ## Phase 4A/4B: configurable LLM gateway and local Control Center

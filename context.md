@@ -4,9 +4,9 @@ Last updated: 2026-09-04 PDT
 
 Context format: v1
 
-Current phase: Phase 3C validation plus front-loaded Phase 4B LLM Control Center implemented; Phase 1B open-session verification pending
+Current phase: Phase 3D robust validation plus front-loaded Phase 4B LLM Control Center implemented; Phase 1B open-session verification pending
 
-Current documented baseline: C015 — `Add configurable LLM Control Center`
+Current documented baseline: C016 — `Add robust research validation gate`
 
 ## Purpose and authority
 
@@ -59,6 +59,9 @@ A Git commit cannot contain its own content-derived hash without changing that h
 - Phase 3C adds immutable rolling train/embargo/test reports. Every candidate is evaluated
   both in and out of sample, with selection degradation, below-median selection rate, and
   realized-regime summaries retained rather than reporting only the winner.
+- Phase 3D adds combinatorial selection-risk/PBO diagnostics and Deflated Sharpe to every
+  report. A versioned gate can only mark sufficient results eligible for later human review;
+  it never promotes automatically, and bounded local samples fail closed.
 - A front-loaded Phase 4B gateway and local Control Center now present one audited contract over OpenAI GPT-5.6 Sol
   and Meta Muse Spark 1.3. Workload routing is versioned and cost-tier-aware; missing project
   credentials fail closed and no model has any monetary authority. Development operators can
@@ -113,7 +116,7 @@ Development service ports bind only to loopback. The local Compose credentials a
 - `make check`: passed.
 - Flake8: passed.
 - Strict mypy: passed for 38 source files.
-- Pytest: 50 passed.
+- Pytest: 52 passed.
 - `make doctor`: passed against the local-lite SQLite profile.
 - `make docker-doctor`: passed against the PostgreSQL-backed Compose profile.
 - PostgreSQL query: passed; the first container replay stored six lineage events.
@@ -129,7 +132,7 @@ Development service ports bind only to loopback. The local Compose credentials a
 - Real primary-source test: 10 entries from Apple's official Newsroom RSS feed passed the same path; identical replay inserted zero documents, versions, catalysts, links, or events.
 - Real SEC test: 20 AAPL filing records produced 19 catalysts and 20 links; identical replay inserted zero new records or events. A bounded 250-record AAPL XBRL facts run also replayed with zero duplicates.
 - Phase 2 fixtures verify primary/secondary source distinction, correction-version retention, SEC filing and XBRL normalization, IR feed parsing, and cross-document catalyst deduplication.
-- Alembic migrations through `20260904_0013` own the Phase 3C/4B schema; a fresh SQLite
+- Alembic migrations through `20260904_0014` own the Phase 3D/4B schema; a fresh SQLite
   upgrade/check/downgrade/re-upgrade cycle passed with no schema diff.
 - `make research-smoke`: passed with 100 deterministic daily bars, three immutable baseline
   experiments, nonzero cost modeling, matching offline/online feature hashes, and ordered
@@ -390,7 +393,10 @@ The Phase 3C validator runs every declared candidate in chronological rolling tr
 out-of-sample windows separated by an embargo. Test windows cannot overlap. Selection uses
 only training metrics, while every test result is retained for rank and selection-failure
 analysis. Realized test returns define transparent up/down/sideways report buckets; they do
-not feed the strategy. Formal CPCV/PBO and Deflated Sharpe remain open.
+not feed the strategy. Phase 3D resamples selection across the already embargoed,
+non-overlapping OOS folds, records PBO and Deflated Sharpe diagnostics, and applies the
+versioned `research_gate@0.1.0` policy. The gate is advisory eligibility only and cannot
+promote a candidate.
 
 The front-loaded Phase 4A gateway gives OpenAI and Meta one internal Responses-style
 contract. `configs/model_routing.yaml` sends critical research/generation/critique to the
@@ -531,6 +537,7 @@ year or more of data.
 | Reference data | `src/agentic_quant/reference_data.py` | bitemporal corporate-action and historical-universe queries |
 | Research operations | `src/agentic_quant/research_cli.py` | synthetic smoke, stored-data baselines, parity audit, experiment listing |
 | Validation engine | `src/agentic_quant/validation.py` | rolling train/embargo/test selection, regime reports, selection diagnostics |
+| Research gate | `configs/research_promotion_policy.yaml` | versioned PBO, DSR, sample, regime, positive-fold, and drawdown thresholds |
 | LLM gateway | `src/agentic_quant/llm.py` | versioned workload routing and bounded OpenAI/Meta Responses calls |
 | LLM persistence | `src/agentic_quant/llm_store.py` | immutable route revisions, source/config lineage, output, usage, latency, and status |
 | LLM routing | `configs/model_routing.yaml` | premium/value model assignments and bounded provider settings |
@@ -882,6 +889,25 @@ The Compose stack is currently intended to remain running for local inspection. 
 - The copilot remains research-only: no credential access, tools, risk approval, strategy
   promotion, portfolio sizing, order submission, or broker path.
 - Formal record: `docs/adr/0011-development-llm-control-center.md`.
+
+### D022 — Complete Phase 6 prerequisites autonomously and reject weak evidence
+
+- Date: 2026-09-04 PDT.
+- The user authorized autonomous implementation through the end of Phase 5 and asked to be
+  interrupted only when their help is required.
+- The original handoff defines Phase 6 as the shadow runtime. Work before it therefore
+  includes closing Phase 3 validation, completing the evidence-bound Phase 4 analyst and
+  Decision Inspector, and implementing Phase 5 ML ranking/model registry. The previously
+  agreed spread, data-quality, governed-reference-data, and resumable-workflow work remains
+  part of the prerequisite correctness layer.
+- Local development proves workflow correctness with bounded fixtures. It cannot honestly
+  satisfy a statistical exit criterion that requires durable multi-year OOS evidence.
+  Therefore implementation may complete while candidate/champion promotion remains
+  `INSUFFICIENT_EVIDENCE` or `REJECTED`.
+- Phase 3D uses combinations of already embargoed, non-overlapping OOS folds to estimate
+  selection PBO and computes Deflated Sharpe from fold returns. A versioned deterministic
+  gate can only grant eligibility for human review and has no automatic promotion path.
+- Formal record: `docs/adr/0012-robust-validation-and-research-gate.md`.
 
 ## Iteration and commit ledger
 
@@ -1351,7 +1377,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C015 — `Add configurable LLM Control Center`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `4e6f505`.
 - Date: 2026-09-04 PDT.
 - User intent: put model configuration into the website and provide a direct chat workspace
   in which Auto, OpenAI GPT-5.6 Sol, or Meta Muse Spark 1.3 can be selected.
@@ -1386,25 +1412,56 @@ The Compose stack is currently intended to remain running for local inspection. 
   - The full evidence-bound research orchestrator and authenticated remote Control Center
     remain future work; no model has monetary or broker authority.
 
+### C016 — `Add robust research validation gate`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-04 PDT.
+- User intent: proceed autonomously through all implementation prerequisites before Phase 6.
+- Scope:
+  - Added deterministic combinatorial train/test selection over pre-purged,
+    non-overlapping OOS folds and formal Probability of Backtest Overfitting output.
+  - Added Bailey–López de Prado Deflated Sharpe diagnostics with sample/trial count,
+    skewness, kurtosis, expected maximum Sharpe, and probability.
+  - Added `research_gate@0.1.0` with versioned minimum folds/candidates/regimes and maximum
+    PBO, minimum DSR/positive-fold, and drawdown thresholds.
+  - Persisted robustness metrics and gate assessment in immutable validation reports through
+    Alembic revision `20260904_0014`; surfaced them through CLI, API, and ledger lineage.
+  - Added deterministic math/gate tests, configuration, ADR 0012, runbook, manifest, README,
+    project-state, and context updates.
+- Architecture/decision impact:
+  - Generated candidates now enter a quantitative rejection surface that accounts for
+    multiple testing and sample sufficiency before LLM/ML orchestration is connected.
+  - Gate outcomes are limited to insufficient, rejected, or eligible for human review.
+    Automatic promotion remains structurally false.
+- Validation:
+  - Flake8, strict mypy, and 52 tests passed.
+  - Validation smoke generated four folds, six combinatorial splits, PBO and DSR output, and
+    correctly returned `INSUFFICIENT_EVIDENCE` because the local sample had fewer than 12
+    OOS folds and failed configured statistical thresholds.
+  - Fresh migration roundtrip, local/Docker doctors, secret scan, and schema-drift checks are
+    completed before commit.
+- Expected global state after commit:
+  - Phase 3D tooling is implemented and ready to reject future LLM/ML candidates.
+  - No strategy has been promoted; production-scale statistical acceptance remains pending
+    future remote data rather than blocking workflow implementation.
+
 ## Open work
 
 Ordered near-term work:
 
-1. Add CPCV/PBO and Deflated Sharpe, then define explicit candidate/champion promotion
-   thresholds after the candidate set and sample-size policy are frozen.
-2. Implement Phase 5A correctness-critical market realism: governed reference-data imports,
+1. Implement Phase 5A correctness-critical market realism: governed reference-data imports,
    spread-aware fills, data-quality failure paths, and scalable resumable jobs.
-3. Complete the evidence-bound LLM research orchestrator and calibrated ML layer on top of
+2. Complete the evidence-bound LLM research orchestrator and calibrated ML layer on top of
    the front-loaded gateway.
-4. During the next U.S. market session, finish Phase 1B real frame/reconnect/gap checks.
-5. Design remote backfill jobs and identify equity/options sources with suitable historical
+3. During the next U.S. market session, finish Phase 1B real frame/reconnect/gap checks.
+4. Design remote backfill jobs and identify equity/options sources with suitable historical
    coverage, retention, and licensing; do not require those large downloads for local tests.
-6. Extend replay with multi-bar partial fills, cancellation, symbol changes, delistings, and
+5. Extend replay with multi-bar partial fills, cancellation, symbol changes, delistings, and
    later capacity calibration on production-scale data.
-7. Add Redis consumer groups, a transactional outbox, dead-letter replay, provider lag,
+6. Add Redis consumer groups, a transactional outbox, dead-letter replay, provider lag,
    sequence-gap, reconciliation, and data-quality dashboards.
-8. Build a labeled corpus and measure cross-provider catalyst dedup precision/recall.
-9. Add authentication/authorization, rate/budget enforcement, and project-data retrieval to
+7. Build a labeled corpus and measure cross-provider catalyst dedup precision/recall.
+8. Add authentication/authorization, rate/budget enforcement, and project-data retrieval to
    turn the local Research Copilot into the citation-bound remote Control Center; create the
    GitHub remote and later validate the guarded cloud pipeline on a selected VPS.
 

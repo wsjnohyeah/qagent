@@ -40,7 +40,7 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert ready.status_code == 200
         assert ready.json()["live_trading_enabled"] is False
         system_status = client.get("/v1/system/status").json()
-        assert system_status["phase"] == "3c-validation-plus-4b-llm-control-center"
+        assert system_status["phase"] == "3d-robust-validation-plus-4b-llm-control-center"
         assert system_status["data_operating_scope"] == "bounded_correctness_samples"
         assert system_status["development_max_backfill_days"] == 120
         assert system_status["development_max_intraday_backfill_days"] == 7

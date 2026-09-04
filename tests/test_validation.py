@@ -12,7 +12,13 @@ from agentic_quant.market_calendar import MarketSessionClock
 from agentic_quant.market_store import MarketDataStore
 from agentic_quant.migrations import upgrade_database
 from agentic_quant.research_store import ResearchStore
-from agentic_quant.validation import WalkForwardValidator
+from agentic_quant.validation import (
+    PromotionGatePolicy,
+    WalkForwardValidator,
+    assess_research_gate,
+    combinatorial_purged_diagnostics,
+    deflated_sharpe_diagnostics,
+)
 
 
 def _regime_bars(count: int = 60) -> tuple[StockBar, ...]:
@@ -94,6 +100,15 @@ def test_walk_forward_validation_preserves_embargo_and_all_candidates(
     )
     assert all(fold.selected_test_rank in {1, 2} for fold in report.folds)
     assert report.aggregate_metrics["fold_count"] == 3
+    pbo = report.robustness_metrics["combinatorial_purged_validation"]
+    assert pbo["group_count"] == 3
+    assert pbo["combination_count_evaluated"] == 3
+    assert Decimal("0") <= pbo["probability_of_backtest_overfitting"] <= Decimal(
+        "1"
+    )
+    assert report.robustness_metrics["deflated_sharpe"]["sample_size"] == 3
+    assert report.gate_assessment["status"] == "INSUFFICIENT_EVIDENCE"
+    assert report.gate_assessment["automatic_promotion"] is False
     assert len(report.report_hash) == 64
     assert store.health_summary()["experiment_runs"] == 12
     assert store.health_summary()["validation_reports"] == 1
@@ -103,6 +118,7 @@ def test_walk_forward_validation_preserves_embargo_and_all_candidates(
     assert recent[0]["fold_count"] == 3
     stored = store.validation_report(report.validation_report_id)
     assert stored is not None
+    assert stored["gate_assessment"]["status"] == "INSUFFICIENT_EVIDENCE"
     assert [fold["fold_number"] for fold in stored["folds"]] == [1, 2, 3]
     events = ledger.by_correlation_id(report.validation_report_id)
     assert events[-1]["event_type"] == "research.validation.completed.v1"
@@ -124,3 +140,97 @@ def test_walk_forward_validation_rejects_overlapping_test_windows(
             step_bars=4,
             embargo_bars=1,
         )
+
+
+def test_pbo_and_deflated_sharpe_diagnostics_are_bounded_and_deterministic() -> None:
+    scores = {
+        "alpha": (
+            Decimal("1.0"),
+            Decimal("0.8"),
+            Decimal("-0.2"),
+            Decimal("0.7"),
+        ),
+        "baseline": (
+            Decimal("0.2"),
+            Decimal("0.3"),
+            Decimal("0.1"),
+            Decimal("0.2"),
+        ),
+        "unstable": (
+            Decimal("2.0"),
+            Decimal("-2.0"),
+            Decimal("2.0"),
+            Decimal("-2.0"),
+        ),
+    }
+    first = combinatorial_purged_diagnostics(scores)
+    second = combinatorial_purged_diagnostics(scores)
+    assert first == second
+    assert first["combination_count_total"] == 6
+    assert Decimal("0") <= first["probability_of_backtest_overfitting"] <= Decimal(
+        "1"
+    )
+
+    positive = deflated_sharpe_diagnostics(
+        tuple(
+            Decimal(value)
+            for value in (
+                "0.01",
+                "0.02",
+                "0.015",
+                "0.03",
+                "0.012",
+                "0.018",
+                "0.025",
+                "0.011",
+                "0.019",
+                "0.017",
+                "0.022",
+                "0.014",
+            )
+        ),
+        number_of_trials=3,
+    )
+    negative = deflated_sharpe_diagnostics(
+        tuple(-value for value in scores["baseline"]),
+        number_of_trials=3,
+    )
+    assert positive["deflated_sharpe_probability"] > negative[
+        "deflated_sharpe_probability"
+    ]
+
+
+def test_research_gate_never_auto_promotes_and_requires_enough_evidence() -> None:
+    policy = PromotionGatePolicy(
+        version="research_gate@0.1.0",
+        minimum_oos_folds=4,
+        minimum_candidate_count=2,
+        minimum_regime_count=2,
+        maximum_probability_of_backtest_overfitting=Decimal("0.25"),
+        minimum_deflated_sharpe_probability=Decimal("0.90"),
+        minimum_positive_oos_fold_rate=Decimal("0.50"),
+        maximum_allowed_drawdown=Decimal("-0.20"),
+    )
+    eligible = assess_research_gate(
+        policy=policy,
+        fold_count=8,
+        candidate_count=3,
+        regime_count=3,
+        positive_fold_rate=Decimal("0.75"),
+        worst_drawdown=Decimal("-0.10"),
+        probability_of_backtest_overfitting=Decimal("0.10"),
+        deflated_sharpe_probability=Decimal("0.97"),
+    )
+    insufficient = assess_research_gate(
+        policy=policy,
+        fold_count=2,
+        candidate_count=3,
+        regime_count=1,
+        positive_fold_rate=Decimal("0.75"),
+        worst_drawdown=Decimal("-0.10"),
+        probability_of_backtest_overfitting=Decimal("0.10"),
+        deflated_sharpe_probability=Decimal("0.97"),
+    )
+    assert eligible["status"] == "ELIGIBLE_FOR_HUMAN_REVIEW"
+    assert eligible["automatic_promotion"] is False
+    assert insufficient["status"] == "INSUFFICIENT_EVIDENCE"

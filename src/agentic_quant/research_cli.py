@@ -21,7 +21,11 @@ from agentic_quant.research import (
     research_code_sha256,
 )
 from agentic_quant.research_store import ResearchStore
-from agentic_quant.validation import SELECTION_METRICS, WalkForwardValidator
+from agentic_quant.validation import (
+    SELECTION_METRICS,
+    WalkForwardValidator,
+    load_promotion_gate_policy,
+)
 
 
 def _parse_time(value: str) -> datetime:
@@ -212,6 +216,9 @@ def _validate(settings: Settings, args: argparse.Namespace) -> None:
         research_store,
         EventLedger(settings.database_url),
         calendar_name=settings.market_calendar,
+        promotion_policy=load_promotion_gate_policy(
+            settings.research_promotion_policy_path
+        ),
     ).run(
         symbol=args.symbol.upper(),
         timeframe=args.timeframe,
@@ -245,6 +252,9 @@ def _validation_smoke(settings: Settings, args: argparse.Namespace) -> None:
         research_store,
         EventLedger(settings.database_url),
         calendar_name=settings.market_calendar,
+        promotion_policy=load_promotion_gate_policy(
+            settings.research_promotion_policy_path
+        ),
     ).run(
         symbol=symbol,
         timeframe="1Day",
@@ -269,6 +279,12 @@ def _validation_smoke(settings: Settings, args: argparse.Namespace) -> None:
                     "aggregate_metrics"
                 ],
                 "regime_metrics": report.model_dump(mode="json")["regime_metrics"],
+                "robustness_metrics": report.model_dump(mode="json")[
+                    "robustness_metrics"
+                ],
+                "gate_assessment": report.model_dump(mode="json")[
+                    "gate_assessment"
+                ],
             },
             indent=2,
         )

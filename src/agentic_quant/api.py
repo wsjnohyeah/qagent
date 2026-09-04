@@ -201,7 +201,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "live_trading_enabled": False,
             "new_exposure_paused": application.state.new_exposure_paused,
             "database": "healthy" if ledger.health() else "unhealthy",
-            "phase": "3c-validation-plus-4b-llm-control-center",
+            "phase": "3d-robust-validation-plus-4b-llm-control-center",
             "data_operating_scope": app_settings.data_operating_scope,
             "development_max_backfill_days": (
                 app_settings.development_max_backfill_days

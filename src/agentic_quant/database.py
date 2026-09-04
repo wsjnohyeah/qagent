@@ -589,6 +589,8 @@ validation_reports = Table(
     Column("embargo_bars", Integer, nullable=False),
     Column("aggregate_metrics", JSON, nullable=False),
     Column("regime_metrics", JSON, nullable=False),
+    Column("robustness_metrics", JSON, nullable=False),
+    Column("gate_assessment", JSON, nullable=False),
     Column("report_hash", String(64), nullable=False, index=True),
     Column("code_git_sha", String(64), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False, index=True),

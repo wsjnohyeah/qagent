@@ -2,13 +2,13 @@
 
 ## Current
 
-- Phases 0 and 2 are complete; the Phase 3C research-validation baseline and front-loaded
+- Phases 0 and 2 are complete; the Phase 3D research-validation gate and front-loaded
   Phase 4B LLM gateway/Control Center are implemented. Phase 1B open-session validation is
   pending.
 - Local-lite uses Python 3.12, a project-local `uv`, SQLite, and filesystem object storage.
 - The Control API, local model/research web console, append-only event ledger, deterministic risk engine, and synthetic vertical slice exist.
 - `live` is not a valid trading mode; `LIVE_TRADING_ENABLED=true` fails configuration validation.
-- Local lint, strict type checking, 50 tests, API readiness, the HTTP vertical slice, and the secret scan pass.
+- Local lint, strict type checking, 52 tests, API readiness, the HTTP vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
 - The full Compose stack is healthy: PostgreSQL 17, Redis 8, MinIO, and the API all passed direct checks; the PostgreSQL-backed shadow slice recorded six lineage events.
 - `context.md` is the required master record for architecture, discussions, iterations, commit contents, and post-commit global state.
@@ -26,7 +26,7 @@
 - Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
   experiment runs, backtest trades, corporate actions, historical universe membership,
   feature parity checks, and walk-forward reports are stored through Alembic revision
-  `20260904_0013`.
+  `20260904_0014`.
 - The Phase 3 runner provides buy-and-hold, long/cash momentum, and long/cash
   mean-reversion baselines with next-bar execution, commission, slippage, metrics, hashes,
   and append-only completion events.
@@ -41,6 +41,9 @@
 - Phase 3C persists rolling train/embargo/test folds, evaluates every candidate both in and
   out of sample, reports train-to-test degradation and selection failures, and separates
   selected out-of-sample results into up/down/sideways realized regimes.
+- Phase 3D adds combinatorial selection-risk/PBO diagnostics, Deflated Sharpe, and a
+  versioned minimum-sample/performance gate. It can only grant eligibility for human review;
+  bounded local evidence remains rejected or insufficient and never promotes automatically.
 - The Phase 4A gateway routes critical research to OpenAI `gpt-5.6-sol` and interactive or
   routine work to Meta `muse-spark-1.3` through versioned configuration. Calls are bounded,
   fail closed without project credentials, and retain immutable hashes, usage, latency,
@@ -56,18 +59,16 @@
 
 ## Next
 
-1. Add CPCV, Probability of Backtest Overfitting, Deflated Sharpe, and explicit promotion
-   thresholds after the candidate set and sample-size policy are frozen.
-2. Implement Phase 5A correctness-critical market realism: governed reference-data imports,
+1. Implement Phase 5A correctness-critical market realism: governed reference-data imports,
    spread-aware fills, data-quality failure paths, and scalable resumable jobs.
-3. Complete the Phase 4 research orchestrator and calibrated ML layer on top of the gateway.
-4. Capture real SIP trade/quote/bar frames and reconnect/gap repair during the next open session.
-5. Design remote long-horizon backfill jobs; continue using bounded samples for local
+2. Complete the Phase 4 research orchestrator and calibrated ML layer on top of the gateway.
+3. Capture real SIP trade/quote/bar frames and reconnect/gap repair during the next open session.
+4. Design remote long-horizon backfill jobs; continue using bounded samples for local
    correctness verification.
-6. Extend fill realism with multi-bar partial fills, order cancellation, spread/quote data,
+5. Extend fill realism with multi-bar partial fills, order cancellation, spread/quote data,
    and symbol-change/delisting replay.
-7. Add Redis consumer groups, durable offsets, a transactional outbox, and dead-letter replay.
-8. Add authentication, budgets, and session audit before remotely exposing the Control
+6. Add Redis consumer groups, durable offsets, a transactional outbox, and dead-letter replay.
+7. Add authentication, budgets, and session audit before remotely exposing the Control
    Center; then expand its data, strategy, and Decision Inspector views.
 
 ## Blocked
@@ -95,3 +96,5 @@
   immutable invocation audits, bounded calls, and no automatic cross-provider fallback.
 - ADR 0011: keep the YAML route map as a reviewed base, append development Control Center
   overrides as immutable revisions, and provide bounded Auto/OpenAI/Meta research chat.
+- ADR 0012: calculate PBO and Deflated Sharpe on pre-purged OOS folds and apply a versioned,
+  fail-closed eligibility gate that cannot promote automatically.

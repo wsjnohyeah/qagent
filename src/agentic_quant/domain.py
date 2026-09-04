@@ -422,6 +422,8 @@ class WalkForwardValidationReport(FrozenModel):
     folds: tuple[WalkForwardFold, ...] = Field(min_length=1)
     aggregate_metrics: dict[str, Decimal | int | str]
     regime_metrics: dict[str, dict[str, Decimal | int | str]]
+    robustness_metrics: dict[str, Any]
+    gate_assessment: dict[str, Any]
     report_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     code_git_sha: str
     created_at: datetime

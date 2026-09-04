@@ -1,4 +1,4 @@
-version: data_manifest@0.6.0
+version: data_manifest@0.7.0
 providers:
   synthetic:
     enabled: true
@@ -30,10 +30,14 @@ research:
     max_volume_participation_default: 0.05
     fixed_market_impact_bps_per_side_default: 1.0
   validation:
-    method: rolling_walk_forward
+    method: rolling_walk_forward_plus_combinatorial_purged_diagnostics
     minimum_embargo_bars: 1
     overlapping_test_windows_allowed: false
     selection_failure_diagnostic: selected_oos_below_median_rate
+    probability_of_backtest_overfitting: required
+    deflated_sharpe: required
+    promotion_policy: research_gate@0.1.0
+    automatic_promotion: false
     regimes: [up, down, sideways]
   universe_membership:
     effective_intervals_required: true

@@ -108,7 +108,13 @@ declared metric, and then retains every candidate's out-of-sample run. Test wind
 overlap and at least one bar is embargoed between train and test. The report includes
 compounded and mean selected out-of-sample return, mean out-of-sample Sharpe, worst drawdown,
 train-to-test Sharpe degradation, selected-strategy out-of-sample rank, a below-median
-selection rate, strategy switches, and realized up/down/sideways regime summaries.
+selection rate, strategy switches, and realized up/down/sideways regime summaries. Phase 3D
+also resamples candidate selection across combinations of the already purged, non-overlapping
+OOS folds to estimate PBO, and calculates Deflated Sharpe from those OOS fold returns.
+
+The versioned thresholds live in `configs/research_promotion_policy.yaml`. The assessment can
+only return `INSUFFICIENT_EVIDENCE`, `REJECTED`, or `ELIGIBLE_FOR_HUMAN_REVIEW`; it never
+promotes automatically. The bounded smoke sample is intentionally too small for eligibility.
 
 This is a bias-detection baseline, not a claim that the selected strategy generalizes.
 Inspect reports with:
@@ -155,10 +161,9 @@ curl -fsS \
 - The current fill model uses market orders against bar open/close with fixed slippage and
   market-impact assumptions. Multi-bar partial fills, queue position, bid/ask spread,
   cancellations, and intrabar path simulation remain open.
-- Delisted-security acquisition, borrow, options fills, taxes, dynamic market impact,
-  capacity analysis, CPCV/PBO, and Deflated Sharpe are not implemented.
+- Delisted-security acquisition, borrow, options fills, taxes, dynamic market impact, and
+  capacity analysis are not implemented.
 - The LLM research orchestrator and predictive ML models are intentionally not connected
   until the validation surface can reject their candidates independently.
-- Full combinatorial purged cross-validation, formal PBO, Deflated Sharpe, and promotion
-  thresholds remain open; the current below-median selection rate is a transparent early
-  warning, not a substitute for those methods.
+- Production-scale statistical acceptance remains open. Local CPCV/PBO/DSR output validates
+  computation and fail-closed behavior, not alpha or eligibility for deployment.

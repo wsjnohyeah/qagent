@@ -2,11 +2,21 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from itertools import combinations
+from math import comb, log, sqrt
+from pathlib import Path
+import random
+from statistics import NormalDist, median
+from typing import Any, Self
+
+from pydantic import Field, model_validator
+import yaml
 
 from agentic_quant.domain import (
     BacktestCostModel,
     BacktestResult,
     EventEnvelope,
+    FrozenModel,
     MarketRegime,
     StockBar,
     WalkForwardFold,
@@ -26,6 +36,264 @@ from agentic_quant.research_store import ResearchStore, _canonical_hash
 _ONE = Decimal("1")
 _ZERO = Decimal("0")
 SELECTION_METRICS = ("sharpe_ratio", "sortino_ratio", "total_return")
+_NORMAL = NormalDist()
+_EULER_MASCHERONI = 0.5772156649015329
+
+
+class PromotionGatePolicy(FrozenModel):
+    version: str = Field(pattern=r"^research_gate@[0-9]+\.[0-9]+\.[0-9]+$")
+    minimum_oos_folds: int = Field(ge=4)
+    minimum_candidate_count: int = Field(ge=2)
+    minimum_regime_count: int = Field(ge=1, le=3)
+    maximum_probability_of_backtest_overfitting: Decimal = Field(ge=0, le=1)
+    minimum_deflated_sharpe_probability: Decimal = Field(ge=0, le=1)
+    minimum_positive_oos_fold_rate: Decimal = Field(ge=0, le=1)
+    maximum_allowed_drawdown: Decimal = Field(le=0)
+
+    @model_validator(mode="after")
+    def thresholds_are_conservative(self) -> Self:
+        if self.maximum_allowed_drawdown < Decimal("-1"):
+            raise ValueError("maximum_allowed_drawdown cannot be below -1")
+        return self
+
+
+DEFAULT_PROMOTION_GATE_POLICY = PromotionGatePolicy(
+    version="research_gate@0.1.0",
+    minimum_oos_folds=12,
+    minimum_candidate_count=3,
+    minimum_regime_count=2,
+    maximum_probability_of_backtest_overfitting=Decimal("0.20"),
+    minimum_deflated_sharpe_probability=Decimal("0.95"),
+    minimum_positive_oos_fold_rate=Decimal("0.55"),
+    maximum_allowed_drawdown=Decimal("-0.20"),
+)
+
+
+def load_promotion_gate_policy(path: Path) -> PromotionGatePolicy:
+    with path.open("r", encoding="utf-8") as handle:
+        return PromotionGatePolicy.model_validate(yaml.safe_load(handle))
+
+
+def _decimal(value: float) -> Decimal:
+    return Decimal(str(round(value, 12)))
+
+
+def _float_mean(values: list[float]) -> float:
+    return sum(values) / len(values)
+
+
+def _sample_test_combinations(
+    *,
+    group_count: int,
+    test_group_count: int,
+    seed: int,
+    maximum: int = 512,
+) -> tuple[tuple[int, ...], ...]:
+    total = comb(group_count, test_group_count)
+    if total <= maximum:
+        return tuple(combinations(range(group_count), test_group_count))
+    generator = random.Random(seed)
+    selected: set[tuple[int, ...]] = set()
+    while len(selected) < maximum:
+        selected.add(
+            tuple(sorted(generator.sample(range(group_count), test_group_count)))
+        )
+    return tuple(sorted(selected))
+
+
+def combinatorial_purged_diagnostics(
+    candidate_scores: dict[str, tuple[Decimal, ...]],
+) -> dict[str, Any]:
+    if len(candidate_scores) < 2:
+        raise ValueError("PBO requires at least two strategy candidates")
+    lengths = {len(values) for values in candidate_scores.values()}
+    if len(lengths) != 1:
+        raise ValueError("Every PBO candidate must have the same number of OOS groups")
+    group_count = lengths.pop()
+    if group_count < 2:
+        raise ValueError("PBO requires at least two non-overlapping OOS groups")
+    test_group_count = max(1, group_count // 2)
+    seed_material = {
+        name: [str(value) for value in values]
+        for name, values in sorted(candidate_scores.items())
+    }
+    seed = int(_canonical_hash(seed_material)[:16], 16)
+    test_splits = _sample_test_combinations(
+        group_count=group_count,
+        test_group_count=test_group_count,
+        seed=seed,
+    )
+    logits: list[float] = []
+    selected_frequency = {name: 0 for name in sorted(candidate_scores)}
+    all_indices = set(range(group_count))
+    for test_indices in test_splits:
+        train_indices = sorted(all_indices - set(test_indices))
+        train_scores = {
+            name: _float_mean([float(values[index]) for index in train_indices])
+            for name, values in candidate_scores.items()
+        }
+        selected = max(sorted(train_scores), key=train_scores.__getitem__)
+        selected_frequency[selected] += 1
+        test_scores = {
+            name: _float_mean([float(values[index]) for index in test_indices])
+            for name, values in candidate_scores.items()
+        }
+        selected_score = test_scores[selected]
+        lower = sum(value < selected_score for value in test_scores.values())
+        equal = sum(value == selected_score for value in test_scores.values())
+        relative_rank = (lower + 0.5 * equal) / len(test_scores)
+        relative_rank = min(max(relative_rank, 1e-12), 1 - 1e-12)
+        logits.append(log(relative_rank / (1 - relative_rank)))
+    overfit_count = sum(value <= 0 for value in logits)
+    total_combinations = comb(group_count, test_group_count)
+    return {
+        "method": "CSCV over pre-purged non-overlapping OOS folds",
+        "candidate_count": len(candidate_scores),
+        "group_count": group_count,
+        "test_group_count": test_group_count,
+        "combination_count_total": total_combinations,
+        "combination_count_evaluated": len(test_splits),
+        "deterministically_sampled": total_combinations > len(test_splits),
+        "probability_of_backtest_overfitting": _decimal(
+            overfit_count / len(logits)
+        ),
+        "median_oos_logit": _decimal(median(logits)),
+        "selected_strategy_frequency": selected_frequency,
+    }
+
+
+def deflated_sharpe_diagnostics(
+    returns: tuple[Decimal, ...],
+    *,
+    number_of_trials: int,
+) -> dict[str, Any]:
+    if number_of_trials < 1:
+        raise ValueError("number_of_trials must be positive")
+    observations = [float(value) for value in returns]
+    sample_size = len(observations)
+    base = {
+        "method": "Bailey-Lopez-de-Prado DSR on non-overlapping OOS fold returns",
+        "sample_size": sample_size,
+        "number_of_trials": number_of_trials,
+    }
+    if sample_size < 3:
+        return {
+            **base,
+            "observed_sharpe": Decimal("0"),
+            "expected_maximum_sharpe": Decimal("0"),
+            "skewness": Decimal("0"),
+            "kurtosis": Decimal("0"),
+            "deflated_sharpe_probability": Decimal("0"),
+            "sufficient_observations": False,
+        }
+    mean_value = _float_mean(observations)
+    centered = [value - mean_value for value in observations]
+    second_moment = _float_mean([value**2 for value in centered])
+    if second_moment <= 1e-18:
+        return {
+            **base,
+            "observed_sharpe": Decimal("0"),
+            "expected_maximum_sharpe": Decimal("0"),
+            "skewness": Decimal("0"),
+            "kurtosis": Decimal("0"),
+            "deflated_sharpe_probability": Decimal("0"),
+            "sufficient_observations": False,
+            "degenerate_returns": True,
+        }
+    standard_deviation = sqrt(second_moment)
+    observed_sharpe = mean_value / standard_deviation
+    skewness = _float_mean([value**3 for value in centered]) / (
+        standard_deviation**3
+    )
+    kurtosis = _float_mean([value**4 for value in centered]) / (
+        standard_deviation**4
+    )
+    if number_of_trials == 1:
+        expected_maximum = 0.0
+    else:
+        trial_variance = 1.0 / max(sample_size - 1, 1)
+        expected_maximum = sqrt(trial_variance) * (
+            (1 - _EULER_MASCHERONI)
+            * _NORMAL.inv_cdf(1 - 1 / number_of_trials)
+            + _EULER_MASCHERONI
+            * _NORMAL.inv_cdf(1 - 1 / (number_of_trials * 2.718281828459045))
+        )
+    sharpe_variance = max(
+        (
+            1
+            - skewness * observed_sharpe
+            + ((kurtosis - 1) / 4) * observed_sharpe**2
+        )
+        / (sample_size - 1),
+        1e-12,
+    )
+    probability = _NORMAL.cdf(
+        (observed_sharpe - expected_maximum) / sqrt(sharpe_variance)
+    )
+    return {
+        **base,
+        "observed_sharpe": _decimal(observed_sharpe),
+        "expected_maximum_sharpe": _decimal(expected_maximum),
+        "skewness": _decimal(skewness),
+        "kurtosis": _decimal(kurtosis),
+        "deflated_sharpe_probability": _decimal(probability),
+        "sufficient_observations": True,
+    }
+
+
+def assess_research_gate(
+    *,
+    policy: PromotionGatePolicy,
+    fold_count: int,
+    candidate_count: int,
+    regime_count: int,
+    positive_fold_rate: Decimal,
+    worst_drawdown: Decimal,
+    probability_of_backtest_overfitting: Decimal,
+    deflated_sharpe_probability: Decimal,
+) -> dict[str, Any]:
+    evidence_shortfalls: list[str] = []
+    threshold_failures: list[str] = []
+    if fold_count < policy.minimum_oos_folds:
+        evidence_shortfalls.append(
+            f"oos_folds {fold_count} < {policy.minimum_oos_folds}"
+        )
+    if candidate_count < policy.minimum_candidate_count:
+        evidence_shortfalls.append(
+            f"candidates {candidate_count} < {policy.minimum_candidate_count}"
+        )
+    if regime_count < policy.minimum_regime_count:
+        evidence_shortfalls.append(
+            f"regimes {regime_count} < {policy.minimum_regime_count}"
+        )
+    if (
+        probability_of_backtest_overfitting
+        > policy.maximum_probability_of_backtest_overfitting
+    ):
+        threshold_failures.append(
+            "probability_of_backtest_overfitting exceeds policy maximum"
+        )
+    if deflated_sharpe_probability < policy.minimum_deflated_sharpe_probability:
+        threshold_failures.append("deflated_sharpe_probability is below policy minimum")
+    if positive_fold_rate < policy.minimum_positive_oos_fold_rate:
+        threshold_failures.append("positive_oos_fold_rate is below policy minimum")
+    if worst_drawdown < policy.maximum_allowed_drawdown:
+        threshold_failures.append("worst_selected_oos_drawdown exceeds policy loss limit")
+    if evidence_shortfalls:
+        status = "INSUFFICIENT_EVIDENCE"
+    elif threshold_failures:
+        status = "REJECTED"
+    else:
+        status = "ELIGIBLE_FOR_HUMAN_REVIEW"
+    return {
+        "policy_version": policy.version,
+        "policy_sha256": _canonical_hash(policy.model_dump(mode="json")),
+        "status": status,
+        "eligible_for_human_review": status == "ELIGIBLE_FOR_HUMAN_REVIEW",
+        "automatic_promotion": False,
+        "evidence_shortfalls": evidence_shortfalls,
+        "threshold_failures": threshold_failures,
+    }
 
 
 def _mean(values: list[Decimal]) -> Decimal:
@@ -50,9 +318,11 @@ class WalkForwardValidator:
         ledger: EventLedger | None = None,
         *,
         calendar_name: str = "XNYS",
+        promotion_policy: PromotionGatePolicy = DEFAULT_PROMOTION_GATE_POLICY,
     ) -> None:
         self.store = store
         self.ledger = ledger
+        self.promotion_policy = promotion_policy
         self.backtester = ResearchBacktester(
             store,
             ledger,
@@ -106,6 +376,9 @@ class WalkForwardValidator:
         costs = cost_model or BacktestCostModel()
         strategy_code_hash = research_code_sha256()
         folds: list[WalkForwardFold] = []
+        candidate_oos_scores: dict[str, list[Decimal]] = {
+            strategy_type: [] for strategy_type in strategy_types
+        }
         offset = 0
         while offset + required <= len(decision_indices):
             train_indices = decision_indices[offset : offset + train_bars]
@@ -140,6 +413,10 @@ class WalkForwardValidator:
                 initial_equity=initial_equity,
                 cost_model=costs,
             )
+            for name, result in test_results.items():
+                candidate_oos_scores[name].append(
+                    _selection_value(result, selection_metric)
+                )
             selected_test_value = _selection_value(
                 test_results[selected_strategy],
                 selection_metric,
@@ -190,6 +467,9 @@ class WalkForwardValidator:
             step_bars=step_bars,
             embargo_bars=embargo_bars,
             folds=tuple(folds),
+            candidate_oos_scores={
+                name: tuple(values) for name, values in candidate_oos_scores.items()
+            },
             code_git_sha=code_git_sha,
         )
         self.store.record_validation_report(report)
@@ -284,6 +564,7 @@ class WalkForwardValidator:
         step_bars: int,
         embargo_bars: int,
         folds: tuple[WalkForwardFold, ...],
+        candidate_oos_scores: dict[str, tuple[Decimal, ...]],
         code_git_sha: str,
     ) -> WalkForwardValidationReport:
         test_returns = [fold.selected_test_metrics.total_return for fold in folds]
@@ -324,6 +605,33 @@ class WalkForwardValidator:
             "strategy_switch_count": switches,
         }
         regime_metrics = self._regime_metrics(folds)
+        pbo_metrics = combinatorial_purged_diagnostics(candidate_oos_scores)
+        dsr_metrics = deflated_sharpe_diagnostics(
+            tuple(test_returns),
+            number_of_trials=len(strategy_types),
+        )
+        robustness_metrics = {
+            "combinatorial_purged_validation": pbo_metrics,
+            "deflated_sharpe": dsr_metrics,
+        }
+        gate_assessment = assess_research_gate(
+            policy=self.promotion_policy,
+            fold_count=len(folds),
+            candidate_count=len(strategy_types),
+            regime_count=len(regime_metrics),
+            positive_fold_rate=Decimal(
+                str(aggregate["positive_oos_fold_rate"])
+            ),
+            worst_drawdown=Decimal(
+                str(aggregate["worst_selected_oos_drawdown"])
+            ),
+            probability_of_backtest_overfitting=Decimal(
+                str(pbo_metrics["probability_of_backtest_overfitting"])
+            ),
+            deflated_sharpe_probability=Decimal(
+                str(dsr_metrics["deflated_sharpe_probability"])
+            ),
+        )
         report_material = {
             "symbol": symbol.upper(),
             "timeframe": timeframe,
@@ -362,6 +670,8 @@ class WalkForwardValidator:
                 regime: {key: str(value) for key, value in metrics.items()}
                 for regime, metrics in regime_metrics.items()
             },
+            "robustness_metrics": robustness_metrics,
+            "gate_assessment": gate_assessment,
         }
         return WalkForwardValidationReport(
             validation_report_id=uuid7(),
@@ -376,6 +686,8 @@ class WalkForwardValidator:
             folds=folds,
             aggregate_metrics=aggregate,
             regime_metrics=regime_metrics,
+            robustness_metrics=robustness_metrics,
+            gate_assessment=gate_assessment,
             report_hash=_canonical_hash(report_material),
             code_git_sha=code_git_sha,
             created_at=datetime.now(UTC),
@@ -407,6 +719,7 @@ class WalkForwardValidator:
     def _record_completion(self, report: WalkForwardValidationReport) -> None:
         if self.ledger is None:
             return
+        serialized = report.model_dump(mode="json")
         self.ledger.append(
             EventEnvelope(
                 event_id=uuid7(),
@@ -425,6 +738,8 @@ class WalkForwardValidator:
                         key: str(value)
                         for key, value in report.aggregate_metrics.items()
                     },
+                    "robustness_metrics": serialized["robustness_metrics"],
+                    "gate_assessment": serialized["gate_assessment"],
                 },
             )
         )

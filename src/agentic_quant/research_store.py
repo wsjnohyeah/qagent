@@ -409,6 +409,12 @@ class ResearchStore:
                         "aggregate_metrics"
                     ],
                     regime_metrics=report.model_dump(mode="json")["regime_metrics"],
+                    robustness_metrics=report.model_dump(mode="json")[
+                        "robustness_metrics"
+                    ],
+                    gate_assessment=report.model_dump(mode="json")[
+                        "gate_assessment"
+                    ],
                     report_hash=report.report_hash,
                     code_git_sha=report.code_git_sha,
                     created_at=report.created_at,
