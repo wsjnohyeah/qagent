@@ -6,7 +6,7 @@ Context format: v1
 
 Current phase: Phase 2 complete; Phase 1B open-session verification pending
 
-Current committed baseline: `5645928 Add point-in-time event document pipeline`
+Current documented baseline: C007 — `Record agentic research philosophy`
 
 ## Purpose and authority
 
@@ -101,7 +101,7 @@ Development service ports bind only to loopback. The local Compose credentials a
 
 ## Product intent and invariant boundaries
 
-The product is a cloud-hosted, agent-operated quantitative research and paper-trading platform. It should ingest point-in-time market and event data, produce reproducible features, run deterministic strategies and calibrated statistical/ML ranking, use an LLM only for bounded evidence interpretation, enforce independent deterministic risk controls, and expose a web Trading Control Center with complete audit lineage.
+The product is a cloud-hosted, agent-operated quantitative research and paper-trading platform. It should ingest point-in-time market and event data, produce reproducible features, let an LLM orchestrate evidence analysis and strategy research, combine those hypotheses with calibrated statistical/ML forecasts, validate every candidate through bias-aware backtesting, enforce independent deterministic portfolio/risk/execution controls, and expose a web Trading Control Center with complete audit lineage.
 
 Non-negotiable boundaries:
 
@@ -112,6 +112,145 @@ Non-negotiable boundaries:
 - Every decision must be reconstructable from information available at its decision timestamp.
 - Persistent state lives in Git, PostgreSQL, object storage, and the append-only event ledger—not chat history or model memory.
 - Production initially means `shadow` or `paper`; promotion is earned through research, backtest, shadow, and paper gates.
+
+## Core research philosophy
+
+### Product thesis
+
+The project's intended innovation is not “an LLM that picks stocks.” It is an automated,
+auditable strategy-research and deployment system in which:
+
+1. LLMs act as research orchestrators. They interpret time-bounded evidence, propose causal
+   hypotheses, design candidate features and strategies, critique competing explanations,
+   synthesize ML and qualitative findings, and choose useful follow-up experiments.
+2. Statistical and ML models provide calibrated numerical forecasts, rankings, uncertainty,
+   and out-of-sample evidence. They remain first-class peers rather than tools hidden behind
+   an LLM persona.
+3. A bias-aware backtester is the empirical judge. An eloquent thesis, high model confidence,
+   or multi-agent consensus never substitutes for point-in-time out-of-sample validation.
+4. Deterministic code owns portfolio construction, position sizing, restricted-security
+   enforcement, risk limits, order state, and broker interaction. No LLM may bypass these
+   controls or promote its own strategy into a trading mode.
+5. Every research and runtime artifact is versioned and traceable: evidence, features,
+   prompts, model versions, generated code, strategy specifications, data snapshots,
+   experiment results, approvals, and realized outcomes.
+
+The durable description of the product is therefore:
+
+> An LLM-orchestrated, ML-calibrated, point-in-time-validated strategy research system with
+> deterministic portfolio, risk, and execution control.
+
+### Separation of authorities
+
+| Authority | May do | Must not do |
+|---|---|---|
+| LLM research orchestrator | Read citation-bound evidence and ML summaries; propose hypotheses, features, `StrategySpec` candidates, and experiments; critique and synthesize results | Approve risk, alter hard limits, size or submit orders, promote itself, or treat narrative confidence as validation |
+| Specialist evidence agents | Extract structured events, surprise, direction, horizon, uncertainty, and evidence links from filings/news/IR data | Invent unavailable facts, use post-decision information, or silently merge contradictory sources |
+| Statistical/ML layer | Train point-in-time models; emit calibrated forecasts, ranks, uncertainty, and diagnostics | Select its own test period, hide failed trials, or bypass portfolio/risk policy |
+| Backtest and validation layer | Replay realistic market state; model costs/fills; compare baselines; run out-of-sample and overfitting diagnostics | Rewrite source history, use future constituents/corrections, or certify a strategy from in-sample performance alone |
+| Portfolio/risk/execution layer | Convert approved signals into bounded targets, enforce all hard controls, and operate only in an authorized mode | Accept free-form LLM orders or credentials, weaken fail-closed controls, or infer authorization for live money |
+
+The LLM may be creative in the research plane. It has no monetary authority in the runtime
+plane. Its outputs cross that boundary only as typed, versioned artifacts that have passed
+independent validation and human-controlled promotion gates.
+
+### Required research contracts
+
+The target research system should converge on these stable contracts:
+
+- `EvidencePacket`: immutable source references, content/version hashes, event and ingestion
+  timestamps, source trust, entity resolution, and the exact as-of boundary visible to an
+  experiment or decision.
+- `FeatureSnapshot`: point-in-time numerical and categorical inputs, feature definitions,
+  lineage, availability times, and data-quality flags.
+- `Forecast`: model/version, instrument, horizon, expected return or class probability,
+  calibrated uncertainty, and training-data cutoff.
+- `Signal`: instrument, direction, horizon, conviction, expected return, uncertainty,
+  supporting evidence IDs, and producing strategy/model versions.
+- `StrategySpec`: universe, required data, features/models, entry/exit logic, rebalance
+  schedule, sizing policy, risk assumptions, cost/fill model, and executable artifact hash.
+- `ExperimentRun`: hypothesis, code/Git SHA, data hash, prompts and LLM version, dependency
+  versions, random seeds, train/validation/test windows, all attempted variants, resource
+  cost, metrics, artifacts, and disposition.
+- `PromotionDecision`: candidate/champion comparison, validation gates, approver, target
+  mode, effective time, rollback rule, and immutable reason.
+
+LLM memory must be evidence memory rather than an ungoverned persona memory. It should link
+each prior prediction to the evidence available at that time and its later realized outcome.
+Research/test boundaries must prevent a reflection generated after an outcome from leaking
+back into the earlier decision state.
+
+### Research and promotion lifecycle
+
+The intended lifecycle is:
+
+```text
+point-in-time evidence + features
+  -> LLM/ML hypothesis generation
+  -> typed StrategySpec and executable candidate
+  -> static leakage and contract checks
+  -> fast vectorized screen
+  -> event-driven replay with realistic fills and costs
+  -> walk-forward / regime / overfitting validation
+  -> candidate registry and human-controlled promotion
+  -> shadow
+  -> paper
+  -> controlled production only after a future explicit authorization
+```
+
+Backtest, shadow, and paper should execute the same strategy logic. Environment-specific
+clock, data, and broker adapters may change; signal and portfolio semantics should not.
+Research remains a parallel lab with many disposable candidates, while the runtime contains
+only explicitly promoted, version-pinned strategies.
+
+### Evaluation doctrine
+
+- No open-source popularity, paper headline, backtest win rate, cumulative return, or LLM
+  confidence is evidence of deployable alpha by itself.
+- Always compare against buy-and-hold where relevant, simple rules, linear/statistical
+  models, and at least one strong ML baseline. Complexity must earn its place.
+- Report net annualized return, excess return, Sharpe, Sortino, Calmar, maximum drawdown,
+  turnover, exposure, alpha/beta, capacity/liquidity, transaction costs, and performance by
+  market regime. Win rate is secondary and cannot stand alone.
+- Use immutable point-in-time universes, delisted securities, corporate actions, exchange
+  calendars, publication/availability time, revisions, and realistic order/fill semantics.
+- Daily strategies should normally span at least three years; weekly/monthly strategies
+  should target ten to twenty years when reliable data exists. Any shorter experiment must
+  be labeled exploratory rather than evidence for promotion.
+- Separate train, validation, and untouched test periods; prefer walk-forward evaluation and
+  add combinatorial purged cross-validation, Probability of Backtest Overfitting, and
+  Deflated Sharpe Ratio where applicable.
+- Record every attempted variant. Do not report only the best symbol, period, seed, prompt,
+  agent persona, or risk profile. Stochastic LLM experiments require repeated runs and
+  dispersion reporting.
+- Include LLM inference cost, latency, failure rate, nondeterminism, and unavailable-data
+  behavior. Proprietary LLM pretraining leakage cannot be fully ruled out and must remain an
+  explicit limitation.
+- A research result earns only the next promotion stage. Backtest success does not authorize
+  paper submission, and paper success does not authorize live-money execution.
+
+### External research synthesis
+
+The following sources informed this philosophy. Their reported returns are research claims,
+not audited live performance, and no external code has been copied into this repository.
+
+| Source | Useful lesson | Limitation that governs our use |
+|---|---|---|
+| [TradingAgents: Multi-Agents LLM Financial Trading Framework](https://arxiv.org/abs/2412.20138) and [implementation](https://github.com/TauricResearch/TradingAgents) | Specialist analysts, adversarial bull/bear review, trader/risk roles, and outcome reflection demonstrate a useful multi-agent research decomposition | Published results cover only three stocks over roughly three months and report unusually high Sharpe ratios; recent point-in-time/look-ahead fixes further limit comparison. Treat it as a research scaffold, not performance evidence |
+| [R&D-Agent-Quant](https://arxiv.org/abs/2505.15155) and [implementation](https://github.com/microsoft/RD-Agent) | Best reference for an automated scientific loop: specification, hypothesis synthesis, code implementation, Qlib validation, analysis, and persistent feedback; factor/model co-optimization is especially relevant | Results remain paper backtests in specific markets. Its bandit experiment scheduler outperforming an LLM-only scheduler supports deterministic/statistical resource allocation around the LLM |
+| [FinMem](https://arxiv.org/abs/2311.13743) | Time-decayed, layered evidence memory and explicit outcome reflection are useful for event research | Evaluation uses five selected news-rich stocks and simplified daily action returns; choosing the best risk persona creates selection risk. Do not copy persona-driven risk behavior |
+| [FINSABER: Can LLM-based Financial Investing Strategies Outperform the Market in Long Run?](https://arxiv.org/abs/2505.07078) and [implementation](https://github.com/waylonli/FINSABER) | Provides the necessary counterweight: long-horizon, broader-universe, delisting-aware, cost-aware, bias-mitigated evaluation | It finds that previously reported LLM advantages deteriorate and that simple strategies often win on risk-adjusted metrics. Its conclusion is a validation requirement, not proof that LLM research cannot add value |
+| [Qlib](https://github.com/microsoft/qlib) | Modular dataset/model/strategy/backtest workflow and reproducible experiment records are strong research-layer references | Example returns are configuration-specific and not product guarantees; Qlib need not replace the current data/runtime architecture |
+| [AI Hedge Fund](https://github.com/virattt/ai-hedge-fund) | Persistent fund/strategy/analyst hierarchy, shared `AlphaModel`/`Signal` contract, one runtime path, research lab, and deterministic master risk are highly aligned with this project | It is explicitly a proof of concept and does not provide credible live return evidence; several validation and promotion features remain roadmap items |
+| [Alpha Forge](https://github.com/Liu-Ming-Yu/alpha-forge) | Governed text-event features, research campaigns, evidence packages, and Shadow → Paper → Live promotion closely match the desired product shape | It is a young project without independently validated returns; borrow architecture concepts only after license and implementation review |
+| [LEAN](https://github.com/QuantConnect/Lean), [NautilusTrader](https://github.com/nautechsystems/nautilus_trader), [Freqtrade](https://github.com/freqtrade/freqtrade), and [VectorBT](https://github.com/polakowo/vectorbt) | Mature execution semantics, shared backtest/live code paths, look-ahead diagnostics, and fast parameter screening provide useful engineering patterns | These are engines rather than sources of alpha. Integration cost and licenses must be reviewed; Freqtrade is crypto-oriented, and VectorBT's community license includes the Commons Clause |
+
+The durable market finding is that no reviewed open-source project publishes independently
+audited, long-term live returns sufficient to establish a general “success rate” for LLM
+trading. In FINSABER's 2004–2024 composite tests, for example, FinMem and FinAgent often
+trailed buy-and-hold or ARIMA on risk-adjusted metrics even when FinAgent occasionally had a
+higher absolute annual return. This project must therefore optimize for falsifiable research
+quality and safe promotion, not for reproducing a headline backtest.
 
 ## Architecture
 
@@ -160,13 +299,20 @@ flowchart TB
       BUS["Redis Streams event bus"]
       RAW["Object storage / Parquet"]
     end
-    subgraph Decision
-      FEATURES["Point-in-time feature engine"]
-      SIGNALS["Rules + calibrated ML"]
-      LLM["Citation-bound LLM analyst"]
-      HARD_RISK["Deterministic risk engine"]
+    subgraph Research["Research plane"]
+      EVIDENCE["Point-in-time EvidencePacket + features"]
+      ML["Calibrated statistical / ML forecasts"]
+      LLM["LLM research orchestrator"]
+      AGENTS["Proposer / skeptic / synthesizer"]
+      SPEC["Versioned StrategySpec + Signal"]
+      BACKTEST["Fast screen + event-driven replay"]
+      VALIDATE["Walk-forward / CPCV / PBO / DSR"]
+      REGISTRY["Candidate registry + promotion gate"]
     end
     subgraph Runtime
+      APPROVED["Approved deterministic strategy"]
+      PORTFOLIO["Deterministic portfolio construction"]
+      HARD_RISK["Deterministic risk engine"]
       EXEC["Shadow / paper executor"]
       CONTROL["Authenticated Control API"]
       WEB["Trading Control Center"]
@@ -181,16 +327,28 @@ flowchart TB
     SOCIAL --> COLLECT
     COLLECT --> BUS
     COLLECT --> RAW
-    BUS --> FEATURES --> SIGNALS --> HARD_RISK
-    BUS --> LLM --> HARD_RISK
+    BUS --> EVIDENCE
+    EVIDENCE --> ML
+    EVIDENCE --> LLM
+    ML --> LLM
+    LLM --> AGENTS --> SPEC
+    SPEC --> BACKTEST --> VALIDATE --> REGISTRY
+    VALIDATE --> LLM
+    REGISTRY -->|explicit promotion| APPROVED
+    APPROVED --> PORTFOLIO --> HARD_RISK
     HARD_RISK --> EXEC --> BROKER
     EXEC --> POSTGRES
     BUS --> LEDGER2
     CONTROL --> LEDGER2
     WEB --> CONTROL
-    GIT --> SIGNALS
+    GIT --> SPEC
+    GIT --> APPROVED
     GIT --> HARD_RISK
 ```
+
+There is intentionally no direct edge from the LLM to portfolio, risk, execution, or the
+broker. Research feedback may loop from validation to the LLM; crossing into runtime requires
+a versioned candidate, independent validation, and explicit promotion.
 
 ### Implemented component map
 
@@ -363,6 +521,30 @@ The Compose stack is currently intended to remain running for local inspection. 
 - Live SEC filing and company-facts ingestion is now verified. This completes the Phase 2
   exit criteria locally; it does not authorize trading or make catalyst dedup a strategy.
 
+### D012 — LLM-orchestrated research, ML calibration, and empirical authority
+
+- Date: 2026-09-03 PDT.
+- The user clarified that LLM participation in strategy generation is a central product
+  innovation, not merely a summarization feature. The LLM should reason over raw evidence,
+  orchestrate research, propose strategies, and synthesize its findings with traditional ML.
+- External review covered TradingAgents, FinMem, R&D-Agent-Quant, FINSABER, Qlib, AI Hedge
+  Fund, Alpha Forge, LEAN, NautilusTrader, Freqtrade, VectorBT, and emerging quant-agent
+  skill files.
+- Decision: the LLM becomes the creative orchestrator of the research plane, while the
+  backtester remains empirical authority and deterministic code retains exclusive control
+  over portfolio construction, risk, promotion, order state, and broker interaction.
+- The prior shorthand that limited the LLM to “bounded evidence interpretation” is
+  superseded by the more complete doctrine in **Core research philosophy**. Citation-bound,
+  point-in-time evidence and typed outputs remain mandatory.
+- Strategy research will use versioned `EvidencePacket`, `Forecast`, `Signal`,
+  `StrategySpec`, `ExperimentRun`, and `PromotionDecision` contracts. The LLM may propose
+  these artifacts but cannot approve its own output.
+- Open-source return claims are not adopted as expectations. Reviewed systems provide no
+  independently audited long-term live success rate, and bias-aware long-horizon studies
+  show material degradation of several headline LLM results.
+- This is a target-architecture decision. It does not move LLM work into the current phase,
+  introduce a model dependency, authorize paper submission, or alter the live-money ban.
+
 ## Iteration and commit ledger
 
 ### C001 — `Bootstrap safety-first Phase 0 environment`
@@ -467,7 +649,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C005 — `Add point-in-time event document pipeline`
 
-- Git hash: resolve with `git log --grep='Add point-in-time event document pipeline'` after commit.
+- Git hash: `5645928`
 - Date: 2026-09-03 PDT.
 - User intent: keep Phase 1B pending until the next open market session and proceed with
   Phase 2.
@@ -511,7 +693,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C006 — `Verify live SEC event ingestion`
 
-- Git hash: resolve with `git log --grep='Verify live SEC event ingestion'` after commit.
+- Git hash: `2fb03b6`
 - Date: 2026-09-03 PDT.
 - User intent: configure the SEC fair-access contact identity and finish real Phase 2
   validation.
@@ -536,20 +718,60 @@ The Compose stack is currently intended to remain running for local inspection. 
   - Phase 3 point-in-time feature work is the next implementation milestone after that
     scheduled validation.
 
+### C007 — `Record agentic research philosophy`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-03 PDT.
+- User intent: preserve the latest complete product understanding as the project's durable
+  philosophical and architectural guidance, with citations to relevant papers and projects.
+- Scope:
+  - Reframed the product thesis around an LLM research orchestrator combined with calibrated
+    statistical/ML forecasts, bias-aware backtesting, and deterministic runtime controls.
+  - Added separation-of-authority rules, required research contracts, the research and
+    promotion lifecycle, and a strict evaluation doctrine.
+  - Added a cited synthesis of open-source systems and research, including both promising
+    architectures and long-horizon counterevidence to narrow headline backtests.
+  - Replaced the target decision flow so no LLM path reaches portfolio, risk, execution, or
+    broker components without validation and explicit promotion.
+  - Refreshed the near-term work order and backfilled the known C005/C006 Git hashes.
+- Architecture/decision impact:
+  - LLM scope expands conceptually from bounded evidence interpretation to strategy-research
+    orchestration, while all existing safety boundaries remain unchanged.
+  - The future research/runtime boundary now depends on typed, versioned artifacts and an
+    explicit candidate/champion promotion gate.
+- Validation:
+  - Documentation content, citations, Mermaid flow, and staged diff reviewed.
+  - `make check` passed: Flake8, strict mypy across 29 source files, and 22 tests.
+  - `make doctor` passed with API readiness, safety state, and the local vertical slice
+    healthy; repository secret scan and `git diff --check` also passed.
+- Expected global state after commit:
+  - Future agents have one durable source for the project's product thesis, external
+    research lessons, validation standard, and division of LLM/ML/backtest/risk authority.
+  - No runtime code, dependency, provider configuration, current phase, or trading
+    authorization changes.
+
 ## Open work
 
 Ordered near-term work:
 
 1. During the next U.S. market session, finish Phase 1B real frame/reconnect/gap checks.
-2. Implement Phase 3 point-in-time features and offline/online parity tests.
-3. Add Redis consumer groups, a transactional outbox, and dead-letter replay.
-4. Add provider lag, sequence-gap, bar/trade reconciliation, and data-quality dashboards.
-5. Build a labeled corpus and measure cross-provider catalyst dedup precision/recall.
-6. Confirm Alpaca retention/licensing and determine the long-history options vendor.
-7. Add authentication and authorization before any remote Control API exposure.
-8. Add baseline strategies and realistic fill simulation before predictive ML.
-9. Expand the UI into the full Trading Control Center and Decision Inspector.
-10. Create a GitHub remote and later validate the cloud pipeline on a selected VPS.
+2. Begin Phase 3 with point-in-time `EvidencePacket`/`FeatureSnapshot` contracts and
+   offline/online parity tests.
+3. Add `Forecast`, `Signal`, `StrategySpec`, and `ExperimentRun` contracts plus an immutable
+   experiment registry.
+4. Build simple rule/statistical baselines and realistic event-driven fill/cost simulation
+   before predictive ML or LLM strategy evaluation.
+5. Add walk-forward/regime reports and overfitting diagnostics, then define explicit
+   candidate/champion promotion thresholds.
+6. Add Redis consumer groups, a transactional outbox, dead-letter replay, provider lag,
+   sequence-gap, reconciliation, and data-quality dashboards.
+7. Build a labeled corpus and measure cross-provider catalyst dedup precision/recall.
+8. Confirm data retention/licensing and obtain sufficient point-in-time history, including
+   delisted constituents, corporate actions, and a long-history options vendor.
+9. Implement the LLM strategy-research orchestrator only after the experiment and validation
+   contracts can independently reject its candidates.
+10. Add authentication/authorization, expand the Trading Control Center, create the GitHub
+    remote, and later validate the guarded cloud pipeline on a selected VPS.
 
 ## Blocked or unresolved decisions
 
