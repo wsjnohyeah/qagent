@@ -44,6 +44,7 @@ from agentic_quant.providers.documents import (
     SecEdgarProvider,
 )
 from agentic_quant.providers.synthetic import SyntheticMarketDataProvider
+from agentic_quant.reference_data import ReferenceDataStore
 from agentic_quant.risk import RestrictionRegistry, RiskPolicy
 from agentic_quant.research_store import ResearchStore
 
@@ -91,6 +92,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ledger = EventLedger(app_settings.database_url)
     document_store = DocumentStore(ledger.engine)
     research_store = ResearchStore(ledger.engine)
+    reference_data_store = ReferenceDataStore(ledger.engine)
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):  # type: ignore[no-untyped-def]
@@ -107,6 +109,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         application.state.market_store = MarketDataStore(ledger.engine)
         application.state.document_store = document_store
         application.state.research_store = research_store
+        application.state.reference_data_store = reference_data_store
         application.state.new_exposure_paused = app_settings.global_new_exposure_paused
         yield
         ledger.engine.dispose()
@@ -177,6 +180,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             **application.state.market_store.health_summary(),
             **document_store.health_summary(),
             **research_store.health_summary(),
+            **reference_data_store.health_summary(),
             "raw_archive": "healthy" if application.state.archive.health() else "unhealthy",
             "event_bus": "healthy" if application.state.publisher.health() else "unhealthy",
             "alpaca_configured": bool(
@@ -268,6 +272,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             api_key=app_settings.alpaca_api_key.get_secret_value(),
             api_secret=app_settings.alpaca_api_secret.get_secret_value(),
             base_url=app_settings.alpaca_data_base_url,
+            calendar_name=app_settings.market_calendar,
         )
 
     def alpaca_news_provider() -> AlpacaNewsProvider:

@@ -9,11 +9,13 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 
 import httpx
+import pytest
 
 from agentic_quant.archive import FileRawArchive
 from agentic_quant.config import Settings
 from agentic_quant.domain import StockBar
 from agentic_quant.ledger import EventLedger
+from agentic_quant.market_calendar import MarketSessionClock
 from agentic_quant.market_ingestion import MarketDataIngestionService
 from agentic_quant.market_store import MarketDataStore
 from agentic_quant.migrations import upgrade_database
@@ -127,7 +129,21 @@ def test_alpaca_adapter_supports_point_in_time_safe_daily_bars() -> None:
 
     page = asyncio.run(scenario())
     assert page.bars[0].timeframe == "1Day"
-    assert page.bars[0].available_from == datetime(2026, 9, 3, 4, tzinfo=UTC)
+    assert page.bars[0].available_from == datetime(2026, 9, 2, 20, tzinfo=UTC)
+
+
+def test_daily_availability_uses_exact_exchange_session_close() -> None:
+    clock = MarketSessionClock("XNYS")
+
+    assert clock.daily_bar_available_from(
+        datetime(2026, 9, 3, 4, tzinfo=UTC)
+    ) == datetime(2026, 9, 3, 20, tzinfo=UTC)
+    assert clock.daily_bar_available_from(
+        datetime(2026, 11, 27, 5, tzinfo=UTC)
+    ) == datetime(2026, 11, 27, 18, tzinfo=UTC)
+
+    with pytest.raises(ValueError, match="not a XNYS session"):
+        clock.daily_bar_available_from(datetime(2026, 12, 25, 5, tzinfo=UTC))
 
 
 def test_alpaca_adapter_normalizes_option_snapshot() -> None:

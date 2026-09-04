@@ -12,9 +12,12 @@ from agentic_quant.domain import (
     BacktestMetrics,
     BacktestResult,
     BacktestTrade,
+    CorporateAction,
+    CorporateActionType,
     EventEnvelope,
     ExperimentRun,
     ExperimentStatus,
+    FeatureParityCheck,
     PointInTimeFeatureSnapshot,
     SignalAction,
     StockBar,
@@ -22,10 +25,11 @@ from agentic_quant.domain import (
 )
 from agentic_quant.ids import uuid7
 from agentic_quant.ledger import EventLedger
+from agentic_quant.reference_data import ReferenceDataStore
 from agentic_quant.research_store import ResearchStore, _canonical_hash
 
 
-FEATURE_SET_VERSION = "price_event_pit@0.1.0"
+FEATURE_SET_VERSION = "price_event_pit@0.2.0"
 SUPPORTED_STRATEGIES = ("buy_and_hold", "momentum", "mean_reversion")
 _MINIMUM_HISTORY = 21
 _ZERO = Decimal("0")
@@ -43,6 +47,7 @@ def _decimal(value: float | int | Decimal) -> Decimal:
 class PointInTimeFeatureBuilder:
     def __init__(self, store: ResearchStore) -> None:
         self.store = store
+        self.reference_data = ReferenceDataStore(store.engine)
 
     def build(
         self,
@@ -64,13 +69,20 @@ class PointInTimeFeatureBuilder:
                 f"Feature set requires at least {_MINIMUM_HISTORY} available bars"
             )
         source_bars = eligible[-_MINIMUM_HISTORY:]
+        actions = self.reference_data.corporate_actions_as_of(
+            symbol=symbol,
+            as_of=as_of,
+            effective_from=source_bars[0].event_time,
+        )
         evidence = self.store.build_evidence_packet(
             symbol=symbol,
             as_of=as_of,
             bars=source_bars,
         )
-        closes = [bar.close for bar in source_bars]
-        volumes = [Decimal(bar.volume) for bar in source_bars]
+        closes = [self._split_adjusted_value(bar.close, bar, actions) for bar in source_bars]
+        volumes = [
+            self._split_adjusted_volume(bar.volume, bar, actions) for bar in source_bars
+        ]
         one_period_returns = [
             closes[index] / closes[index - 1] - _ONE
             for index in range(1, len(closes))
@@ -105,6 +117,16 @@ class PointInTimeFeatureBuilder:
             "volume_ratio_20": volumes[-1] / _average(volumes[-20:]),
             "catalyst_count_90d": len(latest_catalysts),
             "corporate_fact_count": len(latest_facts),
+            "corporate_action_count": len(actions),
+            "cash_dividend_count": sum(
+                1
+                for action in actions
+                if action.action_type == CorporateActionType.CASH_DIVIDEND
+            ),
+            "split_adjustment_factor_oldest": self._split_factor(
+                source_bars[0],
+                actions,
+            ),
             "latest_catalyst_age_hours": (
                 Decimal(str((as_of - latest_event).total_seconds())) / Decimal("3600")
                 if latest_event is not None
@@ -132,6 +154,87 @@ class PointInTimeFeatureBuilder:
             created_at=datetime.now(UTC),
         )
         return self.store.record_feature_snapshot(snapshot)
+
+    @staticmethod
+    def _split_factor(
+        bar: StockBar,
+        actions: tuple[CorporateAction, ...],
+    ) -> Decimal:
+        factor = _ONE
+        for action in actions:
+            if (
+                action.action_type == CorporateActionType.SPLIT
+                and action.split_ratio is not None
+                and bar.event_time < action.effective_at
+            ):
+                factor *= action.split_ratio
+        return factor
+
+    @classmethod
+    def _split_adjusted_value(
+        cls,
+        value: Decimal,
+        bar: StockBar,
+        actions: tuple[CorporateAction, ...],
+    ) -> Decimal:
+        return value / cls._split_factor(bar, actions)
+
+    @classmethod
+    def _split_adjusted_volume(
+        cls,
+        value: int,
+        bar: StockBar,
+        actions: tuple[CorporateAction, ...],
+    ) -> Decimal:
+        return Decimal(value) * cls._split_factor(bar, actions)
+
+
+class FeatureParityChecker:
+    def __init__(self, store: ResearchStore) -> None:
+        self.store = store
+        self.features = PointInTimeFeatureBuilder(store)
+
+    def check(
+        self,
+        *,
+        symbol: str,
+        timeframe: str,
+        as_of: datetime,
+    ) -> FeatureParityCheck:
+        complete_history = self.store.load_bars_for_parity_audit(
+            symbol=symbol,
+            timeframe=timeframe,
+        )
+        online_history = tuple(
+            bar
+            for bar in complete_history
+            if bar.event_time <= as_of and bar.available_from <= as_of
+        )
+        offline_snapshot = self.features.build(
+            symbol=symbol,
+            timeframe=timeframe,
+            as_of=as_of,
+            bars=complete_history,
+        )
+        online_snapshot = self.features.build(
+            symbol=symbol,
+            timeframe=timeframe,
+            as_of=as_of,
+            bars=online_history,
+        )
+        check = FeatureParityCheck(
+            parity_check_id=uuid7(),
+            symbol=symbol.upper(),
+            timeframe=timeframe,
+            as_of=as_of,
+            feature_set_version=FEATURE_SET_VERSION,
+            offline_data_hash=offline_snapshot.data_hash,
+            online_data_hash=online_snapshot.data_hash,
+            matched=offline_snapshot.data_hash == online_snapshot.data_hash,
+            checked_at=datetime.now(UTC),
+        )
+        self.store.record_feature_parity_check(check)
+        return check
 
 
 def default_strategy_spec(
@@ -172,6 +275,7 @@ class ResearchBacktester:
         self.store = store
         self.ledger = ledger
         self.features = PointInTimeFeatureBuilder(store)
+        self.reference_data = ReferenceDataStore(store.engine)
 
     def run(
         self,
@@ -192,6 +296,16 @@ class ResearchBacktester:
             raise ValueError("Initial equity must be positive")
         costs = cost_model or BacktestCostModel()
         stored_spec = self.store.record_strategy_spec(spec)
+        actions = self.reference_data.corporate_actions_as_of(
+            symbol=symbol,
+            as_of=as_of_end,
+            effective_from=as_of_start,
+        )
+        if actions:
+            raise ValueError(
+                "Phase 3A baseline replay does not simulate corporate-action cash/share "
+                "effects; use a window without actions until the event-driven engine exists"
+            )
         bars = self.store.load_bars(
             symbol=symbol,
             timeframe=spec.timeframe,

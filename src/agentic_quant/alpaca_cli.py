@@ -36,6 +36,7 @@ def _provider(settings: Settings) -> AlpacaMarketDataProvider:
         api_key=settings.alpaca_api_key.get_secret_value(),
         api_secret=settings.alpaca_api_secret.get_secret_value(),
         base_url=settings.alpaca_data_base_url,
+        calendar_name=settings.market_calendar,
     )
 
 

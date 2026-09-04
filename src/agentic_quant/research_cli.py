@@ -10,9 +10,11 @@ from decimal import Decimal
 from agentic_quant.config import Settings
 from agentic_quant.domain import BacktestCostModel, BacktestResult, StockBar
 from agentic_quant.ledger import EventLedger
+from agentic_quant.market_calendar import MarketSessionClock
 from agentic_quant.market_store import MarketDataStore
 from agentic_quant.migrations import upgrade_database
 from agentic_quant.research import (
+    FeatureParityChecker,
     SUPPORTED_STRATEGIES,
     ResearchBacktester,
     default_strategy_spec,
@@ -48,10 +50,16 @@ def _git_sha(settings: Settings) -> str:
 def _synthetic_daily_bars(symbol: str, count: int = 100) -> tuple[StockBar, ...]:
     bars: list[StockBar] = []
     day = datetime(2025, 1, 2, 5, tzinfo=UTC)
+    session_clock = MarketSessionClock()
     price = Decimal("100")
     index = 0
     while len(bars) < count:
-        if day.weekday() < 5:
+        try:
+            available_from = session_clock.daily_bar_available_from(day)
+        except ValueError:
+            day += timedelta(days=1)
+            continue
+        else:
             cycle = index % 20
             change = (
                 Decimal("-0.018")
@@ -72,7 +80,7 @@ def _synthetic_daily_bars(symbol: str, count: int = 100) -> tuple[StockBar, ...]
                     symbol=symbol,
                     timeframe="1Day",
                     event_time=day,
-                    available_from=day + timedelta(days=1),
+                    available_from=available_from,
                     open=open_price,
                     high=high,
                     low=low,
@@ -142,6 +150,11 @@ def _smoke(settings: Settings, args: argparse.Namespace) -> None:
             cost_model=BacktestCostModel(),
         )
         results.append(_summary(result))
+    parity = FeatureParityChecker(research_store).check(
+        symbol=symbol,
+        timeframe="1Day",
+        as_of=bars[50].available_from,
+    )
     print(
         json.dumps(
             {
@@ -149,6 +162,7 @@ def _smoke(settings: Settings, args: argparse.Namespace) -> None:
                 "mode": "deterministic_synthetic_research_smoke",
                 "warning": "Synthetic smoke metrics are infrastructure checks, not alpha evidence.",
                 "bars": len(bars),
+                "feature_parity": parity.model_dump(mode="json"),
                 "results": results,
                 "research_store": research_store.health_summary(),
             },
@@ -192,6 +206,18 @@ def _list(settings: Settings, args: argparse.Namespace) -> None:
     )
 
 
+def _parity(settings: Settings, args: argparse.Namespace) -> None:
+    _, research_store, _ = _services(settings)
+    check = FeatureParityChecker(research_store).check(
+        symbol=args.symbol.upper(),
+        timeframe=args.timeframe,
+        as_of=args.as_of,
+    )
+    print(json.dumps(check.model_dump(mode="json"), indent=2))
+    if not check.matched:
+        raise SystemExit(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Point-in-time research and cost-aware backtest operations"
@@ -215,12 +241,21 @@ def main() -> None:
     run.add_argument("--slippage-bps", default="2.0")
     list_runs = subparsers.add_parser("list", help="List recent immutable experiments")
     list_runs.add_argument("--limit", type=int, default=20)
+    parity = subparsers.add_parser(
+        "parity",
+        help="Compare offline full-history and online as-of feature materialization",
+    )
+    parity.add_argument("symbol")
+    parity.add_argument("--timeframe", choices=("1Min", "1Day"), default="1Day")
+    parity.add_argument("--as-of", required=True, type=_parse_time)
     args = parser.parse_args()
     settings = Settings()
     if args.command == "smoke":
         _smoke(settings, args)
     elif args.command == "run":
         _run(settings, args)
+    elif args.command == "parity":
+        _parity(settings, args)
     else:
         _list(settings, args)
 

@@ -15,6 +15,26 @@ class MarketDataGap(BaseModel):
     missing_minutes: int
 
 
+class MarketSessionClock:
+    def __init__(self, calendar_name: str = "XNYS") -> None:
+        self.calendar = exchange_calendars.get_calendar(calendar_name)
+
+    def daily_bar_available_from(self, event_time: datetime) -> datetime:
+        if event_time.tzinfo is None:
+            raise ValueError("Daily bar event_time must be timezone-aware")
+        session_label = event_time.date().isoformat()
+        try:
+            session = self.calendar.date_to_session(session_label, direction="none")
+        except ValueError as exc:
+            raise ValueError(
+                f"Daily bar date {session_label} is not a {self.calendar.name} session"
+            ) from exc
+        close = self.calendar.session_close(session).to_pydatetime()
+        if not isinstance(close, datetime):
+            raise TypeError("Exchange calendar returned a non-datetime session close")
+        return close
+
+
 class MarketGapDetector:
     def __init__(self, calendar_name: str = "XNYS") -> None:
         self.calendar = exchange_calendars.get_calendar(calendar_name)

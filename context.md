@@ -4,9 +4,9 @@ Last updated: 2026-09-04 PDT
 
 Context format: v1
 
-Current phase: Phase 3A research foundation implemented; Phase 1B open-session verification pending
+Current phase: Phase 3A.2 point-in-time semantics implemented; Phase 1B open-session verification pending
 
-Current documented baseline: C010 — `Enforce bounded development data scope`
+Current documented baseline: C011 — `Harden point-in-time research semantics`
 
 ## Purpose and authority
 
@@ -47,6 +47,10 @@ A Git commit cannot contain its own content-derived hash without changing that h
 - Phase 3A persists immutable evidence packets, feature snapshots, strategy specifications,
   experiment runs, and backtest trades. Three deterministic baselines run with next-bar
   execution and nonzero commission/slippage; their output is infrastructure evidence only.
+- Phase 3A.2 adds exact XNYS session-close availability, immutable corporate actions and
+  historical-universe membership, split-adjusted point-in-time features, and persisted
+  offline/online feature-parity checks. The baseline backtester fails closed over corporate
+  actions until share/cash event simulation exists.
 - No GitHub remote or cloud host is configured yet.
 
 ### Repository state
@@ -93,8 +97,8 @@ Development service ports bind only to loopback. The local Compose credentials a
 
 - `make check`: passed.
 - Flake8: passed.
-- Strict mypy: passed for 32 source files.
-- Pytest: 26 passed.
+- Strict mypy: passed for 33 source files.
+- Pytest: 34 passed.
 - `make doctor`: passed against the local-lite SQLite profile.
 - `make docker-doctor`: passed against the PostgreSQL-backed Compose profile.
 - PostgreSQL query: passed; the first container replay stored six lineage events.
@@ -110,16 +114,20 @@ Development service ports bind only to loopback. The local Compose credentials a
 - Real primary-source test: 10 entries from Apple's official Newsroom RSS feed passed the same path; identical replay inserted zero documents, versions, catalysts, links, or events.
 - Real SEC test: 20 AAPL filing records produced 19 catalysts and 20 links; identical replay inserted zero new records or events. A bounded 250-record AAPL XBRL facts run also replayed with zero duplicates.
 - Phase 2 fixtures verify primary/secondary source distinction, correction-version retention, SEC filing and XBRL normalization, IR feed parsing, and cross-document catalyst deduplication.
-- Alembic migrations through `20260904_0007` own the Phase 3A schema; a fresh SQLite
+- Alembic migrations through `20260904_0008` own the Phase 3A.2 schema; a fresh SQLite
   upgrade/check/downgrade/re-upgrade cycle passed with no schema diff.
-- `make research-smoke`: passed with 100 deterministic daily bars, 79 deduplicated evidence
-  packets/features, three immutable experiments, and nonzero cost modeling.
+- `make research-smoke`: passed with 100 deterministic daily bars, three immutable baseline
+  experiments, nonzero cost modeling, and matching offline/online feature hashes. Stored
+  counts accumulate safely in the persistent ignored smoke database.
 - Real daily-data test: 754 AAPL and 754 SPY SIP daily bars from 2023-09-01 through
   2026-09-04 were archived and normalized; identical replays inserted zero bars.
 - Real baseline runs completed on stored daily bars. AAPL buy-and-hold, momentum, and mean
   reversion and SPY buy-and-hold produced reproducible dataset hashes, feature lineage,
   trades, costs, and metrics. These exploratory full-period results are not holdout evidence
   and do not establish strategy validity.
+- Existing PostgreSQL daily rows were migrated to exact XNYS session-close availability;
+  sampled AAPL/SPY rows now show same-session 20:00 UTC availability. A real stored AAPL
+  offline/online parity audit at 2026-09-03 20:00 UTC produced matching feature hashes.
 - Repository secret-pattern scan: passed after fixing a scanner self-match.
 
 ## Product intent and invariant boundaries
@@ -303,8 +311,13 @@ flowchart LR
     INGEST --> MINIO["MinIO raw archive"]
     INGEST --> DB
     INGEST --> REDIS["Redis Streams"]
+    CALENDAR["XNYS sessions"] --> DB
+    REFDATA["Corporate actions + historical universes"] --> DB
     DB --> PITEVIDENCE["PIT evidence packets"]
     PITEVIDENCE --> PITFEATURES["PIT feature snapshots"]
+    REFDATA --> PITFEATURES
+    PITFEATURES --> PARITY["Offline/online parity audit"]
+    PARITY --> DB
     PITSPEC["Versioned baseline StrategySpec"] --> BASELINE["Cost-aware baseline runner"]
     PITFEATURES --> BASELINE
     BASELINE --> EXPERIMENT["Immutable experiment + trades"]
@@ -316,10 +329,13 @@ Alembic migrations own the PostgreSQL/SQLite schema. Redis and MinIO are connect
 
 The Phase 3A research path selects only evidence whose event and availability times are no
 later than each snapshot's `as_of`, calculates a versioned price/event feature set, and runs
-buy-and-hold, long/cash momentum, or long/cash mean-reversion baselines. Signals fill no
-earlier than the next bar, every run has nonzero default costs, and source/feature/dataset/code
-hashes are retained. Walk-forward validation, universe history, corporate-action processing,
-and a production-grade event-driven fill simulator remain open.
+buy-and-hold, long/cash momentum, or long/cash mean-reversion baselines. Daily bars use exact
+XNYS close times, historical universe membership is bitemporal, split-adjusted features use
+only actions known and effective at `as_of`, and offline/online hashes can be compared and
+persisted. Signals fill no earlier than the next bar, every run has nonzero default costs,
+and source/feature/dataset/code hashes are retained. Corporate-action provider ingestion,
+cash/share event simulation, walk-forward validation, and a production-grade event-driven
+fill simulator remain open.
 
 ### Target architecture
 
@@ -434,15 +450,16 @@ year or more of data.
 | Raw archive | `src/agentic_quant/archive.py` | content-addressed local or MinIO JSON evidence |
 | Market persistence | `src/agentic_quant/market_store.py` | idempotent bars, trades, quotes, options, ingestion runs |
 | Event transport | `src/agentic_quant/event_bus.py` | Redis Streams publisher with local no-op fallback |
-| Market calendar | `src/agentic_quant/market_calendar.py` | XNYS sessions and missing-minute detection |
+| Market calendar | `src/agentic_quant/market_calendar.py` | exact XNYS daily availability and missing-minute detection |
 | Document providers | `src/agentic_quant/providers/documents.py` | Alpaca News, SEC EDGAR, approved-host IR, gated social adapters |
 | Event ingestion | `src/agentic_quant/document_ingestion.py` | raw-first document/fact ingestion and normalized events |
 | Document persistence | `src/agentic_quant/document_store.py` | immutable versions, entities, search, catalyst dedup, SEC facts |
 | Event operations | `src/agentic_quant/event_cli.py` | bounded provider ingestion, search, and health CLI |
 | Research engine | `src/agentic_quant/research.py` | point-in-time price/event features and cost-aware deterministic baselines |
 | Research persistence | `src/agentic_quant/research_store.py` | immutable evidence/features/specs/experiments/trades and as-of reads |
-| Research operations | `src/agentic_quant/research_cli.py` | synthetic smoke, stored-data baseline runs, and experiment listing |
-| Schema migrations | `migrations/` | Alembic schema history through Phase 3A |
+| Reference data | `src/agentic_quant/reference_data.py` | bitemporal corporate-action and historical-universe queries |
+| Research operations | `src/agentic_quant/research_cli.py` | synthetic smoke, stored-data baselines, parity audit, experiment listing |
+| Schema migrations | `migrations/` | Alembic schema history through Phase 3A.2 |
 
 ## Current executable risk baseline
 
@@ -663,6 +680,26 @@ The Compose stack is currently intended to remain running for local inspection. 
   monitoring, licensing, and authenticated job control.
 - The environment distinction changes scale and operational expectations, not correctness,
   audit, point-in-time, risk, or security requirements.
+
+### D016 — Exact point-in-time reference data and feature parity
+
+- Date: 2026-09-04 PDT.
+- The next approved Phase 3A milestone is to close the largest correctness gaps before
+  adding more sophisticated strategy or LLM behavior.
+- Decision: daily bars use their exact configured XNYS session close as `available_from`,
+  including early closes. Non-session dates fail closed.
+- Corporate actions are immutable records with separate effective and availability times;
+  raw provider prices remain unchanged. Feature snapshots apply only known, effective split
+  adjustments and include action evidence in their hashes.
+- Historical universe membership is represented by effective intervals plus the time the
+  membership record became knowable, preventing current-constituent survivorship leakage.
+- Offline/full-history and online/as-of feature materialization are compared by persisted
+  hashes. A mismatch is a failed audit, not a warning to ignore.
+- The current baseline runner does not model corporate-action changes to portfolio shares or
+  cash. It therefore rejects affected replay windows instead of emitting misleading metrics.
+- Corporate-action and universe provider ingestion remains open; bounded deterministic
+  fixtures establish the storage and query contracts locally.
+- Formal record: `docs/adr/0007-point-in-time-reference-data-and-feature-parity.md`.
 
 ## Iteration and commit ledger
 
@@ -949,7 +986,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C010 — `Enforce bounded development data scope`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `c3ec221`
 - Date: 2026-09-04 PDT.
 - User intent: make development versus production behavior explicit in `.env` and ensure
   local work uses small datasets to prove correctness rather than long-running backfills.
@@ -979,14 +1016,51 @@ The Compose stack is currently intended to remain running for local inspection. 
     provider request, while future production workers may perform governed long-horizon jobs.
   - No stored runtime data, credentials, trading authority, or Phase 1B status changes.
 
+### C011 — `Harden point-in-time research semantics`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-04 PDT.
+- User intent: proceed with the next research milestone while keeping local verification
+  bounded and preserving the future remote deployment/UI plan.
+- Scope:
+  - Replaced the fixed next-UTC-day daily-bar rule with exact XNYS session-close
+    availability, including early-close and holiday behavior, and migrated existing rows.
+  - Added immutable corporate-action, historical-universe, and feature-parity tables under
+    Alembic revision `20260904_0008`.
+  - Added bitemporal reference-data storage and as-of queries with idempotent inserts.
+  - Added split-adjusted price/volume features using only actions known and effective at the
+    requested timestamp; included action references in evidence lineage.
+  - Added an offline/full-history versus online/as-of parity checker, persisted hashes, a
+    `quant-research parity` command, and parity execution in `make research-smoke`.
+  - Made the baseline backtester reject corporate-action windows until the event-driven
+    engine implements correct share and cash effects.
+  - Updated the data manifest, README, research runbook, project state, context, and ADR 0007.
+- Architecture/decision impact:
+  - Point-in-time correctness now covers session availability, reference-data knowledge
+    time, split feature adjustment, historical universe queries, and materialization parity.
+  - This adds no broker authority and makes an unsupported replay fail closed.
+- Validation:
+  - `make check` passed with Flake8, strict mypy across 33 source files, and 34 tests.
+  - `make research-smoke` passed with matching offline/online feature hashes and three
+    deterministic baseline experiments.
+  - Fresh SQLite migration upgrade/check/downgrade/re-upgrade and the legacy-row timing
+    migration test passed.
+  - `make doctor`, rebuilt-image `make docker-doctor`, PostgreSQL revision/table checks, a
+    real stored AAPL parity audit, secret scan, and final diff checks passed.
+- Expected global state after commit:
+  - The Phase 3A.2 correctness layer is operational for bounded local fixtures and stored
+    bars; provider ingestion for reference data and the event-driven simulator remain next.
+  - Phase 1B remains pending until an open U.S. market session. No paper or live execution
+    capability has been added.
+
 ## Open work
 
 Ordered near-term work:
 
 1. During the next U.S. market session, finish Phase 1B real frame/reconnect/gap checks.
-2. Add exchange-close-exact daily availability, corporate-action processing, and
-   point-in-time historical universe membership.
-3. Add offline/online feature parity and a production-grade event-driven fill simulator.
+2. Select and integrate licensed corporate-action and historical-universe providers.
+3. Build the production-grade event-driven fill simulator, including corporate-action share
+   and cash effects.
 4. Add walk-forward/regime reports and overfitting diagnostics, then define explicit
    candidate/champion promotion thresholds.
 5. Design remote backfill jobs and identify equity/options sources with suitable historical

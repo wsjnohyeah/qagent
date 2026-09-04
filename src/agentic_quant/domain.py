@@ -56,6 +56,56 @@ class ExperimentStatus(StrEnum):
     FAILED = "FAILED"
 
 
+class CorporateActionType(StrEnum):
+    SPLIT = "split"
+    CASH_DIVIDEND = "cash_dividend"
+    SYMBOL_CHANGE = "symbol_change"
+
+
+class CorporateAction(FrozenModel):
+    corporate_action_id: str
+    action_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    symbol: str
+    action_type: CorporateActionType
+    effective_at: datetime
+    available_from: datetime
+    split_ratio: Decimal | None = Field(default=None, gt=0)
+    cash_amount: Decimal | None = Field(default=None, ge=0)
+    currency: str | None = None
+    new_symbol: str | None = None
+    source: str
+    raw_object_id: str
+    ingested_at: datetime
+
+    @model_validator(mode="after")
+    def action_payload_matches_type(self) -> Self:
+        if self.action_type == CorporateActionType.SPLIT and self.split_ratio is None:
+            raise ValueError("Split actions require split_ratio")
+        if self.action_type == CorporateActionType.CASH_DIVIDEND and self.cash_amount is None:
+            raise ValueError("Cash-dividend actions require cash_amount")
+        if self.action_type == CorporateActionType.SYMBOL_CHANGE and not self.new_symbol:
+            raise ValueError("Symbol-change actions require new_symbol")
+        return self
+
+
+class UniverseMembership(FrozenModel):
+    membership_id: str
+    universe: str
+    symbol: str
+    effective_from: datetime
+    effective_to: datetime | None = None
+    available_from: datetime
+    source: str
+    source_version: str
+    created_at: datetime
+
+    @model_validator(mode="after")
+    def membership_interval_is_valid(self) -> Self:
+        if self.effective_to is not None and self.effective_to <= self.effective_from:
+            raise ValueError("Universe membership effective_to must follow effective_from")
+        return self
+
+
 class EvidenceReference(FrozenModel):
     evidence_type: str
     evidence_id: str
@@ -225,6 +275,24 @@ class BacktestResult(FrozenModel):
     experiment: ExperimentRun
     strategy_spec: StrategySpec
     trades: tuple[BacktestTrade, ...]
+
+
+class FeatureParityCheck(FrozenModel):
+    parity_check_id: str
+    symbol: str
+    timeframe: str
+    as_of: datetime
+    feature_set_version: str
+    offline_data_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    online_data_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    matched: bool
+    checked_at: datetime
+
+    @model_validator(mode="after")
+    def match_flag_agrees_with_hashes(self) -> Self:
+        if self.matched != (self.offline_data_hash == self.online_data_hash):
+            raise ValueError("Feature parity flag must agree with the compared hashes")
+        return self
 
 
 class StockBar(FrozenModel):

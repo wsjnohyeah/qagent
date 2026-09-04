@@ -9,6 +9,7 @@ import httpx
 
 from agentic_quant.domain import OptionSnapshot, StockBar
 from agentic_quant.ids import uuid7
+from agentic_quant.market_calendar import MarketSessionClock
 from agentic_quant.providers.base import (
     EntitlementCheck,
     OptionChainRequest,
@@ -48,6 +49,7 @@ class AlpacaMarketDataProvider:
         api_secret: str,
         base_url: str = "https://data.alpaca.markets",
         client: httpx.AsyncClient | None = None,
+        calendar_name: str = "XNYS",
         max_retries: int = 3,
         retry_base_seconds: float = 0.5,
     ) -> None:
@@ -65,6 +67,7 @@ class AlpacaMarketDataProvider:
             timeout=httpx.Timeout(60.0, connect=15.0),
             headers=self._headers,
         )
+        self._session_clock = MarketSessionClock(calendar_name)
 
     async def __aenter__(self) -> AlpacaMarketDataProvider:
         return self
@@ -150,8 +153,8 @@ class AlpacaMarketDataProvider:
             next_page_token=payload.get("next_page_token"),
         )
 
-    @staticmethod
     def _normalize_bar(
+        self,
         *,
         symbol: str,
         timeframe: str,
@@ -169,7 +172,7 @@ class AlpacaMarketDataProvider:
             available_from=(
                 event_time + timedelta(minutes=1)
                 if timeframe == "1Min"
-                else event_time + timedelta(days=1)
+                else self._session_clock.daily_bar_available_from(event_time)
             ),
             open=Decimal(str(item["o"])),
             high=Decimal(str(item["h"])),

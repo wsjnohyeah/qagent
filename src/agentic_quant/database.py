@@ -3,6 +3,7 @@ from __future__ import annotations
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     Column,
     DateTime,
     Integer,
@@ -349,6 +350,46 @@ corporate_facts = Table(
     Column("ingested_at", DateTime(timezone=True), nullable=False),
 )
 
+corporate_actions = Table(
+    "corporate_actions",
+    metadata,
+    Column("corporate_action_id", String(36), primary_key=True),
+    Column("action_fingerprint", String(64), nullable=False, unique=True),
+    Column("symbol", String(24), nullable=False, index=True),
+    Column("action_type", String(32), nullable=False, index=True),
+    Column("effective_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("available_from", DateTime(timezone=True), nullable=False, index=True),
+    Column("split_ratio", Numeric(24, 10), nullable=True),
+    Column("cash_amount", Numeric(24, 10), nullable=True),
+    Column("currency", String(8), nullable=True),
+    Column("new_symbol", String(24), nullable=True),
+    Column("source", String(40), nullable=False),
+    Column("raw_object_id", String(36), nullable=False),
+    Column("ingested_at", DateTime(timezone=True), nullable=False),
+)
+
+universe_memberships = Table(
+    "universe_memberships",
+    metadata,
+    Column("membership_id", String(36), primary_key=True),
+    Column("universe", String(80), nullable=False, index=True),
+    Column("symbol", String(24), nullable=False, index=True),
+    Column("effective_from", DateTime(timezone=True), nullable=False, index=True),
+    Column("effective_to", DateTime(timezone=True), nullable=True),
+    Column("available_from", DateTime(timezone=True), nullable=False),
+    Column("source", String(40), nullable=False),
+    Column("source_version", String(80), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint(
+        "universe",
+        "symbol",
+        "effective_from",
+        "source",
+        "source_version",
+        name="uq_universe_memberships_identity",
+    ),
+)
+
 evidence_packets = Table(
     "evidence_packets",
     metadata,
@@ -466,4 +507,18 @@ backtest_trades = Table(
         nullable=False,
     ),
     Column("exit_reason", String(80), nullable=False),
+)
+
+feature_parity_checks = Table(
+    "feature_parity_checks",
+    metadata,
+    Column("parity_check_id", String(36), primary_key=True),
+    Column("symbol", String(24), nullable=False, index=True),
+    Column("timeframe", String(16), nullable=False),
+    Column("as_of", DateTime(timezone=True), nullable=False, index=True),
+    Column("feature_set_version", String(80), nullable=False),
+    Column("offline_data_hash", String(64), nullable=False),
+    Column("online_data_hash", String(64), nullable=False),
+    Column("matched", Boolean, nullable=False),
+    Column("checked_at", DateTime(timezone=True), nullable=False),
 )

@@ -13,7 +13,8 @@ make research-smoke
 This command uses the isolated, ignored `work/research-smoke.db`, creates 100 deterministic
 daily bars, builds point-in-time evidence and feature snapshots, and runs buy-and-hold,
 momentum, and mean-reversion baselines with nonzero commission and slippage. It persists each
-attempt as an immutable experiment and emits a ledger completion event.
+attempt as an immutable experiment, emits a ledger completion event, and verifies that
+offline/full-history and online/as-of feature materialization produce the same hash.
 
 ## Load real daily bars
 
@@ -26,9 +27,10 @@ Credentials remain only in ignored `.env`. For the Docker/PostgreSQL profile:
   --timeframe 1Day
 ```
 
-Daily bars use `adjustment=raw`. A bar's `available_from` is conservatively set to the next
-UTC day so the completed daily bar cannot enter a same-day decision. Corporate-action-aware
-research remains a separate Phase 3 requirement.
+Daily bars use `adjustment=raw`. A bar's `available_from` is the exact XNYS session close,
+including scheduled early closes; a non-session date is rejected. Raw storage preserves the
+provider record while point-in-time features apply only corporate actions that were both
+known and effective at the requested `as_of`.
 
 With `APP_ENV=development`, market and news backfills are limited to
 `DEVELOPMENT_MAX_BACKFILL_DAYS` (120 by default), while one-minute bars are limited to
@@ -60,6 +62,17 @@ List recent experiments:
 curl -fsS 'http://127.0.0.1:8000/v1/research/experiments?limit=20'
 ```
 
+Audit offline/online feature parity at an exact point in time:
+
+```sh
+./scripts/compose.sh exec -T api quant-research parity AAPL \
+  --timeframe 1Day \
+  --as-of 2026-09-03T20:00:00Z
+```
+
+The check materializes the feature set once from complete stored history and once from an
+online-equivalent as-of slice, persists both hashes, and exits nonzero on a mismatch.
+
 ## Point-in-time invariants
 
 - `event_time <= as_of` and `available_from <= as_of` for every evidence reference.
@@ -67,14 +80,23 @@ curl -fsS 'http://127.0.0.1:8000/v1/research/experiments?limit=20'
 - A completed bar may produce a signal only after its `available_from` timestamp.
 - Entry may occur no earlier than the next bar open.
 - Feature and dataset hashes include the exact source identities, timestamps, and values.
+- Daily availability follows the configured exchange calendar, not a fixed UTC offset.
+- Corporate actions require separate `effective_at` and `available_from` timestamps.
+- Historical universes require effective intervals and an availability timestamp; selecting
+  constituents uses only memberships knowable at `as_of`.
+- Offline and online-equivalent materialization must hash identically for the same `as_of`.
 - Strategy name/version content is immutable; changed code produces a new version.
 - Every run is retained. Re-running does not overwrite an earlier result.
 
 ## Current limitations
 
 - The fast Phase 3A runner is a baseline screen, not yet the final event-driven fill engine.
-- Daily bar availability is deliberately conservative rather than exchange-close exact.
-- Corporate actions, delisted-universe membership, borrow, options fills, taxes, market
-  impact, capacity, walk-forward splits, CPCV/PBO, and Deflated Sharpe are not implemented.
+- Corporate-action provider ingestion and point-in-time universe data acquisition are not
+  yet connected; the immutable schema/store contracts and bounded fixtures are implemented.
+- Split-adjusted features are implemented. The current baseline runner rejects a window
+  containing a known corporate action because it does not yet simulate share or cash
+  changes. This is intentional fail-closed behavior.
+- Delisted-security acquisition, borrow, options fills, taxes, market impact, capacity,
+  walk-forward splits, CPCV/PBO, and Deflated Sharpe are not implemented.
 - The LLM research orchestrator and predictive ML models are intentionally not connected
   until the validation surface can reject their candidates independently.

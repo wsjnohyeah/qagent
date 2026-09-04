@@ -1,4 +1,4 @@
-version: data_manifest@0.3.0
+version: data_manifest@0.4.0
 providers:
   synthetic:
     enabled: true
@@ -10,11 +10,19 @@ providers:
     stock_feed: sip
     option_feed: opra
     supported_bar_timeframes: [1Min, 1Day]
-    daily_bar_availability: next_utc_day_conservative
+    daily_bar_availability: exchange_session_close
     execution_enabled: false
 market_calendar: XNYS
 research:
-  feature_set: price_event_pit@0.1.0
+  feature_set: price_event_pit@0.2.0
   point_in_time_required: true
   next_bar_execution_required: true
+  offline_online_parity_required: true
+  corporate_actions:
+    raw_prices_required: true
+    split_adjusted_features: true
+    backtest_cash_share_simulation: pending_fail_closed
+  universe_membership:
+    effective_intervals_required: true
+    availability_timestamp_required: true
   synthetic_smoke_is_alpha_evidence: false

@@ -48,6 +48,11 @@ specifications, experiment runs, and backtest trades. Its baseline runner enforc
 next-bar execution and nonzero commission/slippage. This is research-infrastructure
 validation, not a profitable-strategy claim.
 
+Phase 3A.2 strengthens that path with exact XNYS session-close availability, immutable
+corporate-action and historical-universe records, split-adjusted point-in-time features,
+and a persisted offline/online feature-parity audit. Backtests fail closed over corporate
+actions until the event-driven engine can model their cash and share effects.
+
 ## Commands
 
 | Command | Purpose |
@@ -128,8 +133,8 @@ Ingest historical one-minute bars:
 ```
 
 Use `--timeframe 1Day` for a bounded daily-history backfill. Daily bars are marked
-available only on the following UTC day, preventing same-day close information from
-entering a decision.
+available at the exact XNYS session close, including scheduled early closes. Non-session
+dates fail closed instead of being assigned an invented availability time.
 
 Ingest one bounded page of an option-chain snapshot:
 
@@ -190,6 +195,18 @@ point-in-time feature snapshots, and runs buy-and-hold, momentum, and mean-rever
 baselines. Every experiment records its data hash, strategy/code version, cost model,
 metrics, trades, feature lineage, and ledger event.
 
+Audit an exact as-of timestamp for offline/online feature parity:
+
+```sh
+quant-research parity AAPL \
+  --timeframe 1Day \
+  --as-of 2026-09-03T20:00:00Z
+```
+
+The command persists both hashes and exits nonzero if they differ. Corporate-action and
+universe-history tables currently accept governed fixtures/imports; provider ingestion is a
+later data-source integration. See ADR 0007 for the precise semantics and fail-closed limits.
+
 To run a baseline on stored real daily bars:
 
 ```sh
@@ -200,8 +217,8 @@ quant-research run AAPL \
   --end 2026-09-04T00:00:00Z
 ```
 
-See `runbooks/research.md` and ADR 0006 for the exact point-in-time invariants, known
-limitations, and research/runtime authority boundary.
+See `runbooks/research.md`, ADR 0006, and ADR 0007 for the exact point-in-time invariants,
+known limitations, and research/runtime authority boundary.
 
 ## Repository map
 

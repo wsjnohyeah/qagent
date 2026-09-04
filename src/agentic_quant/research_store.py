@@ -12,9 +12,11 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from agentic_quant.database import (
     backtest_trades,
     catalysts,
+    corporate_actions,
     corporate_facts,
     evidence_packets,
     experiment_runs,
+    feature_parity_checks,
     feature_snapshots,
     market_bars,
     strategy_specs,
@@ -23,6 +25,7 @@ from agentic_quant.domain import (
     BacktestResult,
     EvidencePacket,
     EvidenceReference,
+    FeatureParityCheck,
     PointInTimeFeatureSnapshot,
     StockBar,
     StrategySpec,
@@ -64,6 +67,37 @@ class ResearchStore:
                     market_bars.c.timeframe == timeframe,
                     market_bars.c.event_time <= as_of_end,
                     market_bars.c.available_from <= as_of_end,
+                )
+            )
+            .order_by(market_bars.c.event_time.asc())
+        )
+        with self.engine.connect() as connection:
+            rows = connection.execute(statement).all()
+        return tuple(
+            StockBar(
+                **{
+                    **dict(row._mapping),
+                    "event_time": _utc(row.event_time),
+                    "available_from": _utc(row.available_from),
+                    "ingested_at": _utc(row.ingested_at),
+                }
+            )
+            for row in rows
+        )
+
+    def load_bars_for_parity_audit(
+        self,
+        *,
+        symbol: str,
+        timeframe: str,
+    ) -> tuple[StockBar, ...]:
+        """Load complete stored history only for testing the as-of filter itself."""
+        statement = (
+            select(market_bars)
+            .where(
+                and_(
+                    market_bars.c.symbol == symbol.upper(),
+                    market_bars.c.timeframe == timeframe,
                 )
             )
             .order_by(market_bars.c.event_time.asc())
@@ -140,6 +174,24 @@ class ResearchStore:
                 .order_by(corporate_facts.c.available_from.desc())
                 .limit(50)
             ).all()
+            action_rows = connection.execute(
+                select(
+                    corporate_actions.c.corporate_action_id,
+                    corporate_actions.c.effective_at,
+                    corporate_actions.c.available_from,
+                    corporate_actions.c.action_type,
+                    corporate_actions.c.source,
+                )
+                .where(
+                    and_(
+                        corporate_actions.c.symbol == symbol.upper(),
+                        corporate_actions.c.effective_at >= bars[0].event_time,
+                        corporate_actions.c.effective_at <= as_of,
+                        corporate_actions.c.available_from <= as_of,
+                    )
+                )
+                .order_by(corporate_actions.c.effective_at.asc())
+            ).all()
         references.extend(
             EvidenceReference(
                 evidence_type="catalyst",
@@ -159,6 +211,16 @@ class ResearchStore:
                 source=f"sec:{row.form}",
             )
             for row in fact_rows
+        )
+        references.extend(
+            EvidenceReference(
+                evidence_type="corporate_action",
+                evidence_id=str(row.corporate_action_id),
+                event_time=_utc(row.effective_at),
+                available_from=_utc(row.available_from),
+                source=f"{row.source}:{row.action_type}",
+            )
+            for row in action_rows
         )
         ordered = tuple(
             sorted(
@@ -309,6 +371,12 @@ class ResearchStore:
                     [trade.model_dump() for trade in result.trades],
                 )
 
+    def record_feature_parity_check(self, check: FeatureParityCheck) -> None:
+        with self.engine.begin() as connection:
+            connection.execute(
+                insert(feature_parity_checks).values(**check.model_dump())
+            )
+
     def recent_experiments(self, *, limit: int = 50) -> list[dict[str, Any]]:
         statement = (
             select(experiment_runs)
@@ -353,6 +421,11 @@ class ResearchStore:
                 "backtest_trades": int(
                     connection.execute(
                         select(func.count()).select_from(backtest_trades)
+                    ).scalar_one()
+                ),
+                "feature_parity_checks": int(
+                    connection.execute(
+                        select(func.count()).select_from(feature_parity_checks)
                     ).scalar_one()
                 ),
             }
