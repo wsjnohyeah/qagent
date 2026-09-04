@@ -1,6 +1,6 @@
 # Agentic Quant Trading System
 
-A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton, the read-only **Phase 1** market-data foundation, the completed **Phase 2** event/document pipeline, a **Phase 3D** bias-aware research validation gate, a **Phase 5A** reliable research-workflow layer, and a front-loaded **Phase 4B** dual-provider LLM gateway and local Control Center.
+A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton, the read-only **Phase 1** market-data foundation, the completed **Phase 2** event/document pipeline, a **Phase 3D** bias-aware research validation gate, the completed **Phase 4** evidence-bound LLM analyst, and the completed **Phase 5** ML/registry tooling. Phase 6 shadow runtime is not implemented.
 
 > Live-money execution is not implemented. `live` is not a valid mode, and setting `LIVE_TRADING_ENABLED=true` makes startup fail.
 
@@ -275,7 +275,7 @@ For stored bars, use `quant-research validate`. Reports include PBO, Deflated Sh
 versioned fail-closed research gate. Fold lineage is available from
 `GET /v1/research/validations` and `GET /v1/research/validations/{validation_report_id}`.
 
-## Phase 4A/4B: configurable LLM gateway and local Control Center
+## Phase 4: configurable LLM gateway, analyst, and Control Center
 
 `configs/model_routing.yaml` is the initial versioned routing source. Critical research,
 strategy generation, and strategy critique route to `gpt-5.6-sol`; interactive explanations
@@ -305,6 +305,21 @@ provider to each named workload. Saving creates an append-only database revision
 rewriting the tracked YAML baseline. Research Copilot supports `Auto` routing or an explicit
 provider for a single conversation. Browser history is session-local and bounded; raw input is
 hashed in the invocation audit while model output and usage are retained.
+
+## Phase 5: calibrated ML ranking and registry
+
+`configs/ml_policy.yaml` defines the feature list and deterministic sample, OOS, calibration,
+and drift thresholds. The trainer builds point-in-time forward labels, compares logistic
+regression with boosted decision stumps in expanding train/embargo/test folds, fits Platt
+calibration on earlier OOS predictions, and evaluates it on a later OOS holdout. Artifacts are
+portable JSON rather than executable pickle files.
+
+Models remain `CANDIDATE` when bounded local evidence is insufficient. A model may become
+`CHALLENGER` only after every ML gate passes and `CHAMPION` only after an explicit human
+registry action. Champion means eligible for model serving, not strategy approval: every
+downstream strategy still passes the separate PBO/DSR research gate. Forecasts can be cited
+by the Phase 4 analyst, giving the Decision Inspector one ML + LLM lineage graph. See
+`runbooks/ml.md` and ADR 0015.
 
 ## Repository map
 
@@ -349,6 +364,13 @@ AGENTS.md                mandatory operating rules for coding/deployment agents
 - `POST /v1/intelligence/analyze` — development only; evidence-bound paid analysis
 - `GET /v1/intelligence/analyses`
 - `GET /v1/decision-inspector/{analysis_id}`
+- `POST /v1/ml/train` — development only; trains bounded point-in-time candidates
+- `GET /v1/ml/training-runs`
+- `GET /v1/ml/models`
+- `POST /v1/ml/forecast` — development only
+- `GET /v1/ml/forecasts`
+- `GET /v1/ml/registry-events`
+- `POST /v1/ml/models/{model_id}/promote` — development only; human action required
 - `POST /v1/llm/probe/{provider}` — development only; incurs a bounded provider call
 - `POST /v1/market-data/alpaca/probe` — development only
 - `POST /v1/market-data/alpaca/backfill` — development only

@@ -8,7 +8,12 @@ from typing import Any
 from pydantic import ValidationError
 from sqlalchemy import Engine, func, insert, select
 
-from agentic_quant.database import research_analyses
+from agentic_quant.database import (
+    ml_forecasts,
+    ml_models,
+    ml_training_runs,
+    research_analyses,
+)
 from agentic_quant.document_store import DocumentStore
 from agentic_quant.domain import (
     AnalystClaim,
@@ -295,6 +300,57 @@ class IntelligenceStore:
                     "relationship": "supports",
                 }
             )
+        if record.forecast_id is not None:
+            with self.engine.connect() as connection:
+                lineage = connection.execute(
+                    select(
+                        ml_forecasts.c.model_id,
+                        ml_models.c.model_version,
+                        ml_models.c.training_run_id,
+                        ml_training_runs.c.dataset_sha256,
+                    )
+                    .join(ml_models, ml_models.c.model_id == ml_forecasts.c.model_id)
+                    .join(
+                        ml_training_runs,
+                        ml_training_runs.c.training_run_id
+                        == ml_models.c.training_run_id,
+                    )
+                    .where(ml_forecasts.c.forecast_id == record.forecast_id)
+                ).one_or_none()
+            if lineage is not None:
+                forecast_node_id = f"FORECAST:{record.forecast_id}"
+                nodes.extend(
+                    (
+                        {
+                            "id": str(lineage.training_run_id),
+                            "type": "ml_training_run",
+                            "label": "point-in-time walk-forward training",
+                            "metadata": {
+                                "dataset_sha256": str(lineage.dataset_sha256)
+                            },
+                        },
+                        {
+                            "id": str(lineage.model_id),
+                            "type": "ml_model_version",
+                            "label": str(lineage.model_version),
+                            "metadata": {},
+                        },
+                    )
+                )
+                edges.extend(
+                    (
+                        {
+                            "source": str(lineage.training_run_id),
+                            "target": str(lineage.model_id),
+                            "relationship": "trained",
+                        },
+                        {
+                            "source": str(lineage.model_id),
+                            "target": forecast_node_id,
+                            "relationship": "produced",
+                        },
+                    )
+                )
         if record.llm_invocation_id is not None:
             nodes.append(
                 {

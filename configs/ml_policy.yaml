@@ -1,0 +1,26 @@
+version: ml_policy@0.1.0
+features:
+  - return_1
+  - return_5
+  - distance_sma_20
+  - realized_vol_20
+  - volume_ratio_20
+  - catalyst_count_90d
+  - corporate_fact_count
+  - corporate_action_count
+label:
+  positive_return_threshold: "0.001"
+validation:
+  minimum_samples: 200
+  minimum_oos_samples: 60
+  minimum_folds: 3
+  embargo_bars: 1
+  test_fraction: "0.15"
+promotion:
+  minimum_roc_auc: "0.52"
+  maximum_brier_score: "0.25"
+  maximum_expected_calibration_error: "0.10"
+  maximum_population_stability_index: "0.25"
+  require_human_approval: true
+  downstream_strategy_requires_research_gate: true
+automatic_promotion: false

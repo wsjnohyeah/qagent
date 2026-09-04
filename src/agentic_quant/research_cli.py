@@ -14,6 +14,13 @@ from agentic_quant.ledger import EventLedger
 from agentic_quant.market_calendar import MarketSessionClock
 from agentic_quant.market_store import MarketDataStore
 from agentic_quant.migrations import upgrade_database
+from agentic_quant.ml import (
+    MLDatasetBuilder,
+    MLPredictor,
+    MLStore,
+    WalkForwardMLTrainer,
+    load_ml_policy,
+)
 from agentic_quant.research import (
     FeatureParityChecker,
     SUPPORTED_STRATEGIES,
@@ -356,6 +363,65 @@ def _import_reference(settings: Settings, args: argparse.Namespace) -> None:
     print(json.dumps(result.model_dump(mode="json"), indent=2))
 
 
+def _ml_train(settings: Settings, args: argparse.Namespace) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    research_store = ResearchStore(ledger.engine)
+    snapshots = research_store.feature_snapshots_for_training(
+        symbol=args.symbol.upper(),
+        timeframe=args.timeframe,
+        as_of_end=args.end,
+    )
+    if not snapshots:
+        raise ValueError("No feature snapshots found for ML training")
+    policy = load_ml_policy(settings.ml_policy_path)
+    examples = MLDatasetBuilder(research_store).build(
+        symbol=args.symbol.upper(),
+        timeframe=args.timeframe,
+        as_of_end=args.end,
+        horizon_bars=args.horizon_bars,
+        policy=policy,
+    )
+    result = WalkForwardMLTrainer(
+        MLStore(ledger.engine, ledger),
+        policy,
+        code_git_sha=_git_sha(settings),
+    ).train(
+        examples,
+        symbol=args.symbol.upper(),
+        timeframe=args.timeframe,
+        horizon_bars=args.horizon_bars,
+        feature_set_version=snapshots[0].feature_set_version,
+    )
+    print(json.dumps(result.model_dump(mode="json"), indent=2))
+
+
+def _ml_models(settings: Settings, args: argparse.Namespace) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    print(
+        json.dumps(
+            MLStore(ledger.engine).recent_models(limit=args.limit),
+            indent=2,
+            default=str,
+        )
+    )
+
+
+def _ml_forecast(settings: Settings, args: argparse.Namespace) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    ml_store = MLStore(ledger.engine, ledger)
+    model = ml_store.model(args.model_id)
+    if model is None:
+        raise ValueError("ML model not found")
+    snapshot = ResearchStore(ledger.engine).feature_snapshot(args.feature_snapshot_id)
+    if snapshot is None:
+        raise ValueError("Feature snapshot not found")
+    forecast = MLPredictor(ml_store).predict(model=model, snapshot=snapshot)
+    print(json.dumps(forecast.model_dump(mode="json"), indent=2))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Point-in-time research and cost-aware backtest operations"
@@ -406,6 +472,22 @@ def main() -> None:
         help="Import a governed corporate-action or universe-membership JSON batch",
     )
     reference_import.add_argument("path")
+    ml_train = subparsers.add_parser(
+        "ml-train",
+        help="Train and register point-in-time logistic and boosted-stump candidates",
+    )
+    ml_train.add_argument("symbol")
+    ml_train.add_argument("--timeframe", choices=("1Min", "1Day"), default="1Day")
+    ml_train.add_argument("--end", required=True, type=_parse_time)
+    ml_train.add_argument("--horizon-bars", type=int, default=1)
+    ml_models = subparsers.add_parser("ml-models", help="List recent ML model versions")
+    ml_models.add_argument("--limit", type=int, default=20)
+    ml_forecast = subparsers.add_parser(
+        "ml-forecast",
+        help="Create a point-in-time forecast from a registered model",
+    )
+    ml_forecast.add_argument("model_id")
+    ml_forecast.add_argument("feature_snapshot_id")
     validate = subparsers.add_parser(
         "validate",
         help="Run chronological train/embargo/test strategy validation",
@@ -445,6 +527,12 @@ def main() -> None:
         _quality(settings, args)
     elif args.command == "import-reference":
         _import_reference(settings, args)
+    elif args.command == "ml-train":
+        _ml_train(settings, args)
+    elif args.command == "ml-models":
+        _ml_models(settings, args)
+    elif args.command == "ml-forecast":
+        _ml_forecast(settings, args)
     elif args.command == "validate":
         _validate(settings, args)
     else:

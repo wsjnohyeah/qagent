@@ -114,6 +114,19 @@ class ResearchRecommendation(StrEnum):
     ABSTAIN = "ABSTAIN"
 
 
+class MLModelKind(StrEnum):
+    LOGISTIC_REGRESSION = "logistic_regression"
+    BOOSTED_STUMPS = "boosted_stumps"
+
+
+class MLModelStatus(StrEnum):
+    CANDIDATE = "CANDIDATE"
+    CHALLENGER = "CHALLENGER"
+    CHAMPION = "CHAMPION"
+    RETIRED = "RETIRED"
+    REJECTED = "REJECTED"
+
+
 class LLMRoutingRevision(FrozenModel):
     routing_revision_id: str
     base_routing_version: str
@@ -351,12 +364,86 @@ class Forecast(FrozenModel):
     model_version: str
     training_data_cutoff: datetime
     feature_snapshot_id: str
+    created_at: datetime
 
     @model_validator(mode="after")
     def training_cutoff_is_safe(self) -> Self:
         if self.training_data_cutoff > self.as_of:
             raise ValueError("Forecast training data cutoff cannot be after as_of")
         return self
+
+
+class MLModelVersion(FrozenModel):
+    model_id: str
+    training_run_id: str
+    model_name: str
+    model_version: str
+    kind: MLModelKind
+    symbol: str
+    timeframe: str
+    horizon_bars: int = Field(ge=1)
+    feature_set_version: str
+    feature_names: tuple[str, ...] = Field(min_length=1)
+    training_start: datetime
+    training_end: datetime
+    training_data_cutoff: datetime
+    artifact: dict[str, Any]
+    artifact_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    metrics: dict[str, Any]
+    calibration: dict[str, Any]
+    drift: dict[str, Any]
+    promotion_assessment: dict[str, Any]
+    status: MLModelStatus
+    code_git_sha: str
+    created_at: datetime
+
+    @model_validator(mode="after")
+    def training_window_is_valid(self) -> Self:
+        if self.training_start >= self.training_end:
+            raise ValueError("ML training start must precede end")
+        if self.training_end > self.training_data_cutoff:
+            raise ValueError("ML training end cannot exceed its data cutoff")
+        return self
+
+
+class MLTrainingRun(FrozenModel):
+    training_run_id: str
+    symbol: str
+    timeframe: str
+    horizon_bars: int = Field(ge=1)
+    feature_set_version: str
+    dataset_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    sample_count: int = Field(ge=1)
+    fold_count: int = Field(ge=1)
+    embargo_bars: int = Field(ge=1)
+    model_ids: tuple[str, ...] = Field(min_length=1)
+    selected_model_id: str
+    selection_metric: str
+    status: str
+    code_git_sha: str
+    started_at: datetime
+    finished_at: datetime
+
+    @model_validator(mode="after")
+    def run_lineage_is_consistent(self) -> Self:
+        if self.selected_model_id not in self.model_ids:
+            raise ValueError("Selected ML model must belong to the training run")
+        if len(self.model_ids) != len(set(self.model_ids)):
+            raise ValueError("ML training run model IDs must be unique")
+        if self.finished_at < self.started_at:
+            raise ValueError("ML training finish cannot precede start")
+        return self
+
+
+class ModelRegistryEvent(FrozenModel):
+    registry_event_id: str
+    model_id: str
+    previous_status: MLModelStatus
+    new_status: MLModelStatus
+    training_run_id: str
+    approved_by: str
+    reason: str
+    created_at: datetime
 
 
 class ResearchSignal(FrozenModel):

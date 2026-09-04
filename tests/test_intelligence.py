@@ -122,7 +122,7 @@ class StructuredProvider:
         self.calls += 1
         payload = json.loads(request.input_text)
         citations = [item["citation_id"] for item in payload["evidence"]]
-        citation = "DOC:invented" if self.invalid_citation else citations[-1]
+        claim_citations = ["DOC:invented"] if self.invalid_citation else citations
         return LLMProviderResult(
             response_id="response-structured",
             output_text=json.dumps(
@@ -137,7 +137,7 @@ class StructuredProvider:
                     "claims": [
                         {
                             "claim": "The issuer published a recent operating update.",
-                            "citations": [citation],
+                            "citations": claim_citations,
                         }
                     ],
                     "risk_factors": ["The sample is bounded."],

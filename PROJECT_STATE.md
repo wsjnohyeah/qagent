@@ -2,13 +2,13 @@
 
 ## Current
 
-- Phases 0, 2, 3D, and 4 are complete; the Phase 5A reliable workflow layer and the
-  front-loaded LLM Control Center are implemented.
+- Phases 0, 2, 3D, 4, and 5 are complete in bounded-development form. Phase 1B open-session
+  validation remains pending, and Phase 6 shadow runtime has not started.
   Phase 1B open-session validation is pending.
 - Local-lite uses Python 3.12, a project-local `uv`, SQLite, and filesystem object storage.
 - The Control API, local model/research web console, append-only event ledger, deterministic risk engine, and synthetic vertical slice exist.
 - `live` is not a valid trading mode; `LIVE_TRADING_ENABLED=true` fails configuration validation.
-- Local lint, strict type checking, 62 tests, API readiness, the HTTP vertical slice, and the secret scan pass.
+- Local lint, strict type checking, 65 tests, API readiness, the HTTP vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
 - The full Compose stack is healthy: PostgreSQL 17, Redis 8, MinIO, and the API all passed direct checks; the PostgreSQL-backed shadow slice recorded six lineage events.
 - `context.md` is the required master record for architecture, discussions, iterations, commit contents, and post-commit global state.
@@ -26,7 +26,7 @@
 - Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
   experiment runs, backtest trades, corporate actions, historical universe membership,
   feature parity checks, and walk-forward reports are stored through Alembic revision
-  `20260904_0017`.
+  `20260904_0018`.
 - The Phase 3 runner provides buy-and-hold, long/cash momentum, and long/cash
   mean-reversion baselines with next-bar execution, commission, slippage, metrics, hashes,
   and append-only completion events.
@@ -59,13 +59,17 @@
 - Phase 4 adds point-in-time document retrieval, `research_analysis@0.1.0`, exact citation
   validation, deterministic abstention, atomic LLM budget reservations, and Decision
   Inspector graph `ai_infrastructure_graph@0.1.0`.
+- Phase 5 builds point-in-time labels, compares logistic and boosted-stump models with
+  embargoed walk-forward splits, evaluates Platt calibration on a later OOS holdout, measures
+  PSI drift, stores JSON artifacts/forecasts, and enforces human-only champion promotion.
+- Bounded local ML evidence remains `CANDIDATE`; no model or strategy has been promoted.
 - `.env` explicitly selects `APP_ENV=development`; development daily/news backfills are
   capped at 120 days and one-minute backfills at 7 days by default. The active scope is
   exposed by `/v1/system/status`.
 
 ## Next
 
-1. Complete the Phase 5 calibrated ML ranking and champion/challenger registry.
+1. Review Phase 6 shadow-runtime scope and UI requirements with the user before implementation.
 2. Capture real SIP trade/quote/bar frames and reconnect/gap repair during the next open session.
 3. Size remote long-horizon backfill concurrency and storage; continue using bounded samples for local
    correctness verification.
@@ -106,3 +110,5 @@
   reference imports, and durable resumable partitions before Phase 6.
 - ADR 0014: bound every LLM call by versioned budgets and accept research analysis only when
   point-in-time evidence, structured output, and exact citations validate.
+- ADR 0015: train transparent chronological ML baselines, measure calibration/drift, store
+  safe JSON artifacts, and require deterministic eligibility plus a human for champion status.

@@ -326,6 +326,36 @@ class ResearchStore:
             return None
         return self._feature_snapshot_from_row(dict(row._mapping))
 
+    def feature_snapshots_for_training(
+        self,
+        *,
+        symbol: str,
+        timeframe: str,
+        as_of_end: datetime,
+    ) -> tuple[PointInTimeFeatureSnapshot, ...]:
+        statement = (
+            select(feature_snapshots)
+            .where(
+                and_(
+                    feature_snapshots.c.symbol == symbol.upper(),
+                    feature_snapshots.c.timeframe == timeframe,
+                    feature_snapshots.c.as_of <= as_of_end,
+                    feature_snapshots.c.source_max_available_from <= as_of_end,
+                )
+            )
+            .order_by(
+                feature_snapshots.c.as_of.asc(),
+                feature_snapshots.c.created_at.asc(),
+            )
+        )
+        with self.engine.connect() as connection:
+            rows = connection.execute(statement).all()
+        latest_by_as_of: dict[datetime, PointInTimeFeatureSnapshot] = {}
+        for row in rows:
+            snapshot = self._feature_snapshot_from_row(dict(row._mapping))
+            latest_by_as_of[snapshot.as_of] = snapshot
+        return tuple(latest_by_as_of[key] for key in sorted(latest_by_as_of))
+
     def record_strategy_spec(self, spec: StrategySpec) -> StrategySpec:
         identity = and_(
             strategy_specs.c.name == spec.name,

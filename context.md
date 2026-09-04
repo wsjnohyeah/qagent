@@ -4,9 +4,9 @@ Last updated: 2026-09-04 PDT
 
 Context format: v1
 
-Current phase: Phase 4 evidence-bound analyst plus Phase 5A reliability implemented; Phase 5 ML registry in progress; Phase 1B open-session verification pending
+Current phase: Phase 5 ML registry and all bounded pre-Phase-6 workflows implemented; Phase 1B open-session verification pending
 
-Current documented baseline: C018 — `Add evidence-bound LLM research analyst`
+Current documented baseline: C019 — `Add calibrated ML model registry`
 
 ## Purpose and authority
 
@@ -45,8 +45,8 @@ A Git commit cannot contain its own content-derived hash without changing that h
 - Real provider responses flow through content-addressed MinIO raw storage, normalized PostgreSQL tables, the append-only event ledger, and Redis Streams.
 - Alpaca News, SEC EDGAR, and an approved-host IR feed have passed live read-only ingestion.
   The social aggregate adapter is implemented but disabled by default. The LLM transport and
-  routing layer has passed bounded live OpenAI and Meta probes; no predictive model or broker
-  adapter is connected.
+  routing layer has passed bounded live OpenAI and Meta probes. ML forecast tooling is now
+  connected to the research evidence graph; no broker execution adapter is connected.
 - Phase 3A persists immutable evidence packets, feature snapshots, strategy specifications,
   experiment runs, and backtest trades. Three deterministic baselines run with next-bar
   execution and nonzero commission/slippage; their output is infrastructure evidence only.
@@ -72,6 +72,10 @@ A Git commit cannot contain its own content-derived hash without changing that h
   each provider call, requires typed research-only output and exact citations, abstains when
   independent evidence is missing, and exposes the full lineage as Decision Inspector graph
   `ai_infrastructure_graph@0.1.0`.
+- Phase 5 trains logistic and boosted-stump candidates on point-in-time labels, evaluates
+  them with embargoed chronological folds and a later calibrated OOS holdout, measures PSI
+  drift, persists safe JSON artifacts/forecasts, and requires deterministic eligibility plus
+  an explicit human action for model champion status. Local candidates remain unpromoted.
 - No GitHub remote or cloud host is configured yet.
 
 ### Repository state
@@ -121,8 +125,8 @@ Development service ports bind only to loopback. The local Compose credentials a
 
 - `make check`: passed.
 - Flake8: passed.
-- Strict mypy: passed for 40 source files.
-- Pytest: 62 passed.
+- Strict mypy: passed for 43 source files.
+- Pytest: 65 passed.
 - `make doctor`: passed against the local-lite SQLite profile.
 - `make docker-doctor`: passed against the PostgreSQL-backed Compose profile.
 - PostgreSQL query: passed; the first container replay stored six lineage events.
@@ -138,7 +142,7 @@ Development service ports bind only to loopback. The local Compose credentials a
 - Real primary-source test: 10 entries from Apple's official Newsroom RSS feed passed the same path; identical replay inserted zero documents, versions, catalysts, links, or events.
 - Real SEC test: 20 AAPL filing records produced 19 catalysts and 20 links; identical replay inserted zero new records or events. A bounded 250-record AAPL XBRL facts run also replayed with zero duplicates.
 - Phase 2 fixtures verify primary/secondary source distinction, correction-version retention, SEC filing and XBRL normalization, IR feed parsing, and cross-document catalyst deduplication.
-- Alembic migrations through `20260904_0017` own the Phase 3D/4/5A schema; a fresh SQLite
+- Alembic migrations through `20260904_0018` own the Phase 3D/4/5 schema; a fresh SQLite
   upgrade/check/downgrade/re-upgrade cycle passed with no schema diff.
 - `make research-smoke`: passed with 100 deterministic daily bars, three immutable baseline
   experiments, nonzero cost modeling, matching offline/online feature hashes, and ordered
@@ -389,6 +393,12 @@ flowchart LR
     LLMGW --> ANALYST
     ANALYST --> INSPECTOR["Decision Inspector graph"]
     ANALYST --> DB
+    PITFEATURES --> MLTRAIN["Embargoed ML walk-forward"]
+    MLTRAIN --> MLREGISTRY["Human-gated model registry"]
+    MLREGISTRY --> FORECAST["Point-in-time ML forecast"]
+    FORECAST --> ANALYST
+    MLTRAIN --> DB
+    FORECAST --> DB
 ```
 
 Alembic migrations own the PostgreSQL/SQLite schema. Redis and MinIO are connected to both ingestion paths. The market stream client authenticates, reconnects with bounded exponential backoff, normalizes trades/quotes/minute bars, and requests historical repair for XNYS-session gaps; a real open-session frame capture remains outstanding. The Phase 2 path versions source documents, retains publication/ingestion/correction time, classifies source trust, resolves issuer entities, normalizes SEC facts, and deterministically links similar multi-source coverage to one catalyst.
@@ -443,6 +453,14 @@ expected exchange intervals. Fills now charge configured half-spread on each sid
 corporate-action/universe batches carry source, source-version, availability, and content
 hashes. Long backfills are deterministic date partitions whose durable job state skips
 completed work and retries interrupted work with bounded attempts.
+
+Phase 5 uses the same point-in-time feature snapshots to construct future-return labels whose
+availability is bounded by the training cutoff. It compares a regularized logistic baseline
+with a deterministic boosted-stump model in expanding train/embargo/test folds. Calibration
+fits only the earlier half of OOS predictions and is evaluated on the later half; ROC AUC,
+Brier, log loss, accuracy, ECE, and per-feature PSI remain durable. Models are portable JSON
+artifacts. Deterministic thresholds may create a challenger, but only an explicit human action
+can mark it champion, and that serving status does not bypass the separate strategy gate.
 
 ### Target architecture
 
@@ -576,7 +594,8 @@ year or more of data.
 | LLM routing | `configs/model_routing.yaml` | premium/value model assignments and bounded provider settings |
 | LLM budgets | `src/agentic_quant/llm_budget.py`, `configs/llm_budget.yaml` | atomic reservation/settlement and versioned token/cost ceilings |
 | Research intelligence | `src/agentic_quant/intelligence.py` | point-in-time retrieval, structured analyst, citation checks, abstention, Decision Inspector graph |
-| Schema migrations | `migrations/` | Alembic schema history through completed Phase 4 |
+| ML training/registry | `src/agentic_quant/ml.py`, `configs/ml_policy.yaml` | PIT labels, logistic/stump walk-forward, calibration, drift, JSON registry, forecasts |
+| Schema migrations | `migrations/` | Alembic schema history through completed Phase 5 |
 
 ## Current executable risk baseline
 
@@ -627,6 +646,14 @@ Implemented endpoints:
 - `POST /v1/intelligence/analyze`, restricted to development; makes a budgeted paid call
 - `GET /v1/intelligence/analyses`
 - `GET /v1/decision-inspector/{analysis_id}`
+- `POST /v1/ml/train`, restricted to development
+- `GET /v1/ml/training-runs`
+- `GET /v1/ml/models`
+- `POST /v1/ml/forecast`, restricted to development
+- `GET /v1/ml/forecasts`
+- `GET /v1/ml/registry-events`
+- `POST /v1/ml/models/{model_id}/promote`, restricted to development and deterministic
+  challenger eligibility; requires explicit approver and reason
 - `POST /v1/llm/probe/{provider}`, restricted to development
 - Development-only read-only Alpaca probe, bar backfill, and option snapshot endpoints.
 - Development-only Alpaca News, SEC filing, and SEC company-facts ingestion endpoints.
@@ -980,6 +1007,23 @@ The Compose stack is currently intended to remain running for local inspection. 
 - Decision Inspector v1 is a lineage graph, not a decision authority. The LLM still cannot
   promote models, approve risk, size positions, submit orders, or access broker credentials.
 - Formal record: `docs/adr/0014-evidence-bound-llm-analysis-and-budgeting.md`.
+
+### D025 — Model champion status is human-gated and is not strategy approval
+
+- Date: 2026-09-04 PDT.
+- Phase 5 uses two deliberately transparent baselines: regularized logistic regression and
+  gradient-boosted decision stumps. Artifacts are JSON rather than executable pickle data.
+- Training labels are available only when the future snapshot exists by the declared cutoff;
+  intervening split and cash-dividend economics are included. Evaluation uses expanding
+  chronological folds with an embargo.
+- Platt calibration fits the earlier half of walk-forward OOS predictions and is evaluated on
+  the later half. Model review gates sample/OOS/fold counts, ROC AUC, Brier, ECE, and PSI.
+- Passing those checks can create a challenger, never a champion. Champion transition needs
+  an explicit human approver/reason and produces an immutable registry event. LLM output can
+  neither change registry status nor substitute for these checks.
+- Model champion is a serving designation only. Any strategy using its forecast still needs
+  independent `research_gate@0.1.0` eligibility, human review, and later runtime risk checks.
+- Formal record: `docs/adr/0015-calibrated-ml-and-human-gated-model-registry.md`.
 
 ## Iteration and commit ledger
 
@@ -1553,7 +1597,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C018 — `Add evidence-bound LLM research analyst`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `b43f118`.
 - Date: 2026-09-04 PDT.
 - User intent: continue autonomously through Phase 5 so LLM and ML can participate in
   strategy research without bypassing deterministic safety and evidence controls.
@@ -1587,12 +1631,48 @@ The Compose stack is currently intended to remain running for local inspection. 
   - Phase 4 is complete and provides a bounded, auditable integration point for Phase 5 ML
     forecasts. Phase 5 model training/registry remains next; Phase 6 remains untouched.
 
+### C019 — `Add calibrated ML model registry`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-04 PDT.
+- User intent: autonomously finish every implementable phase before Phase 6 using bounded
+  local data to prove workflow correctness rather than claim statistical alpha.
+- Scope:
+  - Added point-in-time, corporate-action-aware forward-label construction from persisted
+    feature snapshots.
+  - Added deterministic regularized logistic and boosted-stump learners with expanding
+    embargoed walk-forward evaluation.
+  - Added chronological Platt calibration fit/evaluation separation, ROC AUC/Brier/log-loss/
+    accuracy/ECE metrics, and feature PSI drift reports.
+  - Added versioned `ml_policy@0.1.0`, safe JSON model artifacts, immutable training runs and
+    forecasts, and a candidate/challenger/champion/retired registry.
+  - Added explicit human-only champion transition, API workflow, ML-to-LLM evidence binding,
+    ADR 0015, runbook, manifest, README, state, and Alembic revision `20260904_0018`.
+- Architecture/decision impact:
+  - ML forecasts are cited inputs to the LLM analyst, while deterministic application code
+    owns data cutoffs, validation, registry state, and all promotion decisions.
+  - Model champion status does not promote a strategy and grants no risk or execution
+    authority. The separate Phase 3D gate remains mandatory downstream.
+- Validation:
+  - Flake8, strict mypy across 43 source files, and 65 tests passed.
+  - Tests cover both learners, non-overlapping chronological evaluation, separate calibration
+    holdout, drift output, local insufficient-evidence rejection, forecast replay/idempotency,
+    ML-to-LLM citations, human approval, and registry promotion.
+  - `make ml-smoke` trained both candidates on 78 deterministic labeled snapshots and kept
+    them `CANDIDATE` because sample/OOS/drift gates correctly rejected the bounded evidence.
+  - Fresh SQLite migration/check/downgrade/re-upgrade, local doctor, rebuilt
+    Docker/PostgreSQL doctor at revision 0018, empty registry endpoint probes, secret scan,
+    and diff checks passed. A transient Docker Hub token timeout succeeded on retry.
+- Expected global state after commit:
+  - All code-defined milestones before Phase 6 are implemented and locally verifiable.
+  - Phase 6 shadow runtime and its UI/product choices remain intentionally unstarted pending
+    user review; no locally trained model or strategy is approved.
+
 ## Open work
 
 Ordered near-term work:
 
-1. Complete the calibrated ML ranking and champion/challenger registry, then feed its
-   forecasts into the evidence-bound analyst.
+1. Review Phase 6 shadow-runtime and operator-UI scope with the user before implementation.
 2. During the next U.S. market session, finish Phase 1B real frame/reconnect/gap checks.
 3. Size remote backfill concurrency and identify equity/options sources with suitable historical
    coverage, retention, and licensing; do not require those large downloads for local tests.

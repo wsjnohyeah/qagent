@@ -41,13 +41,15 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert ready.json()["live_trading_enabled"] is False
         system_status = client.get("/v1/system/status").json()
         assert system_status["phase"] == (
-            "4c-evidence-bound-analyst-plus-5a-reliable-workflows"
+            "5-ml-registry-plus-4-evidence-bound-analyst"
         )
         assert system_status["data_operating_scope"] == "bounded_correctness_samples"
         assert system_status["development_max_backfill_days"] == 120
         assert system_status["development_max_intraday_backfill_days"] == 7
         assert system_status["phase_1b_open_session_validation"] == "pending"
         assert system_status["llm_routing_version"] == "llm_routing@0.1.0"
+        assert system_status["llm_budget_policy"] == "llm_budget@0.1.0"
+        assert system_status["ml_policy"] == "ml_policy@0.1.0"
         assert system_status["openai_configured"] is False
         assert system_status["meta_model_configured"] is False
         demo = client.post("/v1/demo/run")
@@ -72,6 +74,10 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert data_health["llm_budget_windows"] == 0
         assert data_health["llm_budget_reservations"] == 0
         assert data_health["research_analyses"] == 0
+        assert data_health["ml_training_runs"] == 0
+        assert data_health["ml_models"] == 0
+        assert data_health["ml_forecasts"] == 0
+        assert data_health["model_registry_events"] == 0
         assert data_health["data_quality_reports"] == 1
         assert data_health["failed_data_quality_reports"] == 0
         assert data_health["workflow_jobs"] == 0
@@ -120,6 +126,10 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert budget["windows"] == []
         assert client.get("/v1/intelligence/analyses").json() == []
         assert client.get("/v1/decision-inspector/missing").status_code == 404
+        assert client.get("/v1/ml/training-runs").json() == []
+        assert client.get("/v1/ml/models").json() == []
+        assert client.get("/v1/ml/forecasts").json() == []
+        assert client.get("/v1/ml/registry-events").json() == []
         missing_invocation = client.get("/v1/llm/invocations/missing")
         assert missing_invocation.status_code == 404
         missing_llm_credentials = client.post("/v1/llm/probe/openai")

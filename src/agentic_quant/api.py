@@ -42,6 +42,13 @@ from agentic_quant.llm_store import LLMStore
 from agentic_quant.market_ingestion import MarketDataIngestionService
 from agentic_quant.market_store import MarketDataStore
 from agentic_quant.migrations import upgrade_database
+from agentic_quant.ml import (
+    MLDatasetBuilder,
+    MLPredictor,
+    MLStore,
+    WalkForwardMLTrainer,
+    load_ml_policy,
+)
 from agentic_quant.option_ingestion import OptionDataIngestionService
 from agentic_quant.pipeline import run_synthetic_vertical_slice
 from agentic_quant.providers.alpaca import (
@@ -142,7 +149,25 @@ class ResearchAnalysisRequest(BaseModel):
     symbol: str = Field(min_length=1, max_length=24, pattern=r"^[A-Za-z.\-]+$")
     as_of: datetime
     feature_snapshot_id: str = Field(min_length=1, max_length=36)
+    forecast_id: str | None = Field(default=None, min_length=1, max_length=36)
     horizon: str = Field(default="5 trading days", min_length=1, max_length=40)
+
+
+class MLTrainingRequest(BaseModel):
+    symbol: str = Field(min_length=1, max_length=24, pattern=r"^[A-Za-z.\-]+$")
+    timeframe: Literal["1Min", "1Day"] = "1Day"
+    as_of_end: datetime
+    horizon_bars: int = Field(default=1, ge=1, le=252)
+
+
+class MLForecastRequest(BaseModel):
+    model_id: str = Field(min_length=1, max_length=36)
+    feature_snapshot_id: str = Field(min_length=1, max_length=36)
+
+
+class MLPromotionRequest(BaseModel):
+    approved_by: str = Field(min_length=1, max_length=80)
+    reason: str = Field(min_length=3, max_length=500)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -153,6 +178,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     reference_data_store = ReferenceDataStore(ledger.engine)
     llm_store = LLMStore(ledger.engine)
     intelligence_store = IntelligenceStore(ledger.engine, ledger)
+    ml_store = MLStore(ledger.engine, ledger)
+    ml_policy = load_ml_policy(app_settings.ml_policy_path)
     data_quality_service = MarketDataQualityService(
         ledger.engine,
         ledger,
@@ -195,6 +222,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         application.state.llm_store = llm_store
         application.state.llm_gateway = llm_gateway
         application.state.intelligence_store = intelligence_store
+        application.state.ml_store = ml_store
         application.state.new_exposure_paused = app_settings.global_new_exposure_paused
         yield
         await llm_gateway.aclose()
@@ -243,7 +271,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "live_trading_enabled": False,
             "new_exposure_paused": application.state.new_exposure_paused,
             "database": "healthy" if ledger.health() else "unhealthy",
-            "phase": "4c-evidence-bound-analyst-plus-5a-reliable-workflows",
+            "phase": "5-ml-registry-plus-4-evidence-bound-analyst",
             "data_operating_scope": app_settings.data_operating_scope,
             "development_max_backfill_days": (
                 app_settings.development_max_backfill_days
@@ -258,6 +286,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "phase_1b_open_session_validation": "pending",
             "llm_routing_version": llm_status["routing_version"],
             "llm_route_source": llm_status["route_source"],
+            "llm_budget_policy": llm_budget_manager.policy.version,
+            "ml_policy": ml_policy.version,
             "openai_configured": app_settings.openai_configured,
             "meta_model_configured": app_settings.meta_model_configured,
             "alpaca_configured": bool(
@@ -275,6 +305,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             **llm_store.health_summary(),
             **llm_budget_manager.health_summary(),
             **intelligence_store.health_summary(),
+            **ml_store.health_summary(),
             **data_quality_service.health_summary(),
             **workflow_job_store.health_summary(),
             "raw_archive": "healthy" if application.state.archive.health() else "unhealthy",
@@ -437,10 +468,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         snapshot = research_store.feature_snapshot(request.feature_snapshot_id)
         if snapshot is None:
             raise HTTPException(status_code=404, detail="feature snapshot not found")
+        forecast = None
+        if request.forecast_id is not None:
+            forecast = ml_store.forecast(request.forecast_id)
+            if forecast is None:
+                raise HTTPException(status_code=404, detail="ML forecast not found")
         try:
             bundle = evidence_retriever.retrieve(
                 feature_snapshot=snapshot,
                 as_of=request.as_of,
+                forecast=forecast,
             )
             record = await research_analyst.analyze(
                 bundle,
@@ -468,6 +505,93 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if graph is None:
             raise HTTPException(status_code=404, detail="research analysis not found")
         return graph
+
+    @application.post("/v1/ml/train")
+    def ml_train(request: MLTrainingRequest) -> dict[str, Any]:
+        require_development()
+        if request.as_of_end.tzinfo is None:
+            raise HTTPException(status_code=422, detail="as_of_end must include a timezone")
+        snapshots = research_store.feature_snapshots_for_training(
+            symbol=request.symbol,
+            timeframe=request.timeframe,
+            as_of_end=request.as_of_end,
+        )
+        if not snapshots:
+            raise HTTPException(status_code=422, detail="no feature snapshots found")
+        try:
+            examples = MLDatasetBuilder(research_store).build(
+                symbol=request.symbol,
+                timeframe=request.timeframe,
+                as_of_end=request.as_of_end,
+                horizon_bars=request.horizon_bars,
+                policy=ml_policy,
+            )
+            result = WalkForwardMLTrainer(
+                ml_store,
+                ml_policy,
+                code_git_sha=app_settings.source_git_sha or "UNAVAILABLE",
+            ).train(
+                examples,
+                symbol=request.symbol,
+                timeframe=request.timeframe,
+                horizon_bars=request.horizon_bars,
+                feature_set_version=snapshots[0].feature_set_version,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return result.model_dump(mode="json")
+
+    @application.get("/v1/ml/training-runs")
+    def ml_training_runs_endpoint(
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> list[dict[str, Any]]:
+        return ml_store.recent_training_runs(limit=limit)
+
+    @application.get("/v1/ml/models")
+    def ml_models_endpoint(
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> list[dict[str, Any]]:
+        return ml_store.recent_models(limit=limit)
+
+    @application.post("/v1/ml/forecast")
+    def ml_forecast(request: MLForecastRequest) -> dict[str, Any]:
+        require_development()
+        model = ml_store.model(request.model_id)
+        if model is None:
+            raise HTTPException(status_code=404, detail="ML model not found")
+        snapshot = research_store.feature_snapshot(request.feature_snapshot_id)
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail="feature snapshot not found")
+        try:
+            forecast = MLPredictor(ml_store).predict(model=model, snapshot=snapshot)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return forecast.model_dump(mode="json")
+
+    @application.get("/v1/ml/forecasts")
+    def ml_forecasts_endpoint(
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> list[dict[str, Any]]:
+        return ml_store.recent_forecasts(limit=limit)
+
+    @application.get("/v1/ml/registry-events")
+    def ml_registry_events_endpoint(
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> list[dict[str, Any]]:
+        return ml_store.recent_registry_events(limit=limit)
+
+    @application.post("/v1/ml/models/{model_id}/promote")
+    def ml_promote(model_id: str, request: MLPromotionRequest) -> dict[str, Any]:
+        require_development()
+        try:
+            event = ml_store.promote(
+                model_id=model_id,
+                approved_by=request.approved_by,
+                reason=request.reason,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return event.model_dump(mode="json")
 
     @application.post("/v1/llm/probe/{provider}")
     async def llm_probe(provider: LLMProviderName) -> dict[str, Any]:
