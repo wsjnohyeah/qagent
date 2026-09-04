@@ -56,6 +56,15 @@ class ExperimentStatus(StrEnum):
     FAILED = "FAILED"
 
 
+class BacktestEventType(StrEnum):
+    SIGNAL = "signal"
+    ORDER_SUBMITTED = "order_submitted"
+    FILL = "fill"
+    SPLIT = "split"
+    CASH_DIVIDEND = "cash_dividend"
+    MARK = "mark"
+
+
 class CorporateActionType(StrEnum):
     SPLIT = "split"
     CASH_DIVIDEND = "cash_dividend"
@@ -203,6 +212,12 @@ class BacktestCostModel(FrozenModel):
     commission_per_share: Decimal = Field(default=Decimal("0.0049"), ge=0)
     minimum_commission_per_order: Decimal = Field(default=Decimal("0.99"), ge=0)
     slippage_bps_per_side: Decimal = Field(default=Decimal("2.0"), ge=0)
+    market_impact_bps_per_side: Decimal = Field(default=Decimal("1.0"), ge=0)
+    max_volume_participation: Decimal = Field(
+        default=Decimal("0.05"),
+        gt=0,
+        le=1,
+    )
 
 
 class BacktestMetrics(FrozenModel):
@@ -229,9 +244,11 @@ class BacktestTrade(FrozenModel):
     entry_time: datetime
     exit_time: datetime
     quantity: int = Field(gt=0)
+    exit_quantity: Decimal | None = Field(default=None, gt=0)
     entry_price: Decimal = Field(gt=0)
     exit_price: Decimal = Field(gt=0)
     gross_pnl: Decimal
+    corporate_action_cash: Decimal = Field(default=Decimal("0"), ge=0)
     transaction_cost: Decimal = Field(ge=0)
     net_pnl: Decimal
     feature_snapshot_id: str
@@ -244,6 +261,23 @@ class BacktestTrade(FrozenModel):
         if self.exit_time < self.entry_time:
             raise ValueError("Trade exit cannot precede entry")
         return self
+
+
+class BacktestPortfolioEvent(FrozenModel):
+    portfolio_event_id: str
+    experiment_run_id: str
+    sequence: int = Field(ge=1)
+    event_type: BacktestEventType
+    event_time: datetime
+    symbol: str
+    cash_balance: Decimal = Field(ge=0)
+    position_quantity: Decimal = Field(ge=0)
+    cash_delta: Decimal = Decimal("0")
+    quantity_delta: Decimal = Decimal("0")
+    price: Decimal | None = Field(default=None, gt=0)
+    corporate_action_id: str | None = None
+    feature_snapshot_id: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class ExperimentRun(FrozenModel):
@@ -275,6 +309,7 @@ class BacktestResult(FrozenModel):
     experiment: ExperimentRun
     strategy_spec: StrategySpec
     trades: tuple[BacktestTrade, ...]
+    portfolio_events: tuple[BacktestPortfolioEvent, ...] = ()
 
 
 class FeatureParityCheck(FrozenModel):

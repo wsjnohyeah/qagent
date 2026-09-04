@@ -9,6 +9,7 @@ from agentic_quant.database import catalysts, evidence_packets, feature_snapshot
 from agentic_quant.domain import BacktestCostModel, StockBar
 from agentic_quant.ids import uuid7
 from agentic_quant.ledger import EventLedger
+from agentic_quant.market_calendar import MarketSessionClock
 from agentic_quant.market_store import MarketDataStore
 from agentic_quant.migrations import upgrade_database
 from agentic_quant.research import (
@@ -21,11 +22,16 @@ from agentic_quant.research_store import ResearchStore
 
 
 def _daily_bars(symbol: str = "AAPL", count: int = 80) -> tuple[StockBar, ...]:
-    start = datetime(2025, 1, 2, 5, tzinfo=UTC)
+    clock = MarketSessionClock("XNYS")
+    sessions = clock.calendar.sessions_in_range("2025-01-02", "2025-12-31")[:count]
     bars: list[StockBar] = []
     price = Decimal("100")
-    for index in range(count):
-        event_time = start + timedelta(days=index)
+    for index, session in enumerate(sessions):
+        event_time = datetime.combine(
+            session.date(),
+            datetime.min.time(),
+            tzinfo=UTC,
+        )
         change = Decimal("-0.025") if index % 13 == 0 else Decimal("0.006")
         close = price * (Decimal("1") + change)
         bars.append(
@@ -34,7 +40,7 @@ def _daily_bars(symbol: str = "AAPL", count: int = 80) -> tuple[StockBar, ...]:
                 symbol=symbol,
                 timeframe="1Day",
                 event_time=event_time,
-                available_from=event_time + timedelta(days=1),
+                available_from=clock.daily_bar_available_from(event_time),
                 open=price,
                 high=max(price, close) * Decimal("1.002"),
                 low=min(price, close) * Decimal("0.998"),
@@ -157,6 +163,14 @@ def test_cost_aware_backtest_uses_next_bar_and_records_immutable_run(
     assert result.experiment.metrics.total_cost > 0
     assert result.experiment.metrics.sortino_ratio < Decimal("100")
     assert all(trade.entry_time >= trade.signal_as_of for trade in result.trades)
+    assert all(
+        trade.entry_time.hour in {13, 14} and trade.entry_time.minute == 30
+        for trade in result.trades
+    )
+    assert all(
+        trade.exit_time.hour in {20, 21} and trade.exit_time.minute == 0
+        for trade in result.trades
+    )
     assert result.experiment.dataset_hash
     assert research_store.health_summary()["experiment_runs"] == 1
     assert research_store.health_summary()["backtest_trades"] == len(result.trades)
@@ -164,7 +178,17 @@ def test_cost_aware_backtest_uses_next_bar_and_records_immutable_run(
     assert recent[0]["feature_snapshot_count"] == len(
         result.experiment.feature_snapshot_ids
     )
+    assert recent[0]["portfolio_event_count"] == len(result.portfolio_events)
     assert "feature_snapshot_ids" not in recent[0]
+    stored_events = research_store.portfolio_events(
+        experiment_run_id=result.experiment.experiment_run_id
+    )
+    assert [item["sequence"] for item in stored_events] == list(
+        range(1, len(stored_events) + 1)
+    )
+    assert [item["event_time"] for item in stored_events] == sorted(
+        item["event_time"] for item in stored_events
+    )
     events = ledger.by_correlation_id(result.experiment.experiment_run_id)
     assert events[-1]["event_type"] == "research.experiment.completed.v1"
 
@@ -185,3 +209,36 @@ def test_research_store_refuses_future_market_bar(settings) -> None:  # type: ig
         assert "at least 21 available bars" in str(exc)
     else:
         raise AssertionError("Future-unavailable bars must not enter a feature snapshot")
+
+
+def test_event_driven_entry_respects_volume_participation_cap(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    ledger, market_store, research_store = _stores(settings)
+    bars = tuple(
+        bar.model_copy(update={"volume": 100}) for bar in _daily_bars(count=30)
+    )
+    market_store.insert_bars(bars, raw_object_id="TEST_RAW")
+    spec = default_strategy_spec(
+        "buy_and_hold",
+        timeframe="1Day",
+        code_sha256=research_code_sha256(),
+    )
+
+    result = ResearchBacktester(research_store, ledger).run(
+        spec=spec,
+        symbol="AAPL",
+        as_of_start=bars[20].available_from,
+        as_of_end=bars[-1].available_from,
+        code_git_sha="test-git-sha",
+        cost_model=BacktestCostModel(
+            commission_per_share=Decimal("0"),
+            minimum_commission_per_order=Decimal("0"),
+            slippage_bps_per_side=Decimal("0"),
+            market_impact_bps_per_side=Decimal("0"),
+            max_volume_participation=Decimal("0.05"),
+        ),
+    )
+
+    assert result.trades[0].quantity == 5
+    assert result.trades[0].exit_quantity == Decimal("5")

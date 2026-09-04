@@ -101,6 +101,32 @@ class ReferenceDataStore:
             rows = connection.execute(statement).all()
         return tuple(self._action_from_row(dict(row._mapping)) for row in rows)
 
+    def corporate_actions_effective_between(
+        self,
+        *,
+        symbol: str,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[CorporateAction, ...]:
+        """Return realized accounting events without applying a knowledge-time filter."""
+        statement = (
+            select(corporate_actions)
+            .where(
+                and_(
+                    corporate_actions.c.symbol == symbol.upper(),
+                    corporate_actions.c.effective_at >= start,
+                    corporate_actions.c.effective_at <= end,
+                )
+            )
+            .order_by(
+                corporate_actions.c.effective_at.asc(),
+                corporate_actions.c.corporate_action_id.asc(),
+            )
+        )
+        with self.engine.connect() as connection:
+            rows = connection.execute(statement).all()
+        return tuple(self._action_from_row(dict(row._mapping)) for row in rows)
+
     def universe_symbols_as_of(
         self,
         *,

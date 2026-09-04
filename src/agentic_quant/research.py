@@ -7,9 +7,11 @@ from decimal import Decimal
 from pathlib import Path
 from statistics import mean, stdev
 
+from agentic_quant.backtest_engine import EventDrivenPortfolio
 from agentic_quant.domain import (
     BacktestCostModel,
     BacktestMetrics,
+    BacktestPortfolioEvent,
     BacktestResult,
     BacktestTrade,
     CorporateAction,
@@ -25,11 +27,13 @@ from agentic_quant.domain import (
 )
 from agentic_quant.ids import uuid7
 from agentic_quant.ledger import EventLedger
+from agentic_quant.market_calendar import MarketSessionClock
 from agentic_quant.reference_data import ReferenceDataStore
 from agentic_quant.research_store import ResearchStore, _canonical_hash
 
 
 FEATURE_SET_VERSION = "price_event_pit@0.2.0"
+BACKTEST_ENGINE_VERSION = "event_driven_portfolio@0.1.0"
 SUPPORTED_STRATEGIES = ("buy_and_hold", "momentum", "mean_reversion")
 _MINIMUM_HISTORY = 21
 _ZERO = Decimal("0")
@@ -254,8 +258,8 @@ def default_strategy_spec(
         parameters = {"minimum_history": _MINIMUM_HISTORY}
     return StrategySpec(
         strategy_spec_id=uuid7(),
-        name=f"phase3a_{strategy_type}_{timeframe.casefold()}",
-        version=f"0.1.0+{code_sha256[:12]}",
+        name=f"phase3b_{strategy_type}_{timeframe.casefold()}",
+        version=f"0.2.0+{code_sha256[:12]}",
         strategy_type=strategy_type,
         timeframe=timeframe,
         feature_set_version=FEATURE_SET_VERSION,
@@ -264,6 +268,9 @@ def default_strategy_spec(
             "minimum_bars": _MINIMUM_HISTORY + 1,
             "execution": "signal available at t; earliest fill is next bar open",
             "point_in_time_required": True,
+            "backtest_engine": BACKTEST_ENGINE_VERSION,
+            "corporate_action_accounting": ["split", "cash_dividend"],
+            "unsupported_corporate_actions": ["symbol_change"],
         },
         code_sha256=code_sha256,
         created_at=datetime.now(UTC),
@@ -271,11 +278,18 @@ def default_strategy_spec(
 
 
 class ResearchBacktester:
-    def __init__(self, store: ResearchStore, ledger: EventLedger | None = None) -> None:
+    def __init__(
+        self,
+        store: ResearchStore,
+        ledger: EventLedger | None = None,
+        *,
+        calendar_name: str = "XNYS",
+    ) -> None:
         self.store = store
         self.ledger = ledger
         self.features = PointInTimeFeatureBuilder(store)
         self.reference_data = ReferenceDataStore(store.engine)
+        self.session_clock = MarketSessionClock(calendar_name)
 
     def run(
         self,
@@ -296,16 +310,6 @@ class ResearchBacktester:
             raise ValueError("Initial equity must be positive")
         costs = cost_model or BacktestCostModel()
         stored_spec = self.store.record_strategy_spec(spec)
-        actions = self.reference_data.corporate_actions_as_of(
-            symbol=symbol,
-            as_of=as_of_end,
-            effective_from=as_of_start,
-        )
-        if actions:
-            raise ValueError(
-                "Phase 3A baseline replay does not simulate corporate-action cash/share "
-                "effects; use a window without actions until the event-driven engine exists"
-            )
         bars = self.store.load_bars(
             symbol=symbol,
             timeframe=spec.timeframe,
@@ -323,6 +327,18 @@ class ResearchBacktester:
             raise ValueError(
                 "Backtest requires at least 22 point-in-time-safe bars in the requested range"
             )
+        actions = self.reference_data.corporate_actions_effective_between(
+            symbol=symbol,
+            start=as_of_start,
+            end=as_of_end,
+        )
+        if any(
+            action.action_type == CorporateActionType.SYMBOL_CHANGE
+            for action in actions
+        ):
+            raise ValueError(
+                "Symbol changes require a cross-symbol market-data replay"
+            )
         started_at = datetime.now(UTC)
         experiment_id = uuid7()
         snapshots = tuple(
@@ -334,8 +350,24 @@ class ResearchBacktester:
             )
             for index in decision_indices
         )
+        decision_times = tuple(snapshot.as_of for snapshot in snapshots)
+        if any(
+            action.action_type == CorporateActionType.SPLIT
+            and any(
+                action.effective_at <= decision_time < action.available_from
+                for decision_time in decision_times
+            )
+            for action in actions
+        ):
+            raise ValueError(
+                "Split data arrived after its effective time; the affected feature window "
+                "cannot be replayed without look-ahead"
+            )
+        portfolio_actions = tuple(
+            action for action in actions if action.effective_at >= snapshots[0].as_of
+        )
         if spec.strategy_type == "buy_and_hold":
-            trades, equity_curve = self._run_buy_and_hold(
+            trades, equity_curve, portfolio_events = self._run_buy_and_hold(
                 experiment_id=experiment_id,
                 symbol=symbol.upper(),
                 bars=bars,
@@ -343,9 +375,10 @@ class ResearchBacktester:
                 snapshot=snapshots[0],
                 initial_equity=initial_equity,
                 costs=costs,
+                actions=portfolio_actions,
             )
         else:
-            trades, equity_curve = self._run_daily_strategy(
+            trades, equity_curve, portfolio_events = self._run_daily_strategy(
                 experiment_id=experiment_id,
                 symbol=symbol.upper(),
                 spec=stored_spec,
@@ -354,6 +387,7 @@ class ResearchBacktester:
                 snapshots=snapshots,
                 initial_equity=initial_equity,
                 costs=costs,
+                actions=portfolio_actions,
             )
         metrics = self._metrics(
             initial_equity=initial_equity,
@@ -380,6 +414,10 @@ class ResearchBacktester:
                     if bar.event_time <= as_of_end
                 ],
                 "feature_hashes": [snapshot.data_hash for snapshot in snapshots],
+                "backtest_engine_version": BACKTEST_ENGINE_VERSION,
+                "corporate_actions": [
+                    action.model_dump(mode="json") for action in actions
+                ],
             }
         )
         finished_at = datetime.now(UTC)
@@ -405,6 +443,7 @@ class ResearchBacktester:
             experiment=experiment,
             strategy_spec=stored_spec,
             trades=trades,
+            portfolio_events=portfolio_events,
         )
         self.store.record_backtest(result)
         self._record_completion(result)
@@ -437,28 +476,64 @@ class ResearchBacktester:
         snapshots: tuple[PointInTimeFeatureSnapshot, ...],
         initial_equity: Decimal,
         costs: BacktestCostModel,
-    ) -> tuple[tuple[BacktestTrade, ...], tuple[Decimal, ...]]:
-        cash = initial_equity
-        curve = [cash]
+        actions: tuple[CorporateAction, ...],
+    ) -> tuple[
+        tuple[BacktestTrade, ...],
+        tuple[Decimal, ...],
+        tuple[BacktestPortfolioEvent, ...],
+    ]:
+        portfolio = EventDrivenPortfolio(
+            experiment_run_id=experiment_id,
+            symbol=symbol,
+            initial_cash=initial_equity,
+            cost_model=costs,
+        )
+        curve = [initial_equity]
         trades: list[BacktestTrade] = []
+        action_index = 0
         for index, snapshot in zip(decision_indices, snapshots, strict=True):
             execution_bar = bars[index + 1]
-            if self._should_trade(spec, snapshot):
-                trade, cash = self._round_trip(
-                    experiment_id=experiment_id,
-                    symbol=symbol,
+            should_trade = self._should_trade(spec, snapshot)
+            portfolio.record_signal(
+                snapshot=snapshot,
+                action=SignalAction.LONG if should_trade else SignalAction.FLAT,
+            )
+            entry_time = self._bar_open_time(execution_bar)
+            action_index = self._apply_actions_until(
+                portfolio=portfolio,
+                actions=actions,
+                start_index=action_index,
+                cutoff=entry_time,
+            )
+            entered = False
+            if should_trade:
+                entered = portfolio.enter_long(
                     signal_as_of=snapshot.as_of,
-                    entry_bar=execution_bar,
-                    exit_bar=execution_bar,
+                    entry_time=entry_time,
+                    raw_price=execution_bar.open,
+                    available_volume=execution_bar.volume,
                     feature_snapshot_id=snapshot.feature_snapshot_id,
-                    cash=cash,
-                    costs=costs,
+                )
+            exit_time = self._bar_close_time(execution_bar)
+            action_index = self._apply_actions_until(
+                portfolio=portfolio,
+                actions=actions,
+                start_index=action_index,
+                cutoff=exit_time,
+            )
+            if entered:
+                trade = portfolio.exit_long(
+                    exit_time=exit_time,
+                    raw_price=execution_bar.close,
+                    available_volume=execution_bar.volume,
                     exit_reason="session_close",
                 )
                 if trade is not None:
                     trades.append(trade)
-            curve.append(cash)
-        return tuple(trades), tuple(curve)
+            else:
+                portfolio.mark(event_time=exit_time, raw_price=execution_bar.close)
+            curve.append(portfolio.cash)
+        return tuple(trades), tuple(curve), portfolio.events
 
     def _run_buy_and_hold(
         self,
@@ -470,90 +545,84 @@ class ResearchBacktester:
         snapshot: PointInTimeFeatureSnapshot,
         initial_equity: Decimal,
         costs: BacktestCostModel,
-    ) -> tuple[tuple[BacktestTrade, ...], tuple[Decimal, ...]]:
+        actions: tuple[CorporateAction, ...],
+    ) -> tuple[
+        tuple[BacktestTrade, ...],
+        tuple[Decimal, ...],
+        tuple[BacktestPortfolioEvent, ...],
+    ]:
         entry_bar = bars[decision_index + 1]
         exit_bar = bars[-1]
-        trade, final_equity = self._round_trip(
-            experiment_id=experiment_id,
+        portfolio = EventDrivenPortfolio(
+            experiment_run_id=experiment_id,
             symbol=symbol,
+            initial_cash=initial_equity,
+            cost_model=costs,
+        )
+        portfolio.record_signal(snapshot=snapshot, action=SignalAction.LONG)
+        action_index = self._apply_actions_until(
+            portfolio=portfolio,
+            actions=actions,
+            start_index=0,
+            cutoff=self._bar_open_time(entry_bar),
+        )
+        entered = portfolio.enter_long(
             signal_as_of=snapshot.as_of,
-            entry_bar=entry_bar,
-            exit_bar=exit_bar,
+            entry_time=self._bar_open_time(entry_bar),
+            raw_price=entry_bar.open,
+            available_volume=entry_bar.volume,
             feature_snapshot_id=snapshot.feature_snapshot_id,
-            cash=initial_equity,
-            costs=costs,
+        )
+        if not entered:
+            return (), (initial_equity,), portfolio.events
+        curve = [initial_equity]
+        for bar in bars[decision_index + 1 :]:
+            close_time = self._bar_close_time(bar)
+            action_index = self._apply_actions_until(
+                portfolio=portfolio,
+                actions=actions,
+                start_index=action_index,
+                cutoff=close_time,
+            )
+            curve.append(
+                portfolio.mark(
+                    event_time=close_time,
+                    raw_price=bar.close,
+                )
+            )
+        trade = portfolio.exit_long(
+            exit_time=self._bar_close_time(exit_bar),
+            raw_price=exit_bar.close,
+            available_volume=exit_bar.volume,
             exit_reason="backtest_end",
         )
         if trade is None:
-            return (), (initial_equity,)
-        entry_cost = trade.entry_price * Decimal(trade.quantity) + self._commission(
-            trade.quantity, costs
-        )
-        residual = initial_equity - entry_cost
-        curve = [initial_equity]
-        for bar in bars[decision_index + 1 :]:
-            curve.append(residual + Decimal(trade.quantity) * bar.close)
-        curve[-1] = final_equity
-        return (trade,), tuple(curve)
+            raise RuntimeError("Event-driven portfolio lost its open position")
+        curve[-1] = portfolio.cash
+        return (trade,), tuple(curve), portfolio.events
+
+    def _bar_open_time(self, bar: StockBar) -> datetime:
+        if bar.timeframe == "1Day":
+            return self.session_clock.daily_bar_session_open(bar.event_time)
+        return bar.event_time
 
     @staticmethod
-    def _round_trip(
+    def _bar_close_time(bar: StockBar) -> datetime:
+        return bar.available_from
+
+    @staticmethod
+    def _apply_actions_until(
         *,
-        experiment_id: str,
-        symbol: str,
-        signal_as_of: datetime,
-        entry_bar: StockBar,
-        exit_bar: StockBar,
-        feature_snapshot_id: str,
-        cash: Decimal,
-        costs: BacktestCostModel,
-        exit_reason: str,
-    ) -> tuple[BacktestTrade | None, Decimal]:
-        slippage = costs.slippage_bps_per_side / Decimal("10000")
-        entry_fill = entry_bar.open * (_ONE + slippage)
-        exit_fill = exit_bar.close * (_ONE - slippage)
-        quantity = int(cash // entry_fill)
-        while quantity > 0:
-            entry_commission = ResearchBacktester._commission(quantity, costs)
-            if entry_fill * Decimal(quantity) + entry_commission <= cash:
-                break
-            quantity -= 1
-        if quantity <= 0:
-            return None, cash
-        exit_commission = ResearchBacktester._commission(quantity, costs)
-        entry_outlay = entry_fill * Decimal(quantity) + entry_commission
-        exit_proceeds = exit_fill * Decimal(quantity) - exit_commission
-        final_cash = cash - entry_outlay + exit_proceeds
-        gross_pnl = (exit_bar.close - entry_bar.open) * Decimal(quantity)
-        net_pnl = final_cash - cash
-        transaction_cost = gross_pnl - net_pnl
-        return (
-            BacktestTrade(
-                trade_id=uuid7(),
-                experiment_run_id=experiment_id,
-                symbol=symbol,
-                action=SignalAction.LONG,
-                signal_as_of=signal_as_of,
-                entry_time=entry_bar.event_time,
-                exit_time=exit_bar.event_time,
-                quantity=quantity,
-                entry_price=entry_fill,
-                exit_price=exit_fill,
-                gross_pnl=gross_pnl,
-                transaction_cost=max(transaction_cost, _ZERO),
-                net_pnl=net_pnl,
-                feature_snapshot_id=feature_snapshot_id,
-                exit_reason=exit_reason,
-            ),
-            final_cash,
-        )
-
-    @staticmethod
-    def _commission(quantity: int, costs: BacktestCostModel) -> Decimal:
-        return max(
-            costs.minimum_commission_per_order,
-            Decimal(quantity) * costs.commission_per_share,
-        )
+        portfolio: EventDrivenPortfolio,
+        actions: tuple[CorporateAction, ...],
+        start_index: int,
+        cutoff: datetime,
+    ) -> int:
+        index = start_index
+        while index < len(actions) and actions[index].effective_at <= cutoff:
+            portfolio.apply_corporate_action(actions[index])
+            index += 1
+        return index
 
     @staticmethod
     def _metrics(
@@ -602,7 +671,8 @@ class ResearchBacktester:
         wins = sum(1 for trade in trades if trade.net_pnl > 0)
         total_notional = sum(
             (
-                Decimal(trade.quantity) * (trade.entry_price + trade.exit_price)
+                Decimal(trade.quantity) * trade.entry_price
+                + (trade.exit_quantity or Decimal(trade.quantity)) * trade.exit_price
                 for trade in trades
             ),
             _ZERO,
@@ -641,10 +711,20 @@ class ResearchBacktester:
                 "dataset_hash": experiment.dataset_hash,
                 "metrics": experiment.metrics.model_dump(mode="json"),
                 "trade_count": len(result.trades),
+                "portfolio_event_count": len(result.portfolio_events),
             },
         )
         self.ledger.append(event)
 
 
 def research_code_sha256() -> str:
-    return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    digest = hashlib.sha256()
+    for path in sorted(
+        (
+            Path(__file__),
+            Path(__file__).with_name("backtest_engine.py"),
+        )
+    ):
+        digest.update(path.name.encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()

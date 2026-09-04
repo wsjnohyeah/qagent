@@ -485,7 +485,11 @@ backtest_trades = Table(
     Column(
         "experiment_run_id",
         String(36),
-        ForeignKey("experiment_runs.experiment_run_id", ondelete="CASCADE"),
+        ForeignKey(
+            "experiment_runs.experiment_run_id",
+            name="fk_bt_events_experiment",
+            ondelete="CASCADE",
+        ),
         nullable=False,
         index=True,
     ),
@@ -495,9 +499,11 @@ backtest_trades = Table(
     Column("entry_time", DateTime(timezone=True), nullable=False),
     Column("exit_time", DateTime(timezone=True), nullable=False),
     Column("quantity", BigInteger, nullable=False),
+    Column("exit_quantity", Numeric(24, 10), nullable=True),
     Column("entry_price", Numeric(20, 8), nullable=False),
     Column("exit_price", Numeric(20, 8), nullable=False),
     Column("gross_pnl", Numeric(24, 8), nullable=False),
+    Column("corporate_action_cash", Numeric(24, 8), nullable=False, default=0),
     Column("transaction_cost", Numeric(24, 8), nullable=False),
     Column("net_pnl", Numeric(24, 8), nullable=False),
     Column(
@@ -507,6 +513,52 @@ backtest_trades = Table(
         nullable=False,
     ),
     Column("exit_reason", String(80), nullable=False),
+)
+
+backtest_portfolio_events = Table(
+    "backtest_portfolio_events",
+    metadata,
+    Column("portfolio_event_id", String(36), primary_key=True),
+    Column(
+        "experiment_run_id",
+        String(36),
+        ForeignKey("experiment_runs.experiment_run_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("sequence", Integer, nullable=False),
+    Column("event_type", String(32), nullable=False, index=True),
+    Column("event_time", DateTime(timezone=True), nullable=False, index=True),
+    Column("symbol", String(24), nullable=False, index=True),
+    Column("cash_balance", Numeric(24, 8), nullable=False),
+    Column("position_quantity", Numeric(24, 10), nullable=False),
+    Column("cash_delta", Numeric(24, 8), nullable=False),
+    Column("quantity_delta", Numeric(24, 10), nullable=False),
+    Column("price", Numeric(20, 8), nullable=True),
+    Column(
+        "corporate_action_id",
+        String(36),
+        ForeignKey(
+            "corporate_actions.corporate_action_id",
+            name="fk_bt_events_action",
+        ),
+        nullable=True,
+    ),
+    Column(
+        "feature_snapshot_id",
+        String(36),
+        ForeignKey(
+            "feature_snapshots.feature_snapshot_id",
+            name="fk_bt_events_feature",
+        ),
+        nullable=True,
+    ),
+    Column("details_json", JSON, nullable=False),
+    UniqueConstraint(
+        "experiment_run_id",
+        "sequence",
+        name="uq_backtest_portfolio_events_sequence",
+    ),
 )
 
 feature_parity_checks = Table(

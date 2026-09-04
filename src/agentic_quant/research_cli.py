@@ -112,6 +112,7 @@ def _summary(result: BacktestResult) -> dict[str, object]:
         "timeframe": result.experiment.timeframe,
         "dataset_hash": result.experiment.dataset_hash,
         "feature_snapshots": len(result.experiment.feature_snapshot_ids),
+        "portfolio_events": len(result.portfolio_events),
         "metrics": result.experiment.metrics.model_dump(mode="json"),
     }
 
@@ -123,7 +124,11 @@ def _services(settings: Settings) -> tuple[MarketDataStore, ResearchStore, Resea
     return (
         MarketDataStore(ledger.engine),
         research_store,
-        ResearchBacktester(research_store, ledger),
+        ResearchBacktester(
+            research_store,
+            ledger,
+            calendar_name=settings.market_calendar,
+        ),
     )
 
 
@@ -190,6 +195,8 @@ def _run(settings: Settings, args: argparse.Namespace) -> None:
             commission_per_share=Decimal(str(args.commission_per_share)),
             minimum_commission_per_order=Decimal(str(args.minimum_commission)),
             slippage_bps_per_side=Decimal(str(args.slippage_bps)),
+            market_impact_bps_per_side=Decimal(str(args.market_impact_bps)),
+            max_volume_participation=Decimal(str(args.max_volume_participation)),
         ),
     )
     print(json.dumps(_summary(result), indent=2))
@@ -225,7 +232,7 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", required=True)
     smoke = subparsers.add_parser(
         "smoke",
-        help="Run deterministic Phase 3A research vertical slices",
+        help="Run deterministic Phase 3 research vertical slices",
     )
     smoke.add_argument("--symbol", default="SYNTH")
     smoke.add_argument("--initial-equity", default="100000")
@@ -239,6 +246,8 @@ def main() -> None:
     run.add_argument("--commission-per-share", default="0.0049")
     run.add_argument("--minimum-commission", default="0.99")
     run.add_argument("--slippage-bps", default="2.0")
+    run.add_argument("--market-impact-bps", default="1.0")
+    run.add_argument("--max-volume-participation", default="0.05")
     list_runs = subparsers.add_parser("list", help="List recent immutable experiments")
     list_runs.add_argument("--limit", type=int, default=20)
     parity = subparsers.add_parser(

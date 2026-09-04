@@ -1,8 +1,8 @@
 # Point-in-time research runbook
 
-Phase 3A provides an auditable research vertical slice. It does not authorize paper or live
-orders, and its deterministic synthetic results are infrastructure checks rather than
-evidence of alpha.
+Phase 3 provides an auditable research and event-driven replay vertical slice. It does not
+authorize paper or live orders, and its deterministic synthetic results are infrastructure
+checks rather than evidence of alpha.
 
 ## One-command health check
 
@@ -14,7 +14,8 @@ This command uses the isolated, ignored `work/research-smoke.db`, creates 100 de
 daily bars, builds point-in-time evidence and feature snapshots, and runs buy-and-hold,
 momentum, and mean-reversion baselines with nonzero commission and slippage. It persists each
 attempt as an immutable experiment, emits a ledger completion event, and verifies that
-offline/full-history and online/as-of feature materialization produce the same hash.
+offline/full-history and online/as-of feature materialization produce the same hash. Each
+backtest also persists its ordered portfolio events.
 
 ## Load real daily bars
 
@@ -51,15 +52,23 @@ Inside the Docker/PostgreSQL profile:
   --end 2026-09-04T00:00:00Z
 ```
 
-Supported Phase 3A baselines are `buy_and_hold`, `momentum`, and `mean_reversion`. Optional
-flags control initial equity, per-share commission, minimum commission, and per-side
-slippage. Every effective value is stored with the experiment.
+Supported baselines are `buy_and_hold`, `momentum`, and `mean_reversion`. Optional flags
+control initial equity, per-share and minimum commission, per-side slippage, fixed market
+impact, and maximum bar-volume participation. Every effective value is stored with the
+experiment.
 
 List recent experiments:
 
 ```sh
 ./scripts/compose.sh exec -T api quant-research list --limit 20
 curl -fsS 'http://127.0.0.1:8000/v1/research/experiments?limit=20'
+```
+
+Inspect the ordered portfolio ledger for a run:
+
+```sh
+curl -fsS \
+  'http://127.0.0.1:8000/v1/research/experiments/EXPERIMENT_ID/events'
 ```
 
 Audit offline/online feature parity at an exact point in time:
@@ -79,6 +88,14 @@ online-equivalent as-of slice, persists both hashes, and exits nonzero on a mism
 - The snapshot records its maximum source availability time and rejects a later value.
 - A completed bar may produce a signal only after its `available_from` timestamp.
 - Entry may occur no earlier than the next bar open.
+- Daily entry and exit records use the exchange session open and close, not the provider's
+  midnight bar label.
+- Every signal, submitted order, fill, portfolio mark, split, and cash dividend is stored in
+  sequence with the resulting cash and position quantity.
+- Split events change share quantity without creating P&L. Gross cash dividends are credited
+  to held shares; dividend taxes and withholding are not modeled.
+- Entry size cannot exceed the configured fraction of bar volume. An exit that cannot fully
+  complete under the same cap fails closed rather than assuming impossible liquidity.
 - Feature and dataset hashes include the exact source identities, timestamps, and values.
 - Daily availability follows the configured exchange calendar, not a fixed UTC offset.
 - Corporate actions require separate `effective_at` and `available_from` timestamps.
@@ -90,13 +107,15 @@ online-equivalent as-of slice, persists both hashes, and exits nonzero on a mism
 
 ## Current limitations
 
-- The fast Phase 3A runner is a baseline screen, not yet the final event-driven fill engine.
 - Corporate-action provider ingestion and point-in-time universe data acquisition are not
   yet connected; the immutable schema/store contracts and bounded fixtures are implemented.
-- Split-adjusted features are implemented. The current baseline runner rejects a window
-  containing a known corporate action because it does not yet simulate share or cash
-  changes. This is intentional fail-closed behavior.
-- Delisted-security acquisition, borrow, options fills, taxes, market impact, capacity,
-  walk-forward splits, CPCV/PBO, and Deflated Sharpe are not implemented.
+- Split and gross cash-dividend accounting are implemented. Symbol changes still fail closed
+  until cross-symbol market-data replay is supported; late split metadata is rejected because
+  it would contaminate the feature path.
+- The current fill model uses market orders against bar open/close with fixed slippage and
+  market-impact assumptions. Multi-bar partial fills, queue position, bid/ask spread,
+  cancellations, and intrabar path simulation remain open.
+- Delisted-security acquisition, borrow, options fills, taxes, dynamic market impact,
+  capacity analysis, walk-forward splits, CPCV/PBO, and Deflated Sharpe are not implemented.
 - The LLM research orchestrator and predictive ML models are intentionally not connected
   until the validation surface can reject their candidates independently.

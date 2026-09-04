@@ -1,6 +1,6 @@
 # Agentic Quant Trading System
 
-A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton, the read-only **Phase 1** market-data foundation, the completed **Phase 2** event/document pipeline, and the first **Phase 3A** point-in-time research vertical slice.
+A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton, the read-only **Phase 1** market-data foundation, the completed **Phase 2** event/document pipeline, and a **Phase 3B** event-driven research baseline.
 
 > Live-money execution is not implemented. `live` is not a valid mode, and setting `LIVE_TRADING_ENABLED=true` makes startup fail.
 
@@ -50,8 +50,12 @@ validation, not a profitable-strategy claim.
 
 Phase 3A.2 strengthens that path with exact XNYS session-close availability, immutable
 corporate-action and historical-universe records, split-adjusted point-in-time features,
-and a persisted offline/online feature-parity audit. Backtests fail closed over corporate
-actions until the event-driven engine can model their cash and share effects.
+and a persisted offline/online feature-parity audit.
+
+Phase 3B adds a deterministic portfolio event loop with separate signal, order, fill, mark,
+split, and cash-dividend events. It records actual exchange open/close timestamps, applies
+commission, slippage, fixed market impact, and volume-participation limits, and persists the
+full event stream. Symbol changes and insufficient exit liquidity fail closed.
 
 ## Commands
 
@@ -62,7 +66,7 @@ actions until the event-driven engine can model their cash and share effects.
 | `make doctor` | Boot the API, check readiness, and run the synthetic vertical slice |
 | `make run` | Start the local Control API/UI with reload |
 | `make demo` | Run the vertical slice in the terminal |
-| `make research-smoke` | Run and persist three deterministic Phase 3A research baselines |
+| `make research-smoke` | Run and persist three deterministic Phase 3 research baselines |
 | `make docker-up` | Start PostgreSQL, Redis, MinIO, and API when Docker is installed |
 | `make docker-doctor` | Verify every container and the PostgreSQL-backed shadow slice |
 | `make docker-alpaca-probe` | Verify SIP/OPRA REST access and SIP WebSocket authentication |
@@ -182,7 +186,7 @@ Search normalized evidence with `quant-events search`, `GET /v1/documents/search
 Social aggregates are feature-flagged off until a licensed provider is selected. See
 `runbooks/event_documents.md` for the full operating and source-trust policy.
 
-## Phase 3A: point-in-time research
+## Phase 3: point-in-time research and event-driven replay
 
 Run the isolated research health check:
 
@@ -193,7 +197,7 @@ make research-smoke
 It creates deterministic synthetic daily bars in ignored local storage, materializes
 point-in-time feature snapshots, and runs buy-and-hold, momentum, and mean-reversion
 baselines. Every experiment records its data hash, strategy/code version, cost model,
-metrics, trades, feature lineage, and ledger event.
+metrics, trades, feature lineage, ordered portfolio events, and ledger event.
 
 Audit an exact as-of timestamp for offline/online feature parity:
 
@@ -205,7 +209,7 @@ quant-research parity AAPL \
 
 The command persists both hashes and exits nonzero if they differ. Corporate-action and
 universe-history tables currently accept governed fixtures/imports; provider ingestion is a
-later data-source integration. See ADR 0007 for the precise semantics and fail-closed limits.
+later data-source integration.
 
 To run a baseline on stored real daily bars:
 
@@ -217,8 +221,10 @@ quant-research run AAPL \
   --end 2026-09-04T00:00:00Z
 ```
 
-See `runbooks/research.md`, ADR 0006, and ADR 0007 for the exact point-in-time invariants,
-known limitations, and research/runtime authority boundary.
+Use `GET /v1/research/experiments/{experiment_run_id}/events` to inspect the ordered
+portfolio event stream. See `runbooks/research.md` and ADRs 0006–0008 for the exact
+point-in-time invariants, fill/accounting assumptions, known limitations, and
+research/runtime authority boundary.
 
 ## Repository map
 
@@ -248,6 +254,7 @@ AGENTS.md                mandatory operating rules for coding/deployment agents
 - `GET /v1/documents/search`
 - `GET /v1/catalysts`
 - `GET /v1/research/experiments`
+- `GET /v1/research/experiments/{experiment_run_id}/events`
 - `POST /v1/market-data/alpaca/probe` — development only
 - `POST /v1/market-data/alpaca/backfill` — development only
 - `POST /v1/market-data/alpaca/option-snapshot` — development only

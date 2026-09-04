@@ -156,7 +156,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "live_trading_enabled": False,
             "new_exposure_paused": application.state.new_exposure_paused,
             "database": "healthy" if ledger.health() else "unhealthy",
-            "phase": "3a-research-foundation",
+            "phase": "3b-event-driven-backtest",
             "data_operating_scope": app_settings.data_operating_scope,
             "development_max_backfill_days": (
                 app_settings.development_max_backfill_days
@@ -213,6 +213,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         limit: int = Query(default=50, ge=1, le=500),
     ) -> list[dict[str, Any]]:
         return research_store.recent_experiments(limit=limit)
+
+    @application.get("/v1/research/experiments/{experiment_run_id}/events")
+    def research_experiment_events(
+        experiment_run_id: str,
+        limit: int = Query(default=10_000, ge=1, le=100_000),
+    ) -> list[dict[str, Any]]:
+        events = research_store.portfolio_events(
+            experiment_run_id=experiment_run_id,
+            limit=limit,
+        )
+        if not events:
+            raise HTTPException(status_code=404, detail="portfolio events not found")
+        return events
 
     @application.get("/v1/events")
     def events(limit: int = Query(default=50, ge=1, le=500)) -> list[dict[str, Any]]:

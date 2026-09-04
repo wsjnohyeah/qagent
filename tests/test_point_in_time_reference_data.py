@@ -11,6 +11,8 @@ from sqlalchemy import create_engine, insert, select
 
 from agentic_quant.database import market_bars
 from agentic_quant.domain import (
+    BacktestCostModel,
+    BacktestEventType,
     CorporateAction,
     CorporateActionType,
     StockBar,
@@ -286,11 +288,157 @@ def test_feature_parity_excludes_future_rows_and_persists_result(
     assert research_store.health_summary()["feature_parity_checks"] == 1
 
 
-def test_backtester_fails_closed_when_window_contains_corporate_action(
+def test_event_driven_backtester_accounts_for_split_and_cash_dividend(
     settings,  # type: ignore[no-untyped-def]
 ) -> None:
     ledger, market_store, research_store, reference_store = _stores(settings)
     bars = _daily_bars(count=40, split_index=25)
+    market_store.insert_bars(bars, raw_object_id="TEST_RAW")
+    reference_store.insert_corporate_actions(
+        (
+            _split_action(
+                effective_at=bars[25].event_time,
+                available_from=bars[24].available_from,
+            ),
+            CorporateAction(
+                corporate_action_id=uuid7(),
+                action_fingerprint=corporate_action_fingerprint(
+                    symbol="AAPL",
+                    action_type=CorporateActionType.CASH_DIVIDEND.value,
+                    effective_at=bars[30].event_time,
+                    cash_amount="0.25",
+                    source="fixture",
+                ),
+                symbol="AAPL",
+                action_type=CorporateActionType.CASH_DIVIDEND,
+                effective_at=bars[30].event_time,
+                available_from=bars[29].available_from,
+                cash_amount=Decimal("0.25"),
+                currency="USD",
+                source="fixture",
+                raw_object_id="TEST_ACTION_RAW",
+                ingested_at=datetime(2026, 9, 4, tzinfo=UTC),
+            ),
+        )
+    )
+    spec = default_strategy_spec(
+        "buy_and_hold",
+        timeframe="1Day",
+        code_sha256=research_code_sha256(),
+    )
+
+    result = ResearchBacktester(research_store, ledger).run(
+        spec=spec,
+        symbol="AAPL",
+        as_of_start=bars[20].available_from,
+        as_of_end=bars[-1].available_from,
+        code_git_sha="test-git-sha",
+        cost_model=BacktestCostModel(
+            commission_per_share=Decimal("0"),
+            minimum_commission_per_order=Decimal("0"),
+            slippage_bps_per_side=Decimal("0"),
+            market_impact_bps_per_side=Decimal("0"),
+        ),
+    )
+
+    trade = result.trades[0]
+    assert trade.exit_quantity == Decimal(trade.quantity) * Decimal("2")
+    assert trade.corporate_action_cash == trade.exit_quantity * Decimal("0.25")
+    assert trade.gross_pnl == Decimal("500")
+    assert trade.net_pnl == Decimal("500")
+    assert result.experiment.metrics.final_equity == Decimal("100500")
+    assert BacktestEventType.SPLIT in {
+        event.event_type for event in result.portfolio_events
+    }
+    assert BacktestEventType.CASH_DIVIDEND in {
+        event.event_type for event in result.portfolio_events
+    }
+    assert research_store.health_summary()["backtest_portfolio_events"] == len(
+        result.portfolio_events
+    )
+
+
+def test_backtester_rejects_late_split_data(settings) -> None:  # type: ignore[no-untyped-def]
+    ledger, market_store, research_store, reference_store = _stores(settings)
+    bars = _daily_bars(count=40, split_index=25)
+    market_store.insert_bars(bars, raw_object_id="TEST_RAW")
+    reference_store.insert_corporate_actions(
+        (
+            _split_action(
+                effective_at=bars[25].event_time,
+                available_from=bars[26].available_from,
+            ),
+        )
+    )
+    spec = default_strategy_spec(
+        "buy_and_hold",
+        timeframe="1Day",
+        code_sha256=research_code_sha256(),
+    )
+
+    with pytest.raises(ValueError, match="cannot be replayed without look-ahead"):
+        ResearchBacktester(research_store, ledger).run(
+            spec=spec,
+            symbol="AAPL",
+            as_of_start=bars[20].available_from,
+            as_of_end=bars[-1].available_from,
+            code_git_sha="test-git-sha",
+        )
+
+
+def test_backtester_rejects_symbol_change_without_cross_symbol_bars(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    ledger, market_store, research_store, reference_store = _stores(settings)
+    bars = _daily_bars(count=40)
+    market_store.insert_bars(bars, raw_object_id="TEST_RAW")
+    effective_at = bars[25].event_time
+    reference_store.insert_corporate_actions(
+        (
+            CorporateAction(
+                corporate_action_id=uuid7(),
+                action_fingerprint=corporate_action_fingerprint(
+                    symbol="AAPL",
+                    action_type=CorporateActionType.SYMBOL_CHANGE.value,
+                    effective_at=effective_at,
+                    new_symbol="APPL",
+                    source="fixture",
+                ),
+                symbol="AAPL",
+                action_type=CorporateActionType.SYMBOL_CHANGE,
+                effective_at=effective_at,
+                available_from=bars[24].available_from,
+                new_symbol="APPL",
+                source="fixture",
+                raw_object_id="TEST_ACTION_RAW",
+                ingested_at=datetime(2026, 9, 4, tzinfo=UTC),
+            ),
+        )
+    )
+    spec = default_strategy_spec(
+        "buy_and_hold",
+        timeframe="1Day",
+        code_sha256=research_code_sha256(),
+    )
+
+    with pytest.raises(ValueError, match="cross-symbol market-data replay"):
+        ResearchBacktester(research_store, ledger).run(
+            spec=spec,
+            symbol="AAPL",
+            as_of_start=bars[20].available_from,
+            as_of_end=bars[-1].available_from,
+            code_git_sha="test-git-sha",
+        )
+
+
+def test_backtester_fails_closed_when_final_bar_cannot_liquidate(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    ledger, market_store, research_store, reference_store = _stores(settings)
+    bars = tuple(
+        bar.model_copy(update={"volume": 100})
+        for bar in _daily_bars(count=40, split_index=25)
+    )
     market_store.insert_bars(bars, raw_object_id="TEST_RAW")
     reference_store.insert_corporate_actions(
         (
@@ -306,7 +454,7 @@ def test_backtester_fails_closed_when_window_contains_corporate_action(
         code_sha256=research_code_sha256(),
     )
 
-    with pytest.raises(ValueError, match="does not simulate corporate-action"):
+    with pytest.raises(ValueError, match="Insufficient bar liquidity"):
         ResearchBacktester(research_store, ledger).run(
             spec=spec,
             symbol="AAPL",

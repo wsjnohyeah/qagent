@@ -10,6 +10,7 @@ from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from agentic_quant.database import (
+    backtest_portfolio_events,
     backtest_trades,
     catalysts,
     corporate_actions,
@@ -370,6 +371,17 @@ class ResearchStore:
                     insert(backtest_trades),
                     [trade.model_dump() for trade in result.trades],
                 )
+            if result.portfolio_events:
+                connection.execute(
+                    insert(backtest_portfolio_events),
+                    [
+                        {
+                            **event.model_dump(exclude={"details"}),
+                            "details_json": event.details,
+                        }
+                        for event in result.portfolio_events
+                    ],
+                )
 
     def record_feature_parity_check(self, check: FeatureParityCheck) -> None:
         with self.engine.begin() as connection:
@@ -392,6 +404,38 @@ class ResearchStore:
                 )
                 snapshot_ids = item.pop("feature_snapshot_ids", [])
                 item["feature_snapshot_count"] = len(snapshot_ids)
+                item["portfolio_event_count"] = int(
+                    connection.execute(
+                        select(func.count())
+                        .select_from(backtest_portfolio_events)
+                        .where(
+                            backtest_portfolio_events.c.experiment_run_id
+                            == item["experiment_run_id"]
+                        )
+                    ).scalar_one()
+                )
+                results.append(item)
+            return results
+
+    def portfolio_events(
+        self,
+        *,
+        experiment_run_id: str,
+        limit: int = 10_000,
+    ) -> list[dict[str, Any]]:
+        statement = (
+            select(backtest_portfolio_events)
+            .where(
+                backtest_portfolio_events.c.experiment_run_id == experiment_run_id
+            )
+            .order_by(backtest_portfolio_events.c.sequence.asc())
+            .limit(limit)
+        )
+        with self.engine.connect() as connection:
+            results = []
+            for row in connection.execute(statement):
+                item = self._normalize_times(dict(row._mapping), ("event_time",))
+                item["details"] = item.pop("details_json")
                 results.append(item)
             return results
 
@@ -421,6 +465,11 @@ class ResearchStore:
                 "backtest_trades": int(
                     connection.execute(
                         select(func.count()).select_from(backtest_trades)
+                    ).scalar_one()
+                ),
+                "backtest_portfolio_events": int(
+                    connection.execute(
+                        select(func.count()).select_from(backtest_portfolio_events)
                     ).scalar_one()
                 ),
                 "feature_parity_checks": int(

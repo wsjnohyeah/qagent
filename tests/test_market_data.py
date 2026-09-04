@@ -138,6 +138,9 @@ def test_daily_availability_uses_exact_exchange_session_close() -> None:
     assert clock.daily_bar_available_from(
         datetime(2026, 9, 3, 4, tzinfo=UTC)
     ) == datetime(2026, 9, 3, 20, tzinfo=UTC)
+    assert clock.daily_bar_session_open(
+        datetime(2026, 9, 3, 4, tzinfo=UTC)
+    ) == datetime(2026, 9, 3, 13, 30, tzinfo=UTC)
     assert clock.daily_bar_available_from(
         datetime(2026, 11, 27, 5, tzinfo=UTC)
     ) == datetime(2026, 11, 27, 18, tzinfo=UTC)

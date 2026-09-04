@@ -4,9 +4,9 @@ Last updated: 2026-09-04 PDT
 
 Context format: v1
 
-Current phase: Phase 3A.2 point-in-time semantics implemented; Phase 1B open-session verification pending
+Current phase: Phase 3B event-driven research baseline implemented; Phase 1B open-session verification pending
 
-Current documented baseline: C011 — `Harden point-in-time research semantics`
+Current documented baseline: C012 — `Add event-driven backtest accounting`
 
 ## Purpose and authority
 
@@ -49,8 +49,10 @@ A Git commit cannot contain its own content-derived hash without changing that h
   execution and nonzero commission/slippage; their output is infrastructure evidence only.
 - Phase 3A.2 adds exact XNYS session-close availability, immutable corporate actions and
   historical-universe membership, split-adjusted point-in-time features, and persisted
-  offline/online feature-parity checks. The baseline backtester fails closed over corporate
-  actions until share/cash event simulation exists.
+  offline/online feature-parity checks.
+- Phase 3B replaces direct round-trip arithmetic with a deterministic portfolio state
+  machine. Ordered signal, order, fill, mark, split, and cash-dividend events are persisted;
+  fills use exchange timestamps, explicit costs, and a bar-volume participation cap.
 - No GitHub remote or cloud host is configured yet.
 
 ### Repository state
@@ -97,8 +99,8 @@ Development service ports bind only to loopback. The local Compose credentials a
 
 - `make check`: passed.
 - Flake8: passed.
-- Strict mypy: passed for 33 source files.
-- Pytest: 34 passed.
+- Strict mypy: passed for 34 source files.
+- Pytest: 38 passed.
 - `make doctor`: passed against the local-lite SQLite profile.
 - `make docker-doctor`: passed against the PostgreSQL-backed Compose profile.
 - PostgreSQL query: passed; the first container replay stored six lineage events.
@@ -114,11 +116,12 @@ Development service ports bind only to loopback. The local Compose credentials a
 - Real primary-source test: 10 entries from Apple's official Newsroom RSS feed passed the same path; identical replay inserted zero documents, versions, catalysts, links, or events.
 - Real SEC test: 20 AAPL filing records produced 19 catalysts and 20 links; identical replay inserted zero new records or events. A bounded 250-record AAPL XBRL facts run also replayed with zero duplicates.
 - Phase 2 fixtures verify primary/secondary source distinction, correction-version retention, SEC filing and XBRL normalization, IR feed parsing, and cross-document catalyst deduplication.
-- Alembic migrations through `20260904_0008` own the Phase 3A.2 schema; a fresh SQLite
+- Alembic migrations through `20260904_0009` own the Phase 3B schema; a fresh SQLite
   upgrade/check/downgrade/re-upgrade cycle passed with no schema diff.
 - `make research-smoke`: passed with 100 deterministic daily bars, three immutable baseline
-  experiments, nonzero cost modeling, and matching offline/online feature hashes. Stored
-  counts accumulate safely in the persistent ignored smoke database.
+  experiments, nonzero cost modeling, matching offline/online feature hashes, and ordered
+  event-driven portfolio ledgers. Stored counts accumulate safely in the persistent ignored
+  smoke database.
 - Real daily-data test: 754 AAPL and 754 SPY SIP daily bars from 2023-09-01 through
   2026-09-04 were archived and normalized; identical replays inserted zero bars.
 - Real baseline runs completed on stored daily bars. AAPL buy-and-hold, momentum, and mean
@@ -128,6 +131,9 @@ Development service ports bind only to loopback. The local Compose credentials a
 - Existing PostgreSQL daily rows were migrated to exact XNYS session-close availability;
   sampled AAPL/SPY rows now show same-session 20:00 UTC availability. A real stored AAPL
   offline/online parity audit at 2026-09-03 20:00 UTC produced matching feature hashes.
+- PostgreSQL migration `20260904_0009` backfilled legacy trade exit quantities and added the
+  portfolio-event ledger. A bounded real AAPL buy-and-hold replay stored 28 ordered events;
+  its API sequence began with `signal` and ended with `fill`.
 - Repository secret-pattern scan: passed after fixing a scanner self-match.
 
 ## Product intent and invariant boundaries
@@ -318,9 +324,10 @@ flowchart LR
     REFDATA --> PITFEATURES
     PITFEATURES --> PARITY["Offline/online parity audit"]
     PARITY --> DB
-    PITSPEC["Versioned baseline StrategySpec"] --> BASELINE["Cost-aware baseline runner"]
+    PITSPEC["Versioned baseline StrategySpec"] --> BASELINE["Event-driven portfolio replay"]
     PITFEATURES --> BASELINE
-    BASELINE --> EXPERIMENT["Immutable experiment + trades"]
+    REFDATA --> BASELINE
+    BASELINE --> EXPERIMENT["Immutable experiment + trades + events"]
     EXPERIMENT --> DB
     EXPERIMENT --> LEDGER
 ```
@@ -332,10 +339,11 @@ later than each snapshot's `as_of`, calculates a versioned price/event feature s
 buy-and-hold, long/cash momentum, or long/cash mean-reversion baselines. Daily bars use exact
 XNYS close times, historical universe membership is bitemporal, split-adjusted features use
 only actions known and effective at `as_of`, and offline/online hashes can be compared and
-persisted. Signals fill no earlier than the next bar, every run has nonzero default costs,
-and source/feature/dataset/code hashes are retained. Corporate-action provider ingestion,
-cash/share event simulation, walk-forward validation, and a production-grade event-driven
-fill simulator remain open.
+persisted. Signals fill no earlier than the next exchange open. The event-driven portfolio
+ledger applies splits and gross cash dividends, records marks/orders/fills, enforces a bar-
+volume participation cap, and charges commission, slippage, and fixed market impact. All
+source/feature/dataset/code hashes are retained. Corporate-action provider ingestion,
+cross-symbol events, advanced fill simulation, and walk-forward validation remain open.
 
 ### Target architecture
 
@@ -456,10 +464,11 @@ year or more of data.
 | Document persistence | `src/agentic_quant/document_store.py` | immutable versions, entities, search, catalyst dedup, SEC facts |
 | Event operations | `src/agentic_quant/event_cli.py` | bounded provider ingestion, search, and health CLI |
 | Research engine | `src/agentic_quant/research.py` | point-in-time price/event features and cost-aware deterministic baselines |
+| Portfolio replay | `src/agentic_quant/backtest_engine.py` | event-driven cash/share accounting, fills, marks, costs, and liquidity caps |
 | Research persistence | `src/agentic_quant/research_store.py` | immutable evidence/features/specs/experiments/trades and as-of reads |
 | Reference data | `src/agentic_quant/reference_data.py` | bitemporal corporate-action and historical-universe queries |
 | Research operations | `src/agentic_quant/research_cli.py` | synthetic smoke, stored-data baselines, parity audit, experiment listing |
-| Schema migrations | `migrations/` | Alembic schema history through Phase 3A.2 |
+| Schema migrations | `migrations/` | Alembic schema history through Phase 3B |
 
 ## Current executable risk baseline
 
@@ -495,6 +504,7 @@ Implemented endpoints:
 - `GET /v1/documents/search`
 - `GET /v1/catalysts`
 - `GET /v1/research/experiments`
+- `GET /v1/research/experiments/{experiment_run_id}/events`
 - Development-only read-only Alpaca probe, bar backfill, and option snapshot endpoints.
 - Development-only Alpaca News, SEC filing, and SEC company-facts ingestion endpoints.
 - `POST /v1/commands/pause`
@@ -700,6 +710,26 @@ The Compose stack is currently intended to remain running for local inspection. 
 - Corporate-action and universe provider ingestion remains open; bounded deterministic
   fixtures establish the storage and query contracts locally.
 - Formal record: `docs/adr/0007-point-in-time-reference-data-and-feature-parity.md`.
+
+### D017 — Event-driven portfolio accounting baseline
+
+- Date: 2026-09-04 PDT.
+- The user authorized continuation into the next research implementation milestone.
+- Decision: replace direct trade-return arithmetic with a deterministic portfolio state
+  machine whose full event sequence is persisted and inspectable.
+- Daily signals execute no earlier than the following XNYS session open; session-close exits
+  use the true exchange close. Each signal, order, fill, mark, split, and dividend records the
+  resulting cash and position quantity.
+- The cost contract now includes commission, slippage, fixed market impact, and maximum
+  bar-volume participation. Entry is capped by available volume and an impossible final exit
+  fails closed.
+- Splits change held quantity without fabricating P&L. Gross cash dividends credit held
+  shares and are separated in the trade summary. Taxes and withholding remain unmodeled.
+- Symbol changes require cross-symbol market data and therefore remain fail-closed. Late
+  split metadata is rejected because it would have contaminated historical feature values.
+- This is a single-symbol, long/cash event-driven baseline, not yet a production exchange
+  simulator. It adds no broker connectivity or trading authority.
+- Formal record: `docs/adr/0008-event-driven-backtest-ledger.md`.
 
 ## Iteration and commit ledger
 
@@ -1018,7 +1048,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C011 — `Harden point-in-time research semantics`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `c3bb548`
 - Date: 2026-09-04 PDT.
 - User intent: proceed with the next research milestone while keeping local verification
   bounded and preserving the future remote deployment/UI plan.
@@ -1053,14 +1083,52 @@ The Compose stack is currently intended to remain running for local inspection. 
   - Phase 1B remains pending until an open U.S. market session. No paper or live execution
     capability has been added.
 
+### C012 — `Add event-driven backtest accounting`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-04 PDT.
+- User intent: continue into the next research milestone after Phase 3A.2.
+- Scope:
+  - Added a deterministic single-symbol portfolio state machine for signal, order, fill,
+    mark, split, and cash-dividend events.
+  - Added exact daily session-open and session-close fill timestamps, commission, slippage,
+    fixed market impact, and bar-volume participation limits.
+  - Added split quantity and gross dividend cash accounting, exit quantity/dividend trade
+    summaries, and fail-closed handling for late splits, symbol changes, and insufficient
+    exit liquidity.
+  - Added immutable portfolio-event persistence and a read-only per-experiment API endpoint
+    under Alembic revision `20260904_0009`.
+  - Versioned strategy/engine inputs and included corporate actions in dataset hashes.
+  - Updated the manifest, README, runbook, project state, context, and ADR 0008.
+- Architecture/decision impact:
+  - Backtest results are now reconstructable as a cash/share state transition sequence,
+    rather than only aggregate trade rows.
+  - The implementation remains a bounded research simulator and does not cross the
+    deterministic research/runtime or no-live-trading boundaries.
+- Validation:
+  - `make check` passed with Flake8, strict mypy across 34 source files, and 38 tests.
+  - A zero-cost 2:1 split plus dividend fixture preserved economic value and credited exactly
+    $500 to a 2,000-share post-split position; liquidity-cap and fail-closed paths passed.
+  - Fresh SQLite migration upgrade/check/downgrade/re-upgrade passed with no schema diff.
+  - Research smoke passed with three event-driven baselines and matching feature hashes.
+  - The rebuilt Docker image passed its doctor; PostgreSQL upgraded to `20260904_0009`,
+    legacy exit quantities were backfilled, and a bounded real AAPL replay persisted 28
+    ordered events exposed by the read-only API.
+  - Local doctor, repository secret scan, and final diff checks passed.
+- Expected global state after commit:
+  - Phase 3B has a deterministic, inspectable event-driven baseline with basic corporate-
+    action accounting and liquidity constraints.
+  - Multi-bar partial fills, quote/spread modeling, symbol changes, delistings, taxes, and
+    advanced validation remain open. Phase 1B is still pending an open market session.
+
 ## Open work
 
 Ordered near-term work:
 
 1. During the next U.S. market session, finish Phase 1B real frame/reconnect/gap checks.
 2. Select and integrate licensed corporate-action and historical-universe providers.
-3. Build the production-grade event-driven fill simulator, including corporate-action share
-   and cash effects.
+3. Extend replay with multi-bar partial fills, order cancellation, bid/ask spread and quote
+   inputs, symbol changes, and delistings.
 4. Add walk-forward/regime reports and overfitting diagnostics, then define explicit
    candidate/champion promotion thresholds.
 5. Design remote backfill jobs and identify equity/options sources with suitable historical
