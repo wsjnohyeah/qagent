@@ -19,6 +19,7 @@ from agentic_quant.domain import (
     LLMInvocation,
     LLMInvocationStatus,
     LLMProviderName,
+    LLMRoutingRevision,
     LLMUsage,
     LLMWorkload,
 )
@@ -332,9 +333,23 @@ class LLMGateway:
             await provider.aclose()
 
     def status(self) -> dict[str, Any]:
+        revision = self.store.latest_routing_revision(
+            base_routing_sha256=self.routing_sha256
+        )
+        routes = revision.routes if revision is not None else self.routing.routes
         return {
-            "routing_version": self.routing.version,
-            "routing_sha256": self.routing_sha256,
+            "base_routing_version": self.routing.version,
+            "base_routing_sha256": self.routing_sha256,
+            "routing_version": (
+                revision.routing_version if revision is not None else self.routing.version
+            ),
+            "routing_sha256": (
+                revision.routing_sha256 if revision is not None else self.routing_sha256
+            ),
+            "route_source": "control_center" if revision is not None else "yaml_base",
+            "active_revision_id": (
+                revision.routing_revision_id if revision is not None else None
+            ),
             "providers": {
                 name.value: {
                     "model": config.model,
@@ -348,10 +363,69 @@ class LLMGateway:
             },
             "routes": {
                 workload.value: provider.value
-                for workload, provider in self.routing.routes.items()
+                for workload, provider in routes.items()
             },
             "automatic_fallback": False,
         }
+
+    def activate_routes(
+        self,
+        *,
+        routes: dict[LLMWorkload, LLMProviderName],
+        reason: str,
+        created_by: str = "development-control-center",
+    ) -> LLMRoutingRevision:
+        if set(routes) != set(LLMWorkload):
+            raise ValueError("A routing revision must define every supported workload")
+        revision_id = uuid7()
+        normalized_routes = {
+            workload: routes[workload]
+            for workload in LLMWorkload
+        }
+        routing_sha256 = _canonical_sha256(
+            {
+                "base_routing_sha256": self.routing_sha256,
+                "routes": {
+                    workload.value: provider.value
+                    for workload, provider in normalized_routes.items()
+                },
+            }
+        )
+        revision = LLMRoutingRevision(
+            routing_revision_id=revision_id,
+            base_routing_version=self.routing.version,
+            base_routing_sha256=self.routing_sha256,
+            routing_version=f"{self.routing.version}+control.{revision_id}",
+            routing_sha256=routing_sha256,
+            routes=normalized_routes,
+            reason=reason,
+            created_by=created_by,
+            created_at=datetime.now(UTC),
+        )
+        self.store.record_routing_revision(revision)
+        if self.ledger is not None:
+            self.ledger.append(
+                EventEnvelope(
+                    event_id=uuid7(),
+                    event_type="llm.routing.activated.v1",
+                    event_time=revision.created_at,
+                    emitted_at=datetime.now(UTC),
+                    producer="llm-gateway",
+                    correlation_id=revision.routing_revision_id,
+                    payload=revision.model_dump(mode="json"),
+                )
+            )
+        return revision
+
+    def _effective_routing(
+        self,
+    ) -> tuple[str, str, dict[LLMWorkload, LLMProviderName]]:
+        revision = self.store.latest_routing_revision(
+            base_routing_sha256=self.routing_sha256
+        )
+        if revision is None:
+            return self.routing.version, self.routing_sha256, self.routing.routes
+        return revision.routing_version, revision.routing_sha256, revision.routes
 
     async def complete(
         self,
@@ -359,7 +433,8 @@ class LLMGateway:
         *,
         provider_override: LLMProviderName | None = None,
     ) -> LLMInvocation:
-        provider_name = provider_override or self.routing.routes[request.workload]
+        routing_version, routing_sha256, routes = self._effective_routing()
+        provider_name = provider_override or routes[request.workload]
         config = self.routing.providers[provider_name]
         reasoning_effort = request.reasoning_effort or config.reasoning_effort
         timeout_seconds = min(
@@ -371,8 +446,12 @@ class LLMGateway:
         input_sha256 = hashlib.sha256(request.input_text.encode()).hexdigest()
         request_sha256 = _canonical_sha256(
             {
-                "routing_version": self.routing.version,
+                "routing_version": routing_version,
+                "routing_sha256": routing_sha256,
                 "provider": provider_name.value,
+                "provider_override": (
+                    provider_override.value if provider_override is not None else None
+                ),
                 "model": config.model,
                 "reasoning_effort": reasoning_effort,
                 "prompt_version": request.prompt_version,
@@ -402,6 +481,8 @@ class LLMGateway:
                 created_at=created_at,
                 started=started,
                 error_code="provider_not_configured",
+                routing_version=routing_version,
+                routing_sha256=routing_sha256,
             )
             self._record(invocation)
             raise LLMConfigurationError(
@@ -425,6 +506,8 @@ class LLMGateway:
                     if exc.status_code is not None
                     else exc.code
                 ),
+                routing_version=routing_version,
+                routing_sha256=routing_sha256,
             )
             self._record(invocation)
             raise
@@ -432,8 +515,8 @@ class LLMGateway:
         invocation = LLMInvocation(
             invocation_id=invocation_id,
             workload=request.workload,
-            routing_version=self.routing.version,
-            routing_sha256=self.routing_sha256,
+            routing_version=routing_version,
+            routing_sha256=routing_sha256,
             code_git_sha=self.code_git_sha,
             provider=provider_name,
             model=config.model,
@@ -466,12 +549,14 @@ class LLMGateway:
         created_at: datetime,
         started: float,
         error_code: str,
+        routing_version: str,
+        routing_sha256: str,
     ) -> LLMInvocation:
         return LLMInvocation(
             invocation_id=invocation_id,
             workload=request.workload,
-            routing_version=self.routing.version,
-            routing_sha256=self.routing_sha256,
+            routing_version=routing_version,
+            routing_sha256=routing_sha256,
             code_git_sha=self.code_git_sha,
             provider=provider,
             model=config.model,

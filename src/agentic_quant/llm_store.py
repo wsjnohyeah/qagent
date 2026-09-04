@@ -5,8 +5,8 @@ from typing import Any
 
 from sqlalchemy import Engine, func, insert, select
 
-from agentic_quant.database import llm_invocations
-from agentic_quant.domain import LLMInvocation
+from agentic_quant.database import llm_invocations, llm_routing_revisions
+from agentic_quant.domain import LLMInvocation, LLMRoutingRevision
 
 
 def _utc(value: datetime) -> datetime:
@@ -67,6 +67,68 @@ class LLMStore:
             row = connection.execute(statement).one_or_none()
         return self._normalize(dict(row._mapping)) if row is not None else None
 
+    def record_routing_revision(self, revision: LLMRoutingRevision) -> None:
+        with self.engine.begin() as connection:
+            connection.execute(
+                insert(llm_routing_revisions).values(
+                    routing_revision_id=revision.routing_revision_id,
+                    base_routing_version=revision.base_routing_version,
+                    base_routing_sha256=revision.base_routing_sha256,
+                    routing_version=revision.routing_version,
+                    routing_sha256=revision.routing_sha256,
+                    routes_json={
+                        workload.value: provider.value
+                        for workload, provider in revision.routes.items()
+                    },
+                    reason=revision.reason,
+                    created_by=revision.created_by,
+                    created_at=revision.created_at,
+                )
+            )
+
+    def latest_routing_revision(
+        self,
+        *,
+        base_routing_sha256: str,
+    ) -> LLMRoutingRevision | None:
+        statement = (
+            select(llm_routing_revisions)
+            .where(
+                llm_routing_revisions.c.base_routing_sha256 == base_routing_sha256
+            )
+            .order_by(
+                llm_routing_revisions.c.created_at.desc(),
+                llm_routing_revisions.c.routing_revision_id.desc(),
+            )
+            .limit(1)
+        )
+        with self.engine.connect() as connection:
+            row = connection.execute(statement).one_or_none()
+        if row is None:
+            return None
+        item = dict(row._mapping)
+        item["routes"] = item.pop("routes_json")
+        item["created_at"] = _utc(item["created_at"])
+        return LLMRoutingRevision.model_validate(item)
+
+    def recent_routing_revisions(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        statement = (
+            select(llm_routing_revisions)
+            .order_by(
+                llm_routing_revisions.c.created_at.desc(),
+                llm_routing_revisions.c.routing_revision_id.desc(),
+            )
+            .limit(limit)
+        )
+        with self.engine.connect() as connection:
+            results = []
+            for row in connection.execute(statement):
+                item = dict(row._mapping)
+                item["routes"] = item.pop("routes_json")
+                item["created_at"] = _utc(item["created_at"])
+                results.append(item)
+            return results
+
     def health_summary(self) -> dict[str, int]:
         with self.engine.connect() as connection:
             return {
@@ -74,7 +136,12 @@ class LLMStore:
                     connection.execute(
                         select(func.count()).select_from(llm_invocations)
                     ).scalar_one()
-                )
+                ),
+                "llm_routing_revisions": int(
+                    connection.execute(
+                        select(func.count()).select_from(llm_routing_revisions)
+                    ).scalar_one()
+                ),
             }
 
     @staticmethod

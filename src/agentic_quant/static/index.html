@@ -1,80 +1,251 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Agentic Quant — Control Center</title>
   <style>
-    :root { color-scheme: dark; font-family: ui-sans-serif, system-ui, sans-serif; }
-    body { margin: 0; background: #08111f; color: #e6edf7; }
-    main { max-width: 1100px; margin: 0 auto; padding: 48px 24px; }
-    h1 { margin-bottom: 6px; } .muted { color: #90a4bd; }
-    .banner { border: 1px solid #3d7a67; background: #102b28; padding: 14px; border-radius: 10px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap: 14px; margin: 22px 0; }
-    .card { background: #111d2f; border: 1px solid #253651; border-radius: 12px; padding: 18px; }
-    .label { color: #90a4bd; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
-    .value { font-size: 22px; margin-top: 8px; }
-    button { background: #3b82f6; color: white; border: 0; padding: 11px 15px; border-radius: 8px; cursor: pointer; margin-right: 8px; }
-    button.danger { background: #b91c1c; } button.secondary { background: #334155; }
-    pre { overflow: auto; background: #060c16; border-radius: 10px; padding: 16px; min-height: 180px; }
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --bg: #07101d; --panel: #0f1c2e; --panel-2: #13243a; --line: #263a56;
+      --text: #eef4fc; --muted: #90a5c0; --blue: #5ca2ff; --green: #63d3ad;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: radial-gradient(circle at 75% 0, #10284a 0, var(--bg) 36%); color: var(--text); }
+    main { max-width: 1240px; margin: 0 auto; padding: 40px 24px 72px; }
+    h1 { margin: 5px 0 8px; font-size: clamp(30px, 5vw, 48px); letter-spacing: -.035em; }
+    h2 { margin: 0; font-size: 22px; } h3 { margin: 0 0 8px; }
+    p { line-height: 1.55; } .muted { color: var(--muted); }
+    .eyebrow, .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .11em; }
+    .topline { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .pill { border: 1px solid #2e695a; background: #0f2d28; color: #9ee8cd; border-radius: 999px; padding: 7px 11px; font-size: 12px; }
+    .banner { border: 1px solid #315a55; background: #0d2928; padding: 13px 15px; border-radius: 11px; color: #b8e9dc; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 20px 0 30px; }
+    .card, .panel { background: rgba(15, 28, 46, .94); border: 1px solid var(--line); border-radius: 14px; }
+    .card { padding: 15px; } .value { font-size: 19px; margin-top: 7px; overflow-wrap: anywhere; }
+    .panel { padding: 22px; }
+    .section-head { display: flex; justify-content: space-between; align-items: start; gap: 14px; margin-bottom: 18px; }
+    .section-head p { margin: 5px 0 0; }
+    .llm-layout { display: grid; grid-template-columns: minmax(310px, .85fr) minmax(420px, 1.45fr); gap: 16px; margin-bottom: 28px; }
+    .provider-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
+    .provider { padding: 13px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; }
+    .provider strong { display: block; margin: 4px 0; }
+    .badge { display: inline-block; border-radius: 999px; padding: 3px 7px; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+    .ok { background: #123b32; color: #95e5c7; } .missing { background: #3c2525; color: #ffb1b1; }
+    .route-row { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(145px, .8fr); align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #1d3049; }
+    label { color: #cbd8e8; font-size: 13px; }
+    select, input, textarea { width: 100%; color: var(--text); background: #091525; border: 1px solid #314764; border-radius: 8px; padding: 10px 11px; font: inherit; }
+    textarea { resize: vertical; min-height: 84px; line-height: 1.45; }
+    select:focus, input:focus, textarea:focus { outline: 2px solid #315f9e; border-color: var(--blue); }
+    button { background: #3279dc; color: white; border: 0; padding: 10px 14px; border-radius: 8px; cursor: pointer; font-weight: 650; }
+    button:hover { filter: brightness(1.08); } button:disabled { cursor: not-allowed; opacity: .5; }
+    button.danger { background: #a93838; } button.secondary { background: #31445e; }
+    .form-stack { display: grid; gap: 10px; margin-top: 14px; }
+    .tiny { color: var(--muted); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+    .chat-toolbar { display: flex; gap: 9px; align-items: center; }
+    .chat-toolbar select { width: auto; min-width: 190px; }
+    .chat-log { background: #081321; border: 1px solid #20334d; border-radius: 11px; min-height: 310px; max-height: 520px; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 12px; }
+    .message { max-width: 88%; padding: 11px 13px; border-radius: 11px; white-space: pre-wrap; line-height: 1.5; overflow-wrap: anywhere; }
+    .message.user { align-self: flex-end; background: #214e86; }
+    .message.assistant { align-self: flex-start; background: #172b43; border: 1px solid #28425f; }
+    .message.error { align-self: flex-start; background: #3a2025; color: #ffc2c6; }
+    .message-meta { display: block; color: #9db0c8; font-size: 11px; margin-top: 8px; }
+    .composer { display: grid; gap: 9px; margin-top: 10px; }
+    .composer-actions, .operations { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .notice { min-height: 20px; margin: 10px 0 0; font-size: 13px; color: var(--green); }
+    details { margin-top: 28px; } summary { cursor: pointer; color: #cdd9ea; font-weight: 650; }
+    pre { overflow: auto; background: #060c16; border-radius: 10px; padding: 16px; min-height: 140px; border: 1px solid #1c2c41; }
+    @media (max-width: 850px) { .llm-layout { grid-template-columns: 1fr; } .topline, .section-head { flex-direction: column; } }
+    @media (max-width: 520px) { main { padding: 26px 14px 50px; } .provider-grid { grid-template-columns: 1fr; } .route-row { grid-template-columns: 1fr; } .chat-toolbar { width: 100%; } .chat-toolbar select { width: 100%; } }
   </style>
 </head>
 <body>
 <main>
-  <p class="label">Trading Control Center</p>
-  <h1>Research Control Center</h1>
-  <p class="muted">Market and event research plus shadow replay. Live execution does not exist.</p>
-  <div class="banner">The risk engine owns approval and sizing. All demo orders remain shadow records.</div>
-  <section class="grid">
+  <div class="topline"><span class="eyebrow">Trading Control Center</span><span class="pill">Research / Shadow only</span></div>
+  <h1>Agentic Quant</h1>
+  <p class="muted">数据、研究与模型控制台。当前系统没有 live-money execution 路径。</p>
+  <div class="banner">LLM 只负责研究与解释；风险审批、仓位和执行始终由独立的确定性系统控制。</div>
+
+  <section class="grid" aria-label="System status">
     <div class="card"><div class="label">Environment</div><div id="environment" class="value">—</div></div>
     <div class="card"><div class="label">Mode</div><div id="mode" class="value">—</div></div>
     <div class="card"><div class="label">Database</div><div id="database" class="value">—</div></div>
     <div class="card"><div class="label">New exposure</div><div id="paused" class="value">—</div></div>
-    <div class="card"><div class="label">Alpaca credentials</div><div id="alpaca" class="value">—</div></div>
+    <div class="card"><div class="label">Alpaca</div><div id="alpaca" class="value">—</div></div>
     <div class="card"><div class="label">Market bars</div><div id="bars" class="value">—</div></div>
-    <div class="card"><div class="label">Option snapshots</div><div id="options" class="value">—</div></div>
-    <div class="card"><div class="label">Source documents</div><div id="documents" class="value">—</div></div>
-    <div class="card"><div class="label">Catalysts</div><div id="catalysts" class="value">—</div></div>
-    <div class="card"><div class="label">Corporate facts</div><div id="facts" class="value">—</div></div>
-    <div class="card"><div class="label">Data services</div><div id="data-services" class="value">—</div></div>
+    <div class="card"><div class="label">Documents / Catalysts</div><div id="evidence" class="value">—</div></div>
+    <div class="card"><div class="label">LLM calls / Routes</div><div id="llm-counts" class="value">—</div></div>
   </section>
-  <p>
-    <button id="demo">Run synthetic decision</button>
-    <button id="market-demo">Test data pipeline</button>
-    <button id="alpaca-probe" class="secondary">Probe Alpaca</button>
-    <button id="pause" class="danger">Pause new exposure</button>
-    <button id="resume" class="secondary">Resume dev shadow</button>
-  </p>
-  <h2>Decision output</h2>
-  <pre id="output">Ready.</pre>
+
+  <section class="llm-layout" aria-label="LLM control center">
+    <div class="panel" id="model-configuration">
+      <div class="section-head">
+        <div><h2>Model routing</h2><p class="muted">为每类工作选择模型。保存会生成不可变配置版本。</p></div>
+      </div>
+      <div id="provider-grid" class="provider-grid"></div>
+      <div id="route-controls"></div>
+      <div class="form-stack">
+        <label for="route-reason">Change reason</label>
+        <input id="route-reason" maxlength="500" value="Operator updated model allocation" placeholder="为什么修改这次模型分配">
+        <button id="save-routes">Save routing revision</button>
+      </div>
+      <p id="route-notice" class="notice"></p>
+      <div id="route-version" class="tiny">Loading routing…</div>
+    </div>
+
+    <div class="panel" id="research-copilot">
+      <div class="section-head">
+        <div><h2>Research Copilot</h2><p class="muted">直接测试两个模型，或让 Auto 使用 interactive 路由。</p></div>
+        <div class="chat-toolbar">
+          <label for="chat-provider">Model</label>
+          <select id="chat-provider"><option value="">Auto</option><option value="openai">OpenAI</option><option value="meta">Meta</option></select>
+        </div>
+      </div>
+      <div id="chat-log" class="chat-log" aria-live="polite"><div id="chat-empty" class="muted">Start a local development conversation. Messages stay in this browser session; invocation hashes and model output are audited.</div></div>
+      <div class="composer">
+        <label for="chat-input">Message</label>
+        <textarea id="chat-input" maxlength="20000" placeholder="问模型关于数据、研究设计或策略验证的问题…"></textarea>
+        <div class="composer-actions"><button id="send-chat">Send</button><button id="clear-chat" class="secondary">Clear session</button><span id="chat-status" class="tiny"></span></div>
+      </div>
+    </div>
+  </section>
+
+  <details>
+    <summary>Development operations</summary>
+    <p class="muted">Synthetic checks and local shadow controls.</p>
+    <div class="operations">
+      <button id="demo">Run synthetic decision</button>
+      <button id="market-demo">Test data pipeline</button>
+      <button id="alpaca-probe" class="secondary">Probe Alpaca</button>
+      <button id="pause" class="danger">Pause new exposure</button>
+      <button id="resume" class="secondary">Resume dev shadow</button>
+    </div>
+    <h3 style="margin-top:18px">Operation output</h3>
+    <pre id="output">Ready.</pre>
+  </details>
 </main>
 <script>
 const output = document.querySelector('#output');
-async function status() {
-  const value = await fetch('/v1/system/status').then(r => r.json());
-  document.querySelector('#environment').textContent = value.environment;
-  document.querySelector('#mode').textContent = value.trading_mode;
-  document.querySelector('#database').textContent = value.database;
-  document.querySelector('#paused').textContent = value.new_exposure_paused ? 'PAUSED' : 'ENABLED';
-  document.querySelector('#alpaca').textContent = value.alpaca_configured ? 'CONFIGURED' : 'MISSING';
-  const data = await fetch('/v1/data-health').then(r => r.json());
+const routeLabels = {
+  interactive_explanation: 'Interactive explanation', routine_pipeline: 'Routine pipeline',
+  critical_research: 'Critical research', strategy_generation: 'Strategy generation', strategy_critique: 'Strategy critique'
+};
+const providerLabels = {openai: 'GPT-5.6 Sol', meta: 'Muse Spark 1.3'};
+let appEnvironment = 'unknown';
+let chatHistory = [];
+
+async function api(url, options = {}) {
+  const response = await fetch(url, options);
+  const payload = await response.json().catch(() => ({detail: response.statusText}));
+  if (!response.ok) throw new Error(payload.detail || `Request failed (${response.status})`);
+  return payload;
+}
+
+function appendProviderOptions(select, selected) {
+  Object.entries(providerLabels).forEach(([value, label]) => {
+    const option = document.createElement('option'); option.value = value; option.textContent = label; option.selected = value === selected; select.append(option);
+  });
+}
+
+function renderRoutes(value) {
+  const providers = document.querySelector('#provider-grid');
+  providers.replaceChildren();
+  Object.entries(value.providers).forEach(([name, config]) => {
+    const card = document.createElement('div'); card.className = 'provider';
+    const label = document.createElement('div'); label.className = 'label'; label.textContent = name;
+    const model = document.createElement('strong'); model.textContent = config.model;
+    const info = document.createElement('div'); info.className = 'tiny'; info.textContent = `${config.cost_tier} · reasoning ${config.reasoning_effort}`;
+    const badge = document.createElement('span'); badge.className = `badge ${config.configured ? 'ok' : 'missing'}`; badge.textContent = config.configured ? 'configured' : 'missing key';
+    card.append(label, model, info, badge); providers.append(card);
+    providerLabels[name] = config.model;
+  });
+  const controls = document.querySelector('#route-controls'); controls.replaceChildren();
+  Object.entries(routeLabels).forEach(([workload, labelText]) => {
+    const row = document.createElement('div'); row.className = 'route-row';
+    const label = document.createElement('label'); label.htmlFor = `route-${workload}`; label.textContent = labelText;
+    const select = document.createElement('select'); select.id = `route-${workload}`; select.dataset.workload = workload; appendProviderOptions(select, value.routes[workload]);
+    row.append(label, select); controls.append(row);
+  });
+  const auto = document.querySelector('#chat-provider option[value=""]');
+  auto.textContent = `Auto · ${providerLabels[value.routes.interactive_explanation]}`;
+  document.querySelector('#chat-provider option[value="openai"]').textContent = providerLabels.openai;
+  document.querySelector('#chat-provider option[value="meta"]').textContent = providerLabels.meta;
+  document.querySelector('#route-version').textContent = `${value.route_source} · ${value.routing_version} · ${value.routing_sha256.slice(0, 12)}`;
+}
+
+async function refresh() {
+  const [system, data, routes] = await Promise.all([api('/v1/system/status'), api('/v1/data-health'), api('/v1/llm/routes')]);
+  appEnvironment = system.environment;
+  document.querySelector('#environment').textContent = system.environment;
+  document.querySelector('#mode').textContent = system.trading_mode;
+  document.querySelector('#database').textContent = system.database;
+  document.querySelector('#paused').textContent = system.new_exposure_paused ? 'PAUSED' : 'ENABLED';
+  document.querySelector('#alpaca').textContent = system.alpaca_configured ? 'CONFIGURED' : 'MISSING';
   document.querySelector('#bars').textContent = data.market_bars;
-  document.querySelector('#options').textContent = data.option_snapshots;
-  document.querySelector('#documents').textContent = data.source_documents;
-  document.querySelector('#catalysts').textContent = data.catalysts;
-  document.querySelector('#facts').textContent = data.corporate_facts;
-  document.querySelector('#data-services').textContent = `${data.raw_archive} / ${data.event_bus}`;
+  document.querySelector('#evidence').textContent = `${data.source_documents} / ${data.catalysts}`;
+  document.querySelector('#llm-counts').textContent = `${data.llm_invocations} / ${data.llm_routing_revisions}`;
+  renderRoutes(routes);
+  const locked = appEnvironment !== 'development';
+  document.querySelector('#save-routes').disabled = locked;
+  document.querySelector('#send-chat').disabled = locked;
+  if (locked) document.querySelector('#route-notice').textContent = 'Production editing requires authentication and is currently disabled.';
 }
+
+async function saveRoutes() {
+  const button = document.querySelector('#save-routes'); const notice = document.querySelector('#route-notice');
+  button.disabled = true; notice.textContent = 'Saving immutable revision…';
+  const routes = {};
+  document.querySelectorAll('[data-workload]').forEach(select => { routes[select.dataset.workload] = select.value; });
+  try {
+    const result = await api('/v1/llm/routes', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({routes, reason: document.querySelector('#route-reason').value})});
+    renderRoutes(result.effective_routing); notice.textContent = `Saved ${result.revision.routing_revision_id}`; await refresh();
+  } catch (error) { notice.textContent = String(error); }
+  finally { button.disabled = appEnvironment !== 'development'; }
+}
+
+function addMessage(role, content, meta = '') {
+  const empty = document.querySelector('#chat-empty'); if (empty) empty.remove();
+  const message = document.createElement('div'); message.className = `message ${role}`; message.textContent = content;
+  if (meta) { const detail = document.createElement('span'); detail.className = 'message-meta'; detail.textContent = meta; message.append(detail); }
+  const log = document.querySelector('#chat-log'); log.append(message); log.scrollTop = log.scrollHeight;
+}
+
+async function sendChat() {
+  const input = document.querySelector('#chat-input'); const message = input.value.trim(); if (!message) return;
+  const provider = document.querySelector('#chat-provider').value || null;
+  const history = chatHistory.slice(-20); addMessage('user', message); input.value = '';
+  const button = document.querySelector('#send-chat'); const status = document.querySelector('#chat-status'); button.disabled = true; status.textContent = 'Thinking…';
+  try {
+    const result = await api('/v1/llm/chat', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({message, history, provider})});
+    const answer = result.output_text || '(No text returned)';
+    chatHistory.push({role: 'user', content: message}, {role: 'assistant', content: answer});
+    addMessage('assistant', answer, `${result.model} · ${result.usage.total_tokens} tokens · ${result.latency_ms} ms · ${result.invocation_id}`);
+    status.textContent = 'Audited'; await refresh();
+  } catch (error) { addMessage('error', String(error)); status.textContent = 'Failed'; }
+  finally { button.disabled = appEnvironment !== 'development'; input.focus(); }
+}
+
+function clearChat() {
+  chatHistory = []; const log = document.querySelector('#chat-log'); log.replaceChildren();
+  const empty = document.createElement('div'); empty.id = 'chat-empty'; empty.className = 'muted'; empty.textContent = 'Conversation cleared from this browser session.'; log.append(empty);
+  document.querySelector('#chat-status').textContent = '';
+}
+
 async function post(url, body) {
-  const response = await fetch(url, {method: 'POST', headers: {'Content-Type':'application/json'}, body: body ? JSON.stringify(body) : undefined});
-  const value = await response.json(); output.textContent = JSON.stringify(value, null, 2); await status();
+  try { const value = await api(url, {method: 'POST', headers: {'Content-Type':'application/json'}, body: body ? JSON.stringify(body) : undefined}); output.textContent = JSON.stringify(value, null, 2); await refresh(); }
+  catch (error) { output.textContent = String(error); }
 }
+document.querySelector('#save-routes').onclick = saveRoutes;
+document.querySelector('#send-chat').onclick = sendChat;
+document.querySelector('#clear-chat').onclick = clearChat;
+document.querySelector('#chat-input').addEventListener('keydown', event => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') sendChat(); });
 document.querySelector('#demo').onclick = () => post('/v1/demo/run');
 document.querySelector('#market-demo').onclick = () => post('/v1/demo/market-data');
 document.querySelector('#alpaca-probe').onclick = () => post('/v1/market-data/alpaca/probe');
 document.querySelector('#pause').onclick = () => post('/v1/commands/pause', {reason:'operator console test'});
 document.querySelector('#resume').onclick = () => post('/v1/commands/resume', {reason:'operator console test'});
-status().catch(error => output.textContent = String(error));
+refresh().catch(error => output.textContent = String(error));
 </script>
 </body>
 </html>

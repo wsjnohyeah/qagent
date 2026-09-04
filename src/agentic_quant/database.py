@@ -653,3 +653,17 @@ llm_invocations = Table(
     Column("created_at", DateTime(timezone=True), nullable=False, index=True),
     Column("completed_at", DateTime(timezone=True), nullable=False),
 )
+
+llm_routing_revisions = Table(
+    "llm_routing_revisions",
+    metadata,
+    Column("routing_revision_id", String(36), primary_key=True),
+    Column("base_routing_version", String(80), nullable=False),
+    Column("base_routing_sha256", String(64), nullable=False, index=True),
+    Column("routing_version", String(120), nullable=False, unique=True),
+    Column("routing_sha256", String(64), nullable=False),
+    Column("routes_json", JSON, nullable=False),
+    Column("reason", Text, nullable=False),
+    Column("created_by", String(80), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+)

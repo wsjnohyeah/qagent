@@ -4,9 +4,9 @@ Last updated: 2026-09-04 PDT
 
 Context format: v1
 
-Current phase: Phase 3C validation plus front-loaded Phase 4A LLM gateway implemented; Phase 1B open-session verification pending
+Current phase: Phase 3C validation plus front-loaded Phase 4B LLM Control Center implemented; Phase 1B open-session verification pending
 
-Current documented baseline: C014 — `Add configurable dual-provider LLM gateway`
+Current documented baseline: C015 — `Add configurable LLM Control Center`
 
 ## Purpose and authority
 
@@ -59,9 +59,10 @@ A Git commit cannot contain its own content-derived hash without changing that h
 - Phase 3C adds immutable rolling train/embargo/test reports. Every candidate is evaluated
   both in and out of sample, with selection degradation, below-median selection rate, and
   realized-regime summaries retained rather than reporting only the winner.
-- A front-loaded Phase 4A gateway now presents one audited contract over OpenAI GPT-5.6 Sol
+- A front-loaded Phase 4B gateway and local Control Center now present one audited contract over OpenAI GPT-5.6 Sol
   and Meta Muse Spark 1.3. Workload routing is versioned and cost-tier-aware; missing project
-  credentials fail closed and no model has any monetary authority.
+  credentials fail closed and no model has any monetary authority. Development operators can
+  save immutable route revisions and chat through Auto or either explicit provider.
 - No GitHub remote or cloud host is configured yet.
 
 ### Repository state
@@ -112,7 +113,7 @@ Development service ports bind only to loopback. The local Compose credentials a
 - `make check`: passed.
 - Flake8: passed.
 - Strict mypy: passed for 38 source files.
-- Pytest: 47 passed.
+- Pytest: 50 passed.
 - `make doctor`: passed against the local-lite SQLite profile.
 - `make docker-doctor`: passed against the PostgreSQL-backed Compose profile.
 - PostgreSQL query: passed; the first container replay stored six lineage events.
@@ -128,7 +129,7 @@ Development service ports bind only to loopback. The local Compose credentials a
 - Real primary-source test: 10 entries from Apple's official Newsroom RSS feed passed the same path; identical replay inserted zero documents, versions, catalysts, links, or events.
 - Real SEC test: 20 AAPL filing records produced 19 catalysts and 20 links; identical replay inserted zero new records or events. A bounded 250-record AAPL XBRL facts run also replayed with zero duplicates.
 - Phase 2 fixtures verify primary/secondary source distinction, correction-version retention, SEC filing and XBRL normalization, IR feed parsing, and cross-document catalyst deduplication.
-- Alembic migrations through `20260904_0012` own the Phase 3C/4A schema; a fresh SQLite
+- Alembic migrations through `20260904_0013` own the Phase 3C/4B schema; a fresh SQLite
   upgrade/check/downgrade/re-upgrade cycle passed with no schema diff.
 - `make research-smoke`: passed with 100 deterministic daily bars, three immutable baseline
   experiments, nonzero cost modeling, matching offline/online feature hashes, and ordered
@@ -156,6 +157,10 @@ Development service ports bind only to loopback. The local Compose credentials a
   live probes returned `LLM_PROVIDER_OK` from both `gpt-5.6-sol` and `muse-spark-1.3` using
   project-scoped credentials in ignored `.env`; both calls also passed from the rebuilt
   PostgreSQL-backed Compose API container.
+- The development Control Center route-save endpoint created and reloaded an immutable
+  effective revision. The bounded chat endpoint completed real calls through both explicit
+  providers; OpenAI returned in about 2.4 seconds and Meta in about 0.8 seconds during the
+  final prompt-contract check. These are connectivity observations, not performance claims.
 - Repository secret-pattern scan: passed after fixing a scanner self-match.
 
 ## Product intent and invariant boundaries
@@ -356,7 +361,11 @@ flowchart LR
     VALIDATE --> REPORT["Immutable folds + regime/selection diagnostics"]
     REPORT --> DB
     REPORT --> LEDGER
-    MODELROUTES["Versioned workload/model routing"] --> LLMGW["Provider-neutral LLM gateway"]
+    MODELROUTES["Reviewed YAML routing base"] --> LLMGW["Provider-neutral LLM gateway"]
+    UI --> LLMCONTROL["Dev route editor + Research Copilot"]
+    LLMCONTROL --> ROUTEREVS["Immutable routing revisions"]
+    ROUTEREVS --> LLMGW
+    LLMCONTROL --> LLMGW
     OPENAI["OpenAI Responses API"] --> LLMGW
     METAMODEL["Meta Model Responses API"] --> LLMGW
     LLMGW --> LLMAUDIT["Immutable invocation audit"]
@@ -389,6 +398,14 @@ premium OpenAI route and interactive explanation/routine pipelines to the value 
 Every attempt is bounded and audited; raw inputs are hashed rather than copied into the audit
 row. No generative strategy loop is connected yet, and neither model can reach runtime risk,
 portfolio, execution, or broker components.
+
+Phase 4B adds a local no-build model control surface. A route save appends a complete SQL
+revision tied to the reviewed YAML base hash; the newest compatible revision becomes active.
+The Research Copilot can use that automatic interactive route or explicitly select either
+provider for one invocation. Browser history is bounded and session-local, while output,
+usage, latency, model, source SHA, and effective routing lineage remain durable. Both write
+and paid-call endpoints fail closed outside development until production authentication and
+budget controls exist.
 
 ### Target architecture
 
@@ -492,8 +509,8 @@ year or more of data.
 | Risk engine | `src/agentic_quant/risk.py` | deterministic gates and equity position sizing |
 | Event ledger | `src/agentic_quant/ledger.py` | append-only SQL event storage and lineage queries |
 | Vertical slice | `src/agentic_quant/pipeline.py` | synthetic catalyst through shadow-order record |
-| Control API | `src/agentic_quant/api.py` | health, status, events, decision inspection, demo, pause/resume |
-| Control page | `src/agentic_quant/static/index.html` | Phase 0 status and synthetic control UI |
+| Control API | `src/agentic_quant/api.py` | health, status, LLM routing/chat, events, decision inspection, demo, pause/resume |
+| Control page | `src/agentic_quant/static/index.html` | model routing, bounded research chat, status, and local operations |
 | Risk configuration | `configs/risk_policy.yaml` | versioned conservative limits |
 | Restriction configuration | `configs/restricted_securities.yaml` | effective-dated denylist containing META |
 | Local orchestration | `docker-compose.yml` | API, PostgreSQL, Redis, MinIO |
@@ -515,9 +532,9 @@ year or more of data.
 | Research operations | `src/agentic_quant/research_cli.py` | synthetic smoke, stored-data baselines, parity audit, experiment listing |
 | Validation engine | `src/agentic_quant/validation.py` | rolling train/embargo/test selection, regime reports, selection diagnostics |
 | LLM gateway | `src/agentic_quant/llm.py` | versioned workload routing and bounded OpenAI/Meta Responses calls |
-| LLM persistence | `src/agentic_quant/llm_store.py` | immutable source/config lineage, output, usage, latency, and status |
+| LLM persistence | `src/agentic_quant/llm_store.py` | immutable route revisions, source/config lineage, output, usage, latency, and status |
 | LLM routing | `configs/model_routing.yaml` | premium/value model assignments and bounded provider settings |
-| Schema migrations | `migrations/` | Alembic schema history through front-loaded Phase 4A |
+| Schema migrations | `migrations/` | Alembic schema history through front-loaded Phase 4B |
 
 ## Current executable risk baseline
 
@@ -557,6 +574,9 @@ Implemented endpoints:
 - `GET /v1/research/validations`
 - `GET /v1/research/validations/{validation_report_id}`
 - `GET /v1/llm/routes`
+- `PUT /v1/llm/routes`, restricted to development; appends a complete route revision
+- `GET /v1/llm/routes/history`
+- `POST /v1/llm/chat`, restricted to development; makes a bounded paid call
 - `GET /v1/llm/invocations`
 - `GET /v1/llm/invocations/{invocation_id}`
 - `POST /v1/llm/probe/{provider}`, restricted to development
@@ -839,6 +859,29 @@ The Compose stack is currently intended to remain running for local inspection. 
   execution, and broker credentials. Full strategy generation still waits for its typed
   orchestration and independent rejection gates.
 - Formal record: `docs/adr/0010-configurable-dual-provider-llm-gateway.md`.
+
+### D021 — Local model control and direct research chat
+
+- Date: 2026-09-04 PDT.
+- The user asked to place model configuration in the website and add a conversation area
+  where either LLM can be selected and tested directly.
+- Decision: the tracked YAML remains the reviewed provider/base-routing source. The local
+  Control Center may append complete workload-to-provider revisions to SQL; only the newest
+  revision matching the current YAML hash becomes active, so a base change cannot inherit a
+  stale override silently.
+- Research Copilot offers `Auto`, OpenAI, and Meta. Auto follows the active
+  `interactive_explanation` route; explicit selection applies to one invocation and never
+  mutates the global route or introduces automatic fallback.
+- The browser retains at most the current session history. Each request is bounded to 20
+  prior turns, 100,000 total input characters, 1,200 output tokens, and 120 seconds. Durable
+  invocation records hash raw input and retain output, usage, latency, provider/model,
+  prompt, route, and Git lineage.
+- Route mutation and paid chat remain available only in development. Remote production use
+  still requires authentication, authorization, rate/budget enforcement, CSRF protection,
+  session audit, and prompt/tool capability hardening.
+- The copilot remains research-only: no credential access, tools, risk approval, strategy
+  promotion, portfolio sizing, order submission, or broker path.
+- Formal record: `docs/adr/0011-development-llm-control-center.md`.
 
 ## Iteration and commit ledger
 
@@ -1269,7 +1312,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C014 — `Add configurable dual-provider LLM gateway`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `07d9a98`.
 - Date: 2026-09-04 PDT.
 - User intent: front-load OpenAI and Meta model connectivity so later research phases can be
   completed without another provider-integration pause; keep workload allocation configurable.
@@ -1306,6 +1349,43 @@ The Compose stack is currently intended to remain running for local inspection. 
   - Both selected model providers are reachable through project-scoped configuration; the
     full evidence-bound strategy orchestrator remains intentionally unimplemented.
 
+### C015 — `Add configurable LLM Control Center`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-04 PDT.
+- User intent: put model configuration into the website and provide a direct chat workspace
+  in which Auto, OpenAI GPT-5.6 Sol, or Meta Muse Spark 1.3 can be selected.
+- Scope:
+  - Added a responsive no-build model-routing panel with provider readiness/model metadata,
+    complete per-workload selectors, immutable save reasons, and effective route provenance.
+  - Added a bounded Research Copilot with session-local history, Auto/explicit provider
+    selection, safe text rendering, call progress/errors, and model/token/latency audit data.
+  - Added complete immutable SQL routing revisions, current/history APIs, effective-route
+    resolution, audit ledger events, and Alembic revision `20260904_0013`.
+  - Added a development-only bounded chat API over the existing provider-neutral gateway;
+    raw input remains hash-only in durable audit while output and invocation lineage persist.
+  - Added production fail-closed checks, route and chat contract tests, README/runbook/state
+    updates, and ADR 0011.
+- Architecture/decision impact:
+  - The reviewed YAML is now an explicit base layer and database revisions are the local
+    runtime control layer. Revisions are valid only against their recorded base hash.
+  - Direct provider selection is per invocation, while Auto honors the active interactive
+    route. Neither path adds fallback, tools, risk authority, promotion, or execution.
+  - Paid and mutating controls remain development-only until the production security and
+    budget prerequisites are implemented.
+- Validation:
+  - Flake8, strict mypy across 38 source files, and 50 tests passed.
+  - Fresh SQLite upgrade, downgrade to `20260904_0012`, and re-upgrade to
+    `20260904_0013` passed; Alembic detected no schema drift.
+  - Local doctor passed. Real bounded `/v1/llm/chat` calls completed against both configured
+    providers; the final Meta prompt-contract retry returned the exact expected response.
+  - Docker/PostgreSQL doctor, rendered Control Center delivery, PostgreSQL route persistence,
+    secret scan, and diff checks passed.
+- Expected global state after commit:
+  - The local website can configure auditable model allocation and test both LLMs directly.
+  - The full evidence-bound research orchestrator and authenticated remote Control Center
+    remain future work; no model has monetary or broker authority.
+
 ## Open work
 
 Ordered near-term work:
@@ -1324,9 +1404,9 @@ Ordered near-term work:
 7. Add Redis consumer groups, a transactional outbox, dead-letter replay, provider lag,
    sequence-gap, reconciliation, and data-quality dashboards.
 8. Build a labeled corpus and measure cross-provider catalyst dedup precision/recall.
-9. Add authentication/authorization, build the remote Trading Control Center and
-    citation-bound conversational research copilot, create the GitHub remote, and later
-    validate the guarded cloud pipeline on a selected VPS.
+9. Add authentication/authorization, rate/budget enforcement, and project-data retrieval to
+   turn the local Research Copilot into the citation-bound remote Control Center; create the
+   GitHub remote and later validate the guarded cloud pipeline on a selected VPS.
 
 ## Blocked or unresolved decisions
 

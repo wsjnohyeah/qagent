@@ -6,7 +6,10 @@ from pathlib import Path
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
+from agentic_quant.api import create_app
 from agentic_quant.config import Settings
 from agentic_quant.domain import (
     LLMInvocationStatus,
@@ -298,7 +301,10 @@ def test_gateway_routes_and_persists_immutable_audit(
     assert invocation.status == LLMInvocationStatus.COMPLETED
     assert openai.calls == 1
     assert meta.calls == 0
-    assert store.health_summary() == {"llm_invocations": 1}
+    assert store.health_summary() == {
+        "llm_invocations": 1,
+        "llm_routing_revisions": 0,
+    }
     assert store.recent(limit=1)[0]["output_preview"] == "completed by openai"
     assert store.get(invocation.invocation_id)["output_text"] == "completed by openai"
     events = ledger.by_correlation_id(invocation.invocation_id)
@@ -336,3 +342,119 @@ def test_gateway_fails_closed_and_audits_missing_credentials(
     assert stored["status"] == "FAILED"
     assert stored["error_code"] == "provider_not_configured"
     assert stored["output_preview"] is None
+
+
+def test_control_center_route_revision_changes_effective_provider(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    store = LLMStore(ledger.engine)
+    routing = load_llm_routing_config(_routing_path())
+    openai = FakeProvider(
+        LLMProviderName.OPENAI,
+        routing.providers[LLMProviderName.OPENAI],
+    )
+    meta = FakeProvider(
+        LLMProviderName.META,
+        routing.providers[LLMProviderName.META],
+    )
+    gateway = LLMGateway(
+        routing=routing,
+        providers={LLMProviderName.OPENAI: openai, LLMProviderName.META: meta},
+        store=store,
+        ledger=ledger,
+    )
+    routes = dict(routing.routes)
+    routes[LLMWorkload.INTERACTIVE_EXPLANATION] = LLMProviderName.OPENAI
+
+    revision = gateway.activate_routes(
+        routes=routes,
+        reason="Test interactive premium routing",
+    )
+    status = gateway.status()
+    invocation = asyncio.run(
+        gateway.complete(
+            LLMRequest(
+                workload=LLMWorkload.INTERACTIVE_EXPLANATION,
+                prompt_version="test_chat@0.1.0",
+                instructions="Explain only.",
+                input_text="Hello",
+            )
+        )
+    )
+
+    assert status["route_source"] == "control_center"
+    assert status["active_revision_id"] == revision.routing_revision_id
+    assert status["routes"]["interactive_explanation"] == "openai"
+    assert invocation.provider == LLMProviderName.OPENAI
+    assert invocation.routing_version == revision.routing_version
+    assert invocation.routing_sha256 == revision.routing_sha256
+    assert openai.calls == 1
+    assert meta.calls == 0
+    assert store.recent_routing_revisions(limit=1)[0]["reason"] == (
+        "Test interactive premium routing"
+    )
+    events = ledger.by_correlation_id(revision.routing_revision_id)
+    assert events[-1]["event_type"] == "llm.routing.activated.v1"
+
+    changed_base = routing.model_copy(update={"version": "llm_routing@0.1.1"})
+    gateway_after_base_change = LLMGateway(
+        routing=changed_base,
+        providers={LLMProviderName.OPENAI: openai, LLMProviderName.META: meta},
+        store=store,
+    )
+    changed_status = gateway_after_base_change.status()
+    assert changed_status["route_source"] == "yaml_base"
+    assert changed_status["routes"]["interactive_explanation"] == "meta"
+
+
+def test_chat_api_supports_explicit_provider_and_bounded_history(
+    settings,  # type: ignore[no-untyped-def]
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[LLMRequest] = []
+
+    async def fake_complete(
+        _provider: ResponsesAPIProvider,
+        request: LLMRequest,
+    ) -> LLMProviderResult:
+        captured.append(request)
+        return LLMProviderResult(
+            response_id="resp_chat_test",
+            output_text="测试回复",
+            usage=LLMUsage(input_tokens=9, output_tokens=4, total_tokens=13),
+        )
+
+    monkeypatch.setattr(ResponsesAPIProvider, "complete", fake_complete)
+    configured = settings.model_copy(
+        update={
+            "llm_openai_api_key": SecretStr("project-test-openai-key"),
+            "llm_meta_api_key": SecretStr("project-test-meta-key"),
+        }
+    )
+    with TestClient(create_app(configured)) as client:
+        response = client.post(
+            "/v1/llm/chat",
+            json={
+                "message": "继续解释",
+                "history": [
+                    {"role": "user", "content": "解释这个研究结果"},
+                    {"role": "assistant", "content": "这是上轮回答"},
+                ],
+                "provider": "openai",
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["provider"] == "openai"
+        assert payload["model"] == "gpt-5.6-sol"
+        assert payload["output_text"] == "测试回复"
+        assert payload["prompt_version"] == "research_copilot@0.1.0"
+        audit = client.get(f"/v1/llm/invocations/{payload['invocation_id']}").json()
+        assert audit["output_text"] == "测试回复"
+
+    transcript = captured[0].input_text
+    assert "解释这个研究结果" in transcript
+    assert "这是上轮回答" in transcript
+    assert "继续解释" in transcript

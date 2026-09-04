@@ -3,11 +3,12 @@
 ## Current
 
 - Phases 0 and 2 are complete; the Phase 3C research-validation baseline and front-loaded
-  Phase 4A LLM gateway are implemented. Phase 1B open-session validation is pending.
+  Phase 4B LLM gateway/Control Center are implemented. Phase 1B open-session validation is
+  pending.
 - Local-lite uses Python 3.12, a project-local `uv`, SQLite, and filesystem object storage.
-- The Control API, minimal web console, append-only event ledger, deterministic risk engine, and synthetic vertical slice exist.
+- The Control API, local model/research web console, append-only event ledger, deterministic risk engine, and synthetic vertical slice exist.
 - `live` is not a valid trading mode; `LIVE_TRADING_ENABLED=true` fails configuration validation.
-- Local lint, strict type checking, 47 tests, API readiness, the HTTP vertical slice, and the secret scan pass.
+- Local lint, strict type checking, 50 tests, API readiness, the HTTP vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
 - The full Compose stack is healthy: PostgreSQL 17, Redis 8, MinIO, and the API all passed direct checks; the PostgreSQL-backed shadow slice recorded six lineage events.
 - `context.md` is the required master record for architecture, discussions, iterations, commit contents, and post-commit global state.
@@ -25,7 +26,7 @@
 - Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
   experiment runs, backtest trades, corporate actions, historical universe membership,
   feature parity checks, and walk-forward reports are stored through Alembic revision
-  `20260904_0012`.
+  `20260904_0013`.
 - The Phase 3 runner provides buy-and-hold, long/cash momentum, and long/cash
   mean-reversion baselines with next-bar execution, commission, slippage, metrics, hashes,
   and append-only completion events.
@@ -46,6 +47,9 @@
   status, and output.
 - Both Responses API adapters pass mocked contract tests and bounded live probes using
   project-specific credentials in ignored `.env`.
+- The local web Control Center shows provider readiness, saves complete workload maps as
+  immutable SQL revisions, and offers bounded chat through Auto/OpenAI/Meta. Route writes and
+  paid chat calls are development-only; every call retains source/config/model/usage lineage.
 - `.env` explicitly selects `APP_ENV=development`; development daily/news backfills are
   capped at 120 days and one-minute backfills at 7 days by default. The active scope is
   exposed by `/v1/system/status`.
@@ -63,7 +67,8 @@
 6. Extend fill realism with multi-bar partial fills, order cancellation, spread/quote data,
    and symbol-change/delisting replay.
 7. Add Redis consumer groups, durable offsets, a transactional outbox, and dead-letter replay.
-8. Build the authenticated Trading Control Center and expand the Decision Inspector.
+8. Add authentication, budgets, and session audit before remotely exposing the Control
+   Center; then expand its data, strategy, and Decision Inspector views.
 
 ## Blocked
 
@@ -88,3 +93,5 @@
   candidate run, and report selection degradation and realized-regime results.
 - ADR 0010: use a provider-neutral Responses API gateway with versioned workload routing,
   immutable invocation audits, bounded calls, and no automatic cross-provider fallback.
+- ADR 0011: keep the YAML route map as a reviewed base, append development Control Center
+  overrides as immutable revisions, and provide bounded Auto/OpenAI/Meta research chat.

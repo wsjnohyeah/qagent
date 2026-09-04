@@ -89,6 +89,26 @@ class LLMInvocationStatus(StrEnum):
     FAILED = "FAILED"
 
 
+class LLMRoutingRevision(FrozenModel):
+    routing_revision_id: str
+    base_routing_version: str
+    base_routing_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    routing_version: str
+    routing_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    routes: dict[LLMWorkload, LLMProviderName]
+    reason: str = Field(min_length=3, max_length=500)
+    created_by: str = Field(min_length=1, max_length=80)
+    created_at: datetime
+
+    @model_validator(mode="after")
+    def routes_are_complete(self) -> Self:
+        missing = set(LLMWorkload) - set(self.routes)
+        extra = set(self.routes) - set(LLMWorkload)
+        if missing or extra:
+            raise ValueError("Routing revisions must define every supported workload")
+        return self
+
+
 class LLMUsage(FrozenModel):
     input_tokens: int = Field(default=0, ge=0)
     output_tokens: int = Field(default=0, ge=0)

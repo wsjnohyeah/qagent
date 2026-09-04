@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from fastapi.testclient import TestClient
 
 from agentic_quant.api import create_app
-from agentic_quant.config import Settings
+from agentic_quant.config import AppEnvironment, Settings
 from agentic_quant.domain import Verdict
 from agentic_quant.ledger import EventLedger
 from agentic_quant.pipeline import run_synthetic_vertical_slice
@@ -40,7 +40,7 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert ready.status_code == 200
         assert ready.json()["live_trading_enabled"] is False
         system_status = client.get("/v1/system/status").json()
-        assert system_status["phase"] == "3c-walk-forward-validation"
+        assert system_status["phase"] == "3c-validation-plus-4b-llm-control-center"
         assert system_status["data_operating_scope"] == "bounded_correctness_samples"
         assert system_status["development_max_backfill_days"] == 120
         assert system_status["development_max_intraday_backfill_days"] == 7
@@ -66,6 +66,7 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert data_health["validation_reports"] == 0
         assert data_health["validation_folds"] == 0
         assert data_health["llm_invocations"] == 0
+        assert data_health["llm_routing_revisions"] == 0
         assert data_health["alpaca_configured"] is False
         assert client.get("/v1/research/experiments").json() == []
         missing_events = client.get("/v1/research/experiments/missing/events")
@@ -76,12 +77,43 @@ def test_api_health_and_demo(settings: Settings) -> None:
         routes = client.get("/v1/llm/routes").json()
         assert routes["routes"]["critical_research"] == "openai"
         assert routes["routes"]["interactive_explanation"] == "meta"
+        assert routes["route_source"] == "yaml_base"
         assert routes["automatic_fallback"] is False
+        route_update = client.put(
+            "/v1/llm/routes",
+            json={
+                "routes": {
+                    "interactive_explanation": "openai",
+                    "routine_pipeline": "meta",
+                    "critical_research": "openai",
+                    "strategy_generation": "openai",
+                    "strategy_critique": "openai",
+                },
+                "reason": "API route revision test",
+            },
+        )
+        assert route_update.status_code == 200
+        assert route_update.json()["effective_routing"]["route_source"] == "control_center"
+        assert route_update.json()["effective_routing"]["routes"][
+            "interactive_explanation"
+        ] == "openai"
+        history = client.get("/v1/llm/routes/history").json()
+        assert len(history) == 1
+        assert history[0]["reason"] == "API route revision test"
         assert client.get("/v1/llm/invocations").json() == []
         missing_invocation = client.get("/v1/llm/invocations/missing")
         assert missing_invocation.status_code == 404
         missing_llm_credentials = client.post("/v1/llm/probe/openai")
         assert missing_llm_credentials.status_code == 503
+        missing_chat_credentials = client.post(
+            "/v1/llm/chat",
+            json={"message": "hello", "provider": "meta"},
+        )
+        assert missing_chat_credentials.status_code == 503
+        page = client.get("/")
+        assert page.status_code == 200
+        assert "Model routing" in page.text
+        assert "Research Copilot" in page.text
         oversized_backfill = client.post(
             "/v1/market-data/alpaca/backfill",
             json={
@@ -94,3 +126,28 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert oversized_backfill.status_code == 422
         missing_credentials = client.post("/v1/market-data/alpaca/probe")
         assert missing_credentials.status_code == 503
+
+
+def test_unauthenticated_llm_controls_fail_closed_in_production(
+    settings: Settings,
+) -> None:
+    production = settings.model_copy(update={"app_env": AppEnvironment.PRODUCTION})
+    routes = {
+        "interactive_explanation": "meta",
+        "routine_pipeline": "meta",
+        "critical_research": "openai",
+        "strategy_generation": "openai",
+        "strategy_critique": "openai",
+    }
+    with TestClient(create_app(production)) as client:
+        route_update = client.put(
+            "/v1/llm/routes",
+            json={"routes": routes, "reason": "Must be rejected"},
+        )
+        chat = client.post(
+            "/v1/llm/chat",
+            json={"message": "Must be rejected", "provider": "openai"},
+        )
+
+    assert route_update.status_code == 403
+    assert chat.status_code == 403

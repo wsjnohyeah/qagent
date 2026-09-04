@@ -1,6 +1,6 @@
 # Agentic Quant Trading System
 
-A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton, the read-only **Phase 1** market-data foundation, the completed **Phase 2** event/document pipeline, a **Phase 3C** bias-aware research validation baseline, and a front-loaded **Phase 4A** dual-provider LLM gateway.
+A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton, the read-only **Phase 1** market-data foundation, the completed **Phase 2** event/document pipeline, a **Phase 3C** bias-aware research validation baseline, and a front-loaded **Phase 4B** dual-provider LLM gateway and local Control Center.
 
 > Live-money execution is not implemented. `live` is not a valid mode, and setting `LIVE_TRADING_ENABLED=true` makes startup fail.
 
@@ -64,6 +64,11 @@ return/Sharpe degradation, selection-failure rate, and performance by realized m
 Phase 4A adds an audited Responses API gateway for OpenAI GPT-5.6 Sol and Meta Muse Spark
 1.3. Versioned workload routing assigns premium and value-tier models without giving either
 provider access to broker credentials, risk authority, or order submission.
+
+Phase 4B exposes that gateway in the local Control Center. The operator can create immutable
+workload-routing revisions and chat through `Auto`, OpenAI, or Meta while preserving model,
+route, token, latency, source, and configuration lineage. These paid/write controls remain
+development-only until the remote interface has authentication and budget enforcement.
 
 ## Commands
 
@@ -249,7 +254,7 @@ make validation-smoke
 For stored bars, use `quant-research validate`. Reports and fold lineage are available from
 `GET /v1/research/validations` and `GET /v1/research/validations/{validation_report_id}`.
 
-## Phase 4A: configurable LLM gateway
+## Phase 4A/4B: configurable LLM gateway and local Control Center
 
 `configs/model_routing.yaml` is the initial versioned routing source. Critical research,
 strategy generation, and strategy critique route to `gpt-5.6-sol`; interactive explanations
@@ -273,6 +278,12 @@ Every attempted call is stored with source Git SHA, route/prompt version, reques
 and input hashes, provider response ID, token usage, latency, status, and output. Input text
 and instructions are not copied into the audit table. Automatic cross-provider fallback is
 disabled so cost and model behavior cannot change silently. See `runbooks/llm_gateway.md`.
+
+The web page now shows provider readiness and lets a development operator assign either
+provider to each named workload. Saving creates an append-only database revision rather than
+rewriting the tracked YAML baseline. Research Copilot supports `Auto` routing or an explicit
+provider for a single conversation. Browser history is session-local and bounded; raw input is
+hashed in the invocation audit while model output and usage are retained.
 
 ## Repository map
 
@@ -306,6 +317,9 @@ AGENTS.md                mandatory operating rules for coding/deployment agents
 - `GET /v1/research/validations`
 - `GET /v1/research/validations/{validation_report_id}`
 - `GET /v1/llm/routes`
+- `PUT /v1/llm/routes` — development only; creates an immutable complete routing revision
+- `GET /v1/llm/routes/history`
+- `POST /v1/llm/chat` — development only; incurs a bounded provider call
 - `GET /v1/llm/invocations`
 - `GET /v1/llm/invocations/{invocation_id}`
 - `POST /v1/llm/probe/{provider}` — development only; incurs a bounded provider call
