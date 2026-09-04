@@ -72,10 +72,18 @@ Important controls:
 
 ```dotenv
 APP_ENV=development
+DEVELOPMENT_MAX_BACKFILL_DAYS=120
+DEVELOPMENT_MAX_INTRADAY_BACKFILL_DAYS=7
 TRADING_MODE=shadow
 LIVE_TRADING_ENABLED=false
 GLOBAL_NEW_EXPOSURE_PAUSED=false
 ```
+
+`APP_ENV=development` is a bounded correctness environment. Daily/news backfills longer than
+`DEVELOPMENT_MAX_BACKFILL_DAYS`, or one-minute backfills longer than
+`DEVELOPMENT_MAX_INTRADAY_BACKFILL_DAYS`, fail before contacting a provider. The future remote
+deployment uses `APP_ENV=production` for durable services and governed long-horizon jobs;
+this distinction does not relax point-in-time, safety, or audit invariants.
 
 Production overrides `GLOBAL_NEW_EXPOSURE_PAUSED=true`. The red pause operation is distinct from liquidation; this build has no liquidation or live broker endpoint.
 
@@ -188,7 +196,7 @@ To run a baseline on stored real daily bars:
 quant-research run AAPL \
   --strategy momentum \
   --timeframe 1Day \
-  --start 2023-10-01T00:00:00Z \
+  --start 2026-06-15T00:00:00Z \
   --end 2026-09-04T00:00:00Z
 ```
 

@@ -66,6 +66,11 @@ async def _probe(settings: Settings) -> None:
 
 
 async def _backfill(settings: Settings, args: argparse.Namespace) -> None:
+    settings.validate_backfill_window(
+        start=args.start,
+        end=args.end,
+        timeframe=args.timeframe,
+    )
     upgrade_database(settings.database_url)
     ledger = EventLedger(settings.database_url)
     publisher = (

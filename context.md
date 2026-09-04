@@ -6,7 +6,7 @@ Context format: v1
 
 Current phase: Phase 3A research foundation implemented; Phase 1B open-session verification pending
 
-Current documented baseline: C009 — `Record local validation and remote UI scope`
+Current documented baseline: C010 — `Enforce bounded development data scope`
 
 ## Purpose and authority
 
@@ -70,6 +70,10 @@ A Git commit cannot contain its own content-derived hash without changing that h
   Prefer deterministic fixtures and the smallest bounded real samples that exercise provider,
   storage, replay, feature, and backtest invariants. Full-year or multi-year backfills are not
   a routine local development requirement.
+- The ignored local `.env` explicitly sets `APP_ENV=development` and
+  `DEVELOPMENT_MAX_BACKFILL_DAYS=120`, with a stricter 7-day one-minute-bar cap;
+  `.env.example` documents the same safe defaults.
+  `/v1/system/status` exposes the effective data operating scope without exposing secrets.
 
 ### Running local services
 
@@ -645,6 +649,21 @@ The Compose stack is currently intended to remain running for local inspection. 
   authentication, authorization, session/audit logging, prompt-injection defenses, and
   explicit tool capability gates.
 
+### D015 — Environment-enforced data operating scope
+
+- Date: 2026-09-04 PDT.
+- The user requested that development and production responsibilities be explicit in the
+  environment configuration rather than remaining only a documentation convention.
+- Decision: `APP_ENV=development` selects `bounded_correctness_samples` and rejects daily or
+  news backfill windows over `DEVELOPMENT_MAX_BACKFILL_DAYS`, default 120, and one-minute
+  windows over `DEVELOPMENT_MAX_INTRADAY_BACKFILL_DAYS`, default 7, before contacting a
+  provider. The limits are explicit and may be deliberately changed for a special local test.
+- `APP_ENV=production` selects `durable_long_horizon`; the development cap does not apply.
+  Production remains responsible for durable storage, restarts, scheduled backfills,
+  monitoring, licensing, and authenticated job control.
+- The environment distinction changes scale and operational expectations, not correctness,
+  audit, point-in-time, risk, or security requirements.
+
 ## Iteration and commit ledger
 
 ### C001 — `Bootstrap safety-first Phase 0 environment`
@@ -903,7 +922,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C009 — `Record local validation and remote UI scope`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `64b1fd2`
 - Date: 2026-09-04 PDT.
 - User intent: keep local development focused on pipeline correctness rather than large
   historical backfills, and preserve the intended remote Web/LLM interaction model.
@@ -927,6 +946,38 @@ The Compose stack is currently intended to remain running for local inspection. 
   - Runtime behavior and stored data are unchanged.
   - Future agents will not treat large local backfills as a development prerequisite and
     will preserve the complete remote UI/research-copilot product requirement.
+
+### C010 — `Enforce bounded development data scope`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-04 PDT.
+- User intent: make development versus production behavior explicit in `.env` and ensure
+  local work uses small datasets to prove correctness rather than long-running backfills.
+- Scope:
+  - Added 120-day daily/news and 7-day one-minute development limits to the ignored local
+    `.env` and tracked `.env.example`.
+  - Added the effective `data_operating_scope` and development backfill policy to typed
+    settings and `/v1/system/status`.
+  - Enforced the development window before Alpaca market or news backfill calls in both CLI
+    and API paths; production mode is not subject to this development-only cap.
+  - Updated local research examples to bounded windows and documented remote long-horizon
+    job responsibilities and image Git provenance.
+  - Added configuration and API regression tests for the environment boundary.
+- Architecture/decision impact:
+  - Development and production now share correctness/safety invariants but have explicitly
+    different data-scale and durability responsibilities.
+- Validation:
+  - `make check` passed with Flake8, strict mypy across 32 source files, and 27 tests.
+  - `make doctor`, repository secret scan, and `git diff --check` passed.
+  - The active ignored `.env` resolved to `development`,
+    `bounded_correctness_samples`, a 120-day general limit, and a 7-day intraday limit
+    without printing secrets.
+  - Docker/PostgreSQL doctor passed; the container status exposed the same development scope,
+    and an attempted 365-day API backfill was rejected with HTTP 422 before provider access.
+- Expected global state after commit:
+  - Accidental large development backfills fail locally with an actionable error before any
+    provider request, while future production workers may perform governed long-horizon jobs.
+  - No stored runtime data, credentials, trading authority, or Phase 1B status changes.
 
 ## Open work
 

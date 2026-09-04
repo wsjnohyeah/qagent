@@ -28,12 +28,15 @@
   mean-reversion baselines with next-bar execution, commission, slippage, metrics, hashes,
   and append-only completion events.
 - `make research-smoke` exercises the complete research path in an isolated local database.
+- `.env` explicitly selects `APP_ENV=development`; development daily/news backfills are
+  capped at 120 days and one-minute backfills at 7 days by default. The active scope is
+  exposed by `/v1/system/status`.
 
 ## Next
 
 1. Capture real SIP trade/quote/bar frames and reconnect/gap repair during the next open session.
-2. Backfill a bounded multi-year daily equity dataset and verify the Phase 3A runner against
-   real stored data.
+2. Design remote long-horizon backfill jobs; continue using bounded samples for local
+   correctness verification.
 3. Add offline/online feature parity, walk-forward/regime reports, and overfitting diagnostics.
 4. Add Redis consumer groups, durable offsets, a transactional outbox, and dead-letter replay.
 5. Add data-quality reconciliation and provider lag metrics.

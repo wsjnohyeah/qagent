@@ -48,6 +48,10 @@ REDIS_URL=redis://redis:6379/0
 OBJECT_STORE_ROOT=/app/work/object-store
 ```
 
+`APP_ENV=production` selects the durable, long-horizon operating profile. The development
+backfill cap does not apply, but long jobs must run through authenticated, observable worker
+operations rather than unauthenticated public API endpoints.
+
 Provider keys are added only when their integration phase is approved. Redact them from logs and health responses.
 
 ## Build and publish
@@ -58,7 +62,8 @@ From the clean, reviewed commit:
 make check
 make doctor
 ./scripts/check_no_secrets.sh
-docker build -t ghcr.io/OWNER/REPO:COMMIT_SHA .
+docker build --build-arg SOURCE_GIT_SHA=$(git rev-parse HEAD) \
+  -t ghcr.io/OWNER/REPO:COMMIT_SHA .
 docker push ghcr.io/OWNER/REPO:COMMIT_SHA
 ```
 

@@ -41,6 +41,9 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert ready.json()["live_trading_enabled"] is False
         system_status = client.get("/v1/system/status").json()
         assert system_status["phase"] == "3a-research-foundation"
+        assert system_status["data_operating_scope"] == "bounded_correctness_samples"
+        assert system_status["development_max_backfill_days"] == 120
+        assert system_status["development_max_intraday_backfill_days"] == 7
         assert system_status["phase_1b_open_session_validation"] == "pending"
         demo = client.post("/v1/demo/run")
         assert demo.status_code == 200
@@ -58,5 +61,15 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert data_health["experiment_runs"] == 0
         assert data_health["alpaca_configured"] is False
         assert client.get("/v1/research/experiments").json() == []
+        oversized_backfill = client.post(
+            "/v1/market-data/alpaca/backfill",
+            json={
+                "symbol": "AAPL",
+                "start": "2025-01-01T00:00:00Z",
+                "end": "2025-06-01T00:00:00Z",
+                "timeframe": "1Day",
+            },
+        )
+        assert oversized_backfill.status_code == 422
         missing_credentials = client.post("/v1/market-data/alpaca/probe")
         assert missing_credentials.status_code == 503

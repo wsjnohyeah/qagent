@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 
@@ -54,6 +55,8 @@ class Settings(BaseSettings):
     social_aggregate_url: str | None = None
     social_aggregate_token: SecretStr | None = None
     market_calendar: str = "XNYS"
+    development_max_backfill_days: int = Field(default=120, ge=1, le=3_650)
+    development_max_intraday_backfill_days: int = Field(default=7, ge=1, le=365)
     source_git_sha: str | None = None
     api_host: str = "127.0.0.1"
     api_port: int = Field(default=8000, ge=1, le=65535)
@@ -77,3 +80,34 @@ class Settings(BaseSettings):
                 "Social aggregates require SOCIAL_AGGREGATE_URL and SOCIAL_AGGREGATE_TOKEN"
             )
         return self
+
+    @property
+    def data_operating_scope(self) -> str:
+        if self.app_env == AppEnvironment.DEVELOPMENT:
+            return "bounded_correctness_samples"
+        return "durable_long_horizon"
+
+    def validate_backfill_window(
+        self,
+        *,
+        start: datetime,
+        end: datetime,
+        timeframe: str | None = None,
+    ) -> None:
+        if start >= end:
+            raise ValueError("Backfill start must be before end")
+        maximum_days = (
+            self.development_max_intraday_backfill_days
+            if timeframe == "1Min"
+            else self.development_max_backfill_days
+        )
+        if (
+            self.app_env == AppEnvironment.DEVELOPMENT
+            and end - start > timedelta(days=maximum_days)
+        ):
+            raise ValueError(
+                "Development backfills are bounded to "
+                f"{maximum_days} days for {timeframe or 'this data source'}; "
+                "run long-horizon jobs in "
+                "APP_ENV=production or explicitly change the development limit"
+            )

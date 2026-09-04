@@ -154,6 +154,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "new_exposure_paused": application.state.new_exposure_paused,
             "database": "healthy" if ledger.health() else "unhealthy",
             "phase": "3a-research-foundation",
+            "data_operating_scope": app_settings.data_operating_scope,
+            "development_max_backfill_days": (
+                app_settings.development_max_backfill_days
+                if app_settings.app_env == AppEnvironment.DEVELOPMENT
+                else None
+            ),
+            "development_max_intraday_backfill_days": (
+                app_settings.development_max_intraday_backfill_days
+                if app_settings.app_env == AppEnvironment.DEVELOPMENT
+                else None
+            ),
             "phase_1b_open_session_validation": "pending",
             "alpaca_configured": bool(
                 app_settings.alpaca_api_key and app_settings.alpaca_api_secret
@@ -315,6 +326,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if request.start >= request.end:
             raise HTTPException(status_code=422, detail="start must be before end")
         try:
+            app_settings.validate_backfill_window(
+                start=request.start,
+                end=request.end,
+                timeframe=request.timeframe,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        try:
             async with alpaca_provider() as provider:
                 service = MarketDataIngestionService(
                     provider=provider,
@@ -373,6 +392,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         if request.start and request.end and request.start >= request.end:
             raise HTTPException(status_code=422, detail="start must be before end")
+        if request.start and request.end:
+            try:
+                app_settings.validate_backfill_window(
+                    start=request.start,
+                    end=request.end,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
         try:
             async with alpaca_news_provider() as provider:
                 summary = await DocumentIngestionService(

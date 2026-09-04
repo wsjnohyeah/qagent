@@ -21,7 +21,7 @@ Credentials remain only in ignored `.env`. For the Docker/PostgreSQL profile:
 
 ```sh
 ./scripts/compose.sh exec -T api quant-alpaca backfill AAPL \
-  --start 2023-09-01T00:00:00Z \
+  --start 2026-06-01T00:00:00Z \
   --end 2026-09-04T00:00:00Z \
   --timeframe 1Day
 ```
@@ -29,6 +29,13 @@ Credentials remain only in ignored `.env`. For the Docker/PostgreSQL profile:
 Daily bars use `adjustment=raw`. A bar's `available_from` is conservatively set to the next
 UTC day so the completed daily bar cannot enter a same-day decision. Corporate-action-aware
 research remains a separate Phase 3 requirement.
+
+With `APP_ENV=development`, market and news backfills are limited to
+`DEVELOPMENT_MAX_BACKFILL_DAYS` (120 by default), while one-minute bars are limited to
+`DEVELOPMENT_MAX_INTRADAY_BACKFILL_DAYS` (7 by default). This is intentional: local work
+proves correctness with bounded samples. Multi-year backfills belong to scheduled remote
+jobs under `APP_ENV=production`; changing a local limit must be an explicit choice, not a
+test prerequisite.
 
 ## Run a stored-data baseline
 
@@ -38,7 +45,7 @@ Inside the Docker/PostgreSQL profile:
 ./scripts/compose.sh exec -T api quant-research run AAPL \
   --strategy momentum \
   --timeframe 1Day \
-  --start 2023-10-01T00:00:00Z \
+  --start 2026-06-15T00:00:00Z \
   --end 2026-09-04T00:00:00Z
 ```
 
