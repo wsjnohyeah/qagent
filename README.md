@@ -1,6 +1,6 @@
 # Agentic Quant Trading System
 
-A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. This repository currently implements **Phase 0**: deterministic risk controls, an append-only decision ledger, a synthetic end-to-end replay, health endpoints, and a small Control Center.
+A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton and the first **Phase 1** read-only Alpaca market-data path.
 
 > Live-money execution is not implemented. `live` is not a valid mode, and setting `LIVE_TRADING_ENABLED=true` makes startup fail.
 
@@ -50,6 +50,7 @@ This is infrastructure validation, not evidence that a strategy is profitable.
 | `make demo` | Run the vertical slice in the terminal |
 | `make docker-up` | Start PostgreSQL, Redis, MinIO, and API when Docker is installed |
 | `make docker-doctor` | Verify every container and the PostgreSQL-backed shadow slice |
+| `make docker-alpaca-probe` | Verify SIP/OPRA REST access and SIP WebSocket authentication |
 | `make docker-down` | Stop the full local stack without deleting volumes |
 
 ## Safe configuration
@@ -81,6 +82,47 @@ make docker-doctor
 
 The full profile runs PostgreSQL 17, Redis 8, MinIO, and the API. It has been exercised successfully on the initial Apple Silicon development Mac. Development ports bind only to loopback. Credentials in `docker-compose.yml` are intentionally local-only and must never be reused in production.
 
+## Phase 1: read-only Alpaca data
+
+Put credentials only in the ignored `.env` file:
+
+```dotenv
+ALPACA_API_KEY=...
+ALPACA_API_SECRET=...
+ALPACA_STOCK_FEED=sip
+ALPACA_OPTION_FEED=opra
+```
+
+Never paste credentials into tracked files. Verify entitlements without placing orders:
+
+```sh
+make docker-up
+make docker-alpaca-probe
+```
+
+Ingest historical one-minute bars:
+
+```sh
+./scripts/compose.sh exec -T api quant-alpaca backfill AAPL \
+  --start 2026-09-02T13:30:00Z \
+  --end 2026-09-02T20:00:00Z
+```
+
+Ingest one bounded page of an option-chain snapshot:
+
+```sh
+./scripts/compose.sh exec -T api quant-alpaca option-snapshot AAPL \
+  --limit 100 --max-pages 1
+```
+
+Capture a bounded live SIP stream during market hours:
+
+```sh
+SYMBOLS=SPY,AAPL SECONDS=60 MAX_FRAMES=100 make docker-alpaca-stream
+```
+
+Every accepted provider response is content-addressed in MinIO, normalized into PostgreSQL with uniqueness constraints, recorded in the event ledger, and published to Redis Streams. Replaying identical historical data does not create duplicate normalized records or events.
+
 ## Repository map
 
 ```text
@@ -91,6 +133,7 @@ docs/adr/                architectural decisions
 docs/DEPLOYMENT.md       exact handoff contract for a cloud deployment agent
 context.md               master context, architecture, discussions, iterations, commits
 infra/deploy/            guarded VPS deployment entry point
+runbooks/                 operational procedures, including market-data checks
 PROJECT_STATE.md         Current / Next / Blocked / Decisions
 AGENTS.md                mandatory operating rules for coding/deployment agents
 ```
@@ -103,6 +146,11 @@ AGENTS.md                mandatory operating rules for coding/deployment agents
 - `GET /v1/events`
 - `GET /v1/decisions/{correlation_id}`
 - `POST /v1/demo/run`
+- `POST /v1/demo/market-data`
+- `GET /v1/data-health`
+- `POST /v1/market-data/alpaca/probe` — development only
+- `POST /v1/market-data/alpaca/backfill` — development only
+- `POST /v1/market-data/alpaca/option-snapshot` — development only
 - `POST /v1/commands/pause`
 - `POST /v1/commands/resume` — development + shadow only
 

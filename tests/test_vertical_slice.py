@@ -44,4 +44,11 @@ def test_api_health_and_demo(settings: Settings) -> None:
         correlation_id = demo.json()["correlation_id"]
         lineage = client.get(f"/v1/decisions/{correlation_id}")
         assert len(lineage.json()["lineage"]) == 6
-
+        market_demo = client.post("/v1/demo/market-data")
+        assert market_demo.status_code == 200
+        assert market_demo.json()["records_inserted"] == 1
+        data_health = client.get("/v1/data-health").json()
+        assert data_health["market_bars"] == 1
+        assert data_health["alpaca_configured"] is False
+        missing_credentials = client.post("/v1/market-data/alpaca/probe")
+        assert missing_credentials.status_code == 503

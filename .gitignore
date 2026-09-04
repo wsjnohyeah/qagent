@@ -9,10 +9,12 @@ htmlcov/
 __pycache__/
 *.py[cod]
 *.egg-info/
+.coverage.*
 dist/
 build/
 work/*
 !work/.gitkeep
 outputs/*
 !outputs/.gitkeep
-
+*.pem
+*.key

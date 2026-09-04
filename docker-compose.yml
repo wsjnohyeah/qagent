@@ -3,6 +3,8 @@ name: agentic-quant
 services:
   api:
     build: .
+    env_file:
+      - .env
     environment:
       APP_ENV: development
       TRADING_MODE: shadow
@@ -10,13 +12,20 @@ services:
       GLOBAL_NEW_EXPOSURE_PAUSED: "false"
       DATABASE_URL: postgresql+psycopg://quant:quant_dev_only@postgres:5432/quant
       REDIS_URL: redis://redis:6379/0
-      OBJECT_STORE_ROOT: /app/work/object-store
+      OBJECT_STORE_BACKEND: s3
+      OBJECT_STORE_ENDPOINT: http://minio:9000
+      OBJECT_STORE_BUCKET: quant-raw
+      OBJECT_STORE_ACCESS_KEY: quant_local
+      OBJECT_STORE_SECRET_KEY: quant_local_change_me
+      AUTO_MIGRATE: "true"
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]

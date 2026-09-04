@@ -9,14 +9,17 @@ description = "Auditable research, shadow-trading, and paper-trading foundation"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
+  "alembic>=1.16,<2",
   "fastapi>=0.116,<1",
   "httpx>=0.28,<1",
+  "minio>=7.2,<8",
   "psycopg[binary]>=3.2,<4",
   "pydantic-settings>=2.10,<3",
   "pyyaml>=6.0,<7",
   "redis>=6.4,<8",
   "sqlalchemy>=2.0,<3",
   "uvicorn[standard]>=0.35,<1",
+  "websockets>=17,<18",
 ]
 
 [dependency-groups]
@@ -32,6 +35,7 @@ dev = [
 [project.scripts]
 quant-api = "agentic_quant.api:run"
 quant-demo = "agentic_quant.demo:main"
+quant-alpaca = "agentic_quant.alpaca_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agentic_quant"]

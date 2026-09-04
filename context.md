@@ -1,12 +1,12 @@
 # Master Project Context
 
-Last updated: 2026-09-03 21:51 PDT
+Last updated: 2026-09-03 PDT
 
 Context format: v1
 
-Current phase: Phase 0 — repository and safety skeleton
+Current phase: Phase 1 — market-data foundation (in progress)
 
-Current local commit before this document: `5374c1b`
+Current committed baseline: `ab7e620 Add durable master project context`
 
 ## Purpose and authority
 
@@ -34,11 +34,13 @@ A Git commit cannot contain its own content-derived hash without changing that h
 
 ### Product state
 
-- The repository contains a working Phase 0 safety foundation, not a profitable or production-ready trading system.
+- The repository contains a completed Phase 0 safety foundation and an in-progress Phase 1 read-only market-data foundation. It is not a profitable or production-ready trading system.
 - Supported conceptual modes are `research`, `backtest`, `shadow`, and `paper`.
 - The executable settings intentionally omit `live`; `LIVE_TRADING_ENABLED=true` fails validation.
-- The implemented end-to-end path uses deterministic synthetic data and creates a shadow record only. It makes no broker call.
-- No real market-data provider, news provider, LLM, predictive model, or broker adapter is connected yet.
+- The original synthetic shadow path remains operational and makes no broker call.
+- A read-only Alpaca adapter now retrieves SIP historical stock bars, OPRA option-chain snapshots, and authenticates to the SIP stock WebSocket.
+- Real provider responses flow through content-addressed MinIO raw storage, normalized PostgreSQL tables, the append-only event ledger, and Redis Streams.
+- No news provider, LLM, predictive model, or broker adapter is connected yet.
 - No GitHub remote or cloud host is configured yet.
 
 ### Repository state
@@ -78,7 +80,7 @@ Development service ports bind only to loopback. The local Compose credentials a
 - `make check`: passed.
 - Flake8: passed.
 - Strict mypy: passed for 10 source files.
-- Pytest: 7 passed.
+- Pytest: 13 passed.
 - `make doctor`: passed against the local-lite SQLite profile.
 - `make docker-doctor`: passed against the PostgreSQL-backed Compose profile.
 - PostgreSQL query: passed; the first container replay stored six lineage events.
@@ -86,6 +88,10 @@ Development service ports bind only to loopback. The local Compose credentials a
 - MinIO live health endpoint: passed.
 - API `/health/ready`: ready, database healthy, risk/restriction versions loaded, live trading false.
 - Container vertical slice: risk verdict `APPROVE`; order state `RECORDED_NOT_SUBMITTED`.
+- Alpaca entitlements: SIP historical REST, OPRA option snapshot REST, and SIP WebSocket authentication passed.
+- Real historical test: 391 AAPL one-minute bars inserted, zero duplicates after identical replay.
+- Real options test: 10 AAPL option snapshots inserted from one bounded page, zero duplicates after replay.
+- Live trade/quote/bar normalization and persistence: synthetic frames passed; real frames await an open market session.
 - Repository secret-pattern scan: passed after fixing a scanner self-match.
 
 ## Product intent and invariant boundaries
@@ -104,7 +110,7 @@ Non-negotiable boundaries:
 
 ## Architecture
 
-### Implemented Phase 0 architecture
+### Implemented architecture
 
 ```mermaid
 flowchart LR
@@ -120,11 +126,13 @@ flowchart LR
     RISK --> LEDGER
     SHADOW --> LEDGER
     LEDGER --> DB["SQLite local-lite / PostgreSQL Compose"]
-    REDIS["Redis provisioned"]
-    MINIO["MinIO provisioned"]
+    ALPACA["Alpaca SIP / OPRA read-only"] --> INGEST["Historical + snapshot + stream adapters"]
+    INGEST --> MINIO["MinIO raw archive"]
+    INGEST --> DB
+    INGEST --> REDIS["Redis Streams"]
 ```
 
-Redis and MinIO are provisioned and healthy but are not yet connected to the Phase 0 event/data paths. SQLAlchemy currently initializes the ledger schema with `create_all`; Alembic migrations are the next persistence step.
+Alembic migrations own the PostgreSQL/SQLite schema. Redis and MinIO are connected to the Phase 1 ingestion path. The live stream client authenticates and normalizes trades, quotes, and minute bars; a real open-session frame capture remains outstanding.
 
 ### Target architecture
 
@@ -189,6 +197,12 @@ flowchart TB
 | Restriction configuration | `configs/restricted_securities.yaml` | effective-dated denylist containing META |
 | Local orchestration | `docker-compose.yml` | API, PostgreSQL, Redis, MinIO |
 | Deployment skeleton | `compose.production.yml`, `infra/deploy/` | guarded shadow/paper VPS deployment path |
+| Alpaca REST adapter | `src/agentic_quant/providers/alpaca.py` | SIP bars, OPRA snapshots, entitlement checks |
+| Alpaca stream adapter | `src/agentic_quant/providers/alpaca_stream.py` | SIP authentication, subscription, reconnect, normalization |
+| Raw archive | `src/agentic_quant/archive.py` | content-addressed local or MinIO JSON evidence |
+| Market persistence | `src/agentic_quant/market_store.py` | idempotent bars, trades, quotes, options, ingestion runs |
+| Event transport | `src/agentic_quant/event_bus.py` | Redis Streams publisher with local no-op fallback |
+| Schema migrations | `migrations/` | Alembic schema history through Phase 1 |
 
 ## Current executable risk baseline
 
@@ -219,6 +233,9 @@ Implemented endpoints:
 - `GET /v1/events`
 - `GET /v1/decisions/{correlation_id}`
 - `POST /v1/demo/run`
+- `POST /v1/demo/market-data`
+- `GET /v1/data-health`
+- Development-only read-only Alpaca probe, bar backfill, and option snapshot endpoints.
 - `POST /v1/commands/pause`
 - `POST /v1/commands/resume`, restricted to development + shadow mode
 
@@ -292,6 +309,15 @@ The Compose stack is currently intended to remain running for local inspection. 
 - The user requested one persistent `context.md` containing iterations, project discussions, architecture changes, every commit's content and post-commit global state, and the latest global architecture.
 - Decision: this document becomes required agent reading and maintenance. README and `AGENTS.md` enforce that workflow.
 
+### D009 — Phase 1 read-only Alpaca integration
+
+- Date: 2026-09-03 PDT.
+- The user confirmed a paid Alpaca subscription and authorized direct local credential configuration.
+- Credentials are stored only in ignored `.env`; values are intentionally absent from source, logs, this context, and Git.
+- Live-money and broker order endpoints remain absent. Phase 1 uses only `data.alpaca.markets` and its market-data WebSocket.
+- SIP historical bars, OPRA option snapshots, and SIP WebSocket authentication were verified against the real service.
+- Because the credential was supplied through chat, rotation after the current validation is recommended.
+
 ## Iteration and commit ledger
 
 ### C001 — `Bootstrap safety-first Phase 0 environment`
@@ -321,7 +347,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C002 — `Add durable master project context`
 
-- Git hash: resolve with `git log --grep='Add durable master project context'` after commit.
+- Git hash: `ab7e620`
 - Date: 2026-09-03 PDT.
 - Scope:
   - Added `context.md` as the comprehensive project memory and iteration ledger.
@@ -338,17 +364,50 @@ The Compose stack is currently intended to remain running for local inspection. 
   - Future agents can recover current architecture, decisions, environment status, open work, and change history from the repository without chat access.
   - Every future substantive commit must include its own predeclared context entry.
 
+### C003 — `Add read-only Alpaca market-data foundation`
+
+- Git hash: resolve with `git log --grep='Add read-only Alpaca market-data foundation'` after commit.
+- Date: 2026-09-03 PDT.
+- User intent: begin Phase 1 by connecting the paid Alpaca data subscription and verifying the data pipeline end to end.
+- Scope:
+  - Added Alembic and three migrations for the ledger, ingestion runs, raw-object manifests, equity bars/trades/quotes, and option snapshots.
+  - Added typed provider contracts and a read-only Alpaca REST adapter.
+  - Added SIP historical bar pagination and normalization with raw corporate-action adjustment policy.
+  - Added OPRA option-chain snapshot pagination and normalization.
+  - Added a SIP WebSocket client with authentication, subscription, retries, reconnects, and trade/quote/bar normalization.
+  - Added content-addressed filesystem and MinIO raw archives.
+  - Added idempotent PostgreSQL/SQLite market stores and Redis Stream publication.
+  - Added ingestion CLIs, development-only API controls, data-health reporting, and a full-infrastructure synthetic data test.
+  - Optimized Docker dependency caching and passed ignored local credentials into the development API container.
+- Architecture/decision impact:
+  - The market-data boundary is provider-specific only inside adapters; normalized schemas contain no Alpaca field names.
+  - Market data is stored before downstream strategy use; broker/order APIs remain completely absent.
+  - Raw historical bars default to `adjustment=raw` to avoid silently applying future corporate actions.
+- Validation:
+  - SIP historical REST, OPRA snapshot REST, and SIP WebSocket authentication succeeded with the user's account.
+  - 391 real AAPL minute bars passed Alpaca → MinIO → PostgreSQL → Redis; identical replay inserted zero records and emitted zero new events.
+  - 10 real AAPL option snapshots passed the same path; identical replay inserted zero records and emitted zero new events.
+  - Synthetic live trade/quote/bar frame persistence and deduplication passed.
+  - Full lint and strict type checking passed across the Phase 1 source and migrations.
+  - Thirteen unit/integration tests passed.
+  - Docker doctor, Alembic migration head `20260904_0003`, and secret scan passed.
+  - The final database checks found 391 Alpaca equity bars, 10 Alpaca option snapshots, and zero duplicate identities in both tables.
+- Expected global state after commit:
+  - Phase 1 historical equity and bounded option-snapshot ingestion are operational.
+  - SIP streaming is authenticated and the live frame path is implemented, but real frame persistence remains unverified until market hours.
+  - Gap repair, durable consumer groups/outbox, and broader data-quality monitoring remain open.
+
 ## Open work
 
 Ordered near-term work:
 
-1. Add Alembic migrations and remove production reliance on SQLAlchemy `create_all`.
-2. Add authentication, authorization, CSRF protection where relevant, and TLS before remote Control API exposure.
-3. Introduce transport-independent provider interfaces and deterministic replay fixtures.
-4. Revalidate current Alpaca SIP/OPRA/paper entitlements, retention, licensing, and rate limits.
-5. Implement Redis Streams event delivery, durable offsets, idempotent consumers, and dead-letter replay.
-6. Connect raw payload archival to MinIO/S3-compatible storage with manifests and retention rules.
-7. Implement a point-in-time feature registry and offline/online parity tests.
+1. Capture real SIP trades/quotes/bars during an open market session and validate reconnect behavior.
+2. Add market-session-aware gap detection and automatic REST repair.
+3. Add Redis consumer groups, a transactional outbox, and dead-letter replay.
+4. Add provider lag, sequence-gap, bar/trade reconciliation, and data-quality dashboards.
+5. Confirm Alpaca retention/licensing and determine the long-history options vendor.
+6. Implement a point-in-time feature registry and offline/online parity tests.
+7. Add authentication and authorization before any remote Control API exposure.
 8. Add baseline strategies and realistic fill simulation before predictive ML.
 9. Expand the UI into the full Trading Control Center and Decision Inspector.
 10. Create a GitHub remote and later validate the cloud pipeline on a selected VPS.
@@ -358,7 +417,6 @@ Ordered near-term work:
 - GitHub organization/repository and branch-protection policy.
 - VPS/cloud provider, region, instance size, and domain/TLS approach.
 - Secure secret-delivery mechanism for the VPS and CI.
-- Current Alpaca subscriptions and entitlements.
 - Historical options, news, fundamentals, and compliant social-data vendors/budgets.
 - Final restricted-security list beyond META/work-related names.
 - Reconciled paper account size and percentage-versus-dollar risk limits.

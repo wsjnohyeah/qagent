@@ -18,6 +18,21 @@ if ! grep -Eq '^LIVE_TRADING_ENABLED=false$' .env.production; then
 fi
 
 docker compose --env-file .env.production -f compose.production.yml pull
+docker compose --env-file .env.production -f compose.production.yml up -d postgres redis
+
+attempt=0
+until docker compose --env-file .env.production -f compose.production.yml exec -T postgres \
+  sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' >/dev/null 2>&1; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -ge 30 ]; then
+    echo "PostgreSQL did not become ready for migration."
+    exit 1
+  fi
+  sleep 2
+done
+
+docker compose --env-file .env.production -f compose.production.yml run --rm --no-deps api \
+  alembic upgrade head
 docker compose --env-file .env.production -f compose.production.yml up -d --remove-orphans
 docker compose --env-file .env.production -f compose.production.yml ps
 

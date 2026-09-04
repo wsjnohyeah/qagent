@@ -76,6 +76,8 @@ curl -fsS http://127.0.0.1:8000/health/ready
 
 The API is loopback-only. Add a TLS reverse proxy only after Control API authentication exists. Do not expose ports 5432 or 6379.
 
+The guarded deploy script starts PostgreSQL, waits for readiness, applies Alembic migrations as a one-shot task, and only then replaces the API. `AUTO_MIGRATE` remains false in the long-running production service.
+
 ## Post-deploy verification
 
 Verify and record:
@@ -95,4 +97,3 @@ Phase 0 is not production-ready for remote access because authentication, migrat
 Keep the prior immutable image tag. To roll back, set `APP_IMAGE` to that prior tag and rerun `infra/deploy/deploy_vps.sh`. Never roll back across an incompatible database migration without its documented restore/migration procedure.
 
 Rollback does not delete volumes. Destructive database recovery requires an explicit operator decision and a verified backup.
-

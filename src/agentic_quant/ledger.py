@@ -2,40 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import (
-    JSON,
-    Column,
-    DateTime,
-    Integer,
-    MetaData,
-    String,
-    Table,
-    create_engine,
-    insert,
-    select,
-    text,
-)
+from sqlalchemy import create_engine, insert, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
 from agentic_quant.domain import EventEnvelope
-
-
-metadata = MetaData()
-ledger_events = Table(
-    "ledger_events",
-    metadata,
-    Column("sequence", Integer, primary_key=True, autoincrement=True),
-    Column("event_id", String(36), nullable=False, unique=True),
-    Column("event_type", String(120), nullable=False, index=True),
-    Column("event_time", DateTime(timezone=True), nullable=False),
-    Column("emitted_at", DateTime(timezone=True), nullable=False),
-    Column("producer", String(80), nullable=False),
-    Column("correlation_id", String(36), nullable=False, index=True),
-    Column("causation_id", String(36), nullable=True),
-    Column("schema_version", Integer, nullable=False),
-    Column("payload", JSON, nullable=False),
-)
+from agentic_quant.database import ledger_events, metadata
 
 
 class EventLedger:

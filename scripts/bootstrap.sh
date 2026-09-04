@@ -18,5 +18,5 @@ fi
 
 cd "$project_root"
 "$uv_bin" sync --all-groups
+"$uv_bin" run alembic upgrade head
 echo "Local environment is ready. Run: make check && make doctor"
-

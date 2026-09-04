@@ -1,6 +1,6 @@
 # Agent operating contract
 
-Read `README.md`, `context.md`, `PROJECT_STATE.md`, and `docs/DEPLOYMENT.md` before changing or deploying this repository.
+Read `README.md`, `context.md`, `PROJECT_STATE.md`, relevant ADRs, and the applicable runbook before changing or deploying this repository.
 
 Non-negotiable rules:
 

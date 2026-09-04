@@ -30,9 +30,15 @@
     <div class="card"><div class="label">Mode</div><div id="mode" class="value">—</div></div>
     <div class="card"><div class="label">Database</div><div id="database" class="value">—</div></div>
     <div class="card"><div class="label">New exposure</div><div id="paused" class="value">—</div></div>
+    <div class="card"><div class="label">Alpaca credentials</div><div id="alpaca" class="value">—</div></div>
+    <div class="card"><div class="label">Market bars</div><div id="bars" class="value">—</div></div>
+    <div class="card"><div class="label">Option snapshots</div><div id="options" class="value">—</div></div>
+    <div class="card"><div class="label">Data services</div><div id="data-services" class="value">—</div></div>
   </section>
   <p>
     <button id="demo">Run synthetic decision</button>
+    <button id="market-demo">Test data pipeline</button>
+    <button id="alpaca-probe" class="secondary">Probe Alpaca</button>
     <button id="pause" class="danger">Pause new exposure</button>
     <button id="resume" class="secondary">Resume dev shadow</button>
   </p>
@@ -47,12 +53,19 @@ async function status() {
   document.querySelector('#mode').textContent = value.trading_mode;
   document.querySelector('#database').textContent = value.database;
   document.querySelector('#paused').textContent = value.new_exposure_paused ? 'PAUSED' : 'ENABLED';
+  document.querySelector('#alpaca').textContent = value.alpaca_configured ? 'CONFIGURED' : 'MISSING';
+  const data = await fetch('/v1/data-health').then(r => r.json());
+  document.querySelector('#bars').textContent = data.market_bars;
+  document.querySelector('#options').textContent = data.option_snapshots;
+  document.querySelector('#data-services').textContent = `${data.raw_archive} / ${data.event_bus}`;
 }
 async function post(url, body) {
   const response = await fetch(url, {method: 'POST', headers: {'Content-Type':'application/json'}, body: body ? JSON.stringify(body) : undefined});
   const value = await response.json(); output.textContent = JSON.stringify(value, null, 2); await status();
 }
 document.querySelector('#demo').onclick = () => post('/v1/demo/run');
+document.querySelector('#market-demo').onclick = () => post('/v1/demo/market-data');
+document.querySelector('#alpaca-probe').onclick = () => post('/v1/market-data/alpaca/probe');
 document.querySelector('#pause').onclick = () => post('/v1/commands/pause', {reason:'operator console test'});
 document.querySelector('#resume').onclick = () => post('/v1/commands/resume', {reason:'operator console test'});
 status().catch(error => output.textContent = String(error));

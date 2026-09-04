@@ -44,6 +44,86 @@ class FeatureSnapshot(FrozenModel):
     quote_age_seconds: int = Field(ge=0)
 
 
+class StockBar(FrozenModel):
+    bar_id: str
+    symbol: str
+    timeframe: str
+    event_time: datetime
+    available_from: datetime
+    open: Decimal = Field(gt=0)
+    high: Decimal = Field(gt=0)
+    low: Decimal = Field(gt=0)
+    close: Decimal = Field(gt=0)
+    volume: int = Field(ge=0)
+    trade_count: int | None = Field(default=None, ge=0)
+    vwap: Decimal | None = Field(default=None, gt=0)
+    source: str
+    feed: str
+    raw_object_id: str
+    ingested_at: datetime
+
+
+class StockTrade(FrozenModel):
+    trade_id: str
+    provider_trade_id: str
+    symbol: str
+    event_time: datetime
+    available_from: datetime
+    price: Decimal = Field(gt=0)
+    size: int = Field(gt=0)
+    exchange: str
+    conditions: tuple[str, ...]
+    tape: str | None = None
+    source: str
+    feed: str
+    raw_object_id: str
+    ingested_at: datetime
+
+
+class StockQuote(FrozenModel):
+    quote_id: str
+    quote_fingerprint: str
+    symbol: str
+    event_time: datetime
+    available_from: datetime
+    bid_exchange: str
+    bid_price: Decimal = Field(ge=0)
+    bid_size: int = Field(ge=0)
+    ask_exchange: str
+    ask_price: Decimal = Field(ge=0)
+    ask_size: int = Field(ge=0)
+    conditions: tuple[str, ...]
+    tape: str | None = None
+    source: str
+    feed: str
+    raw_object_id: str
+    ingested_at: datetime
+
+
+class OptionSnapshot(FrozenModel):
+    option_snapshot_id: str
+    contract_symbol: str
+    underlying_symbol: str
+    as_of: datetime
+    available_from: datetime
+    bid_price: Decimal | None = Field(default=None, ge=0)
+    bid_size: int | None = Field(default=None, ge=0)
+    ask_price: Decimal | None = Field(default=None, ge=0)
+    ask_size: int | None = Field(default=None, ge=0)
+    last_trade_price: Decimal | None = Field(default=None, ge=0)
+    last_trade_size: int | None = Field(default=None, ge=0)
+    implied_volatility: Decimal | None = Field(default=None, ge=0)
+    delta: Decimal | None = None
+    gamma: Decimal | None = None
+    theta: Decimal | None = None
+    vega: Decimal | None = None
+    rho: Decimal | None = None
+    source: str
+    feed: str
+    raw_object_id: str
+    ingested_at: datetime
+
+
 class SignalCandidate(FrozenModel):
     candidate_id: str
     symbol: str
@@ -108,4 +188,3 @@ class DecisionBundle(FrozenModel):
     risk_decision: RiskDecision
     trade_plan: TradePlan | None = None
     shadow_order: ShadowOrder | None = None
-
