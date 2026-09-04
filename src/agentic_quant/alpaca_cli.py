@@ -86,6 +86,7 @@ async def _backfill(settings: Settings, args: argparse.Namespace) -> None:
                 symbol=args.symbol,
                 start=args.start,
                 end=args.end,
+                timeframe=args.timeframe,
                 feed=settings.alpaca_stock_feed,
             )
         )
@@ -202,10 +203,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Read-only Alpaca market-data operations")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("probe", help="Check SIP and OPRA data entitlements")
-    backfill = subparsers.add_parser("backfill", help="Ingest raw one-minute equity bars")
+    backfill = subparsers.add_parser("backfill", help="Ingest raw equity bars")
     backfill.add_argument("symbol")
     backfill.add_argument("--start", required=True, type=_parse_time)
     backfill.add_argument("--end", required=True, type=_parse_time)
+    backfill.add_argument("--timeframe", choices=("1Min", "1Day"), default="1Min")
     options = subparsers.add_parser(
         "option-snapshot",
         help="Ingest a read-only option-chain snapshot",

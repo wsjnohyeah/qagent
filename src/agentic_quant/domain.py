@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any
+from typing import Any, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class FrozenModel(BaseModel):
@@ -42,6 +42,189 @@ class FeatureSnapshot(FrozenModel):
     opening_range_confirmed: bool
     sector_compatible: bool
     quote_age_seconds: int = Field(ge=0)
+
+
+class SignalAction(StrEnum):
+    LONG = "long"
+    SHORT = "short"
+    FLAT = "flat"
+
+
+class ExperimentStatus(StrEnum):
+    COMPLETED = "COMPLETED"
+    REJECTED = "REJECTED"
+    FAILED = "FAILED"
+
+
+class EvidenceReference(FrozenModel):
+    evidence_type: str
+    evidence_id: str
+    event_time: datetime
+    available_from: datetime
+    source: str
+
+
+class EvidencePacket(FrozenModel):
+    evidence_packet_id: str
+    symbol: str
+    as_of: datetime
+    evidence_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    references: tuple[EvidenceReference, ...]
+    source_max_available_from: datetime
+    created_at: datetime
+
+    @model_validator(mode="after")
+    def evidence_is_point_in_time_safe(self) -> Self:
+        if self.source_max_available_from > self.as_of:
+            raise ValueError("Evidence packet contains information unavailable at as_of")
+        if any(reference.available_from > self.as_of for reference in self.references):
+            raise ValueError("Evidence reference is unavailable at packet as_of")
+        if any(reference.event_time > self.as_of for reference in self.references):
+            raise ValueError("Evidence reference occurs after packet as_of")
+        return self
+
+
+class PointInTimeFeatureSnapshot(FrozenModel):
+    feature_snapshot_id: str
+    evidence_packet_id: str
+    symbol: str
+    timeframe: str
+    as_of: datetime
+    feature_set_version: str
+    values: dict[str, Decimal | int | bool | str | None]
+    source_max_available_from: datetime
+    data_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    created_at: datetime
+
+    @model_validator(mode="after")
+    def features_are_point_in_time_safe(self) -> Self:
+        if self.source_max_available_from > self.as_of:
+            raise ValueError("Feature snapshot contains information unavailable at as_of")
+        return self
+
+
+class Forecast(FrozenModel):
+    forecast_id: str
+    symbol: str
+    as_of: datetime
+    horizon: str
+    expected_return: Decimal
+    probability_up: Decimal = Field(ge=0, le=1)
+    uncertainty: Decimal = Field(ge=0)
+    model_version: str
+    training_data_cutoff: datetime
+    feature_snapshot_id: str
+
+    @model_validator(mode="after")
+    def training_cutoff_is_safe(self) -> Self:
+        if self.training_data_cutoff > self.as_of:
+            raise ValueError("Forecast training data cutoff cannot be after as_of")
+        return self
+
+
+class ResearchSignal(FrozenModel):
+    signal_id: str
+    symbol: str
+    as_of: datetime
+    horizon: str
+    action: SignalAction
+    conviction: Decimal = Field(ge=0, le=1)
+    expected_return: Decimal | None = None
+    uncertainty: Decimal | None = Field(default=None, ge=0)
+    strategy_version: str
+    feature_snapshot_id: str
+    evidence_ids: tuple[str, ...]
+
+
+class StrategySpec(FrozenModel):
+    strategy_spec_id: str
+    name: str
+    version: str
+    strategy_type: str
+    timeframe: str
+    feature_set_version: str
+    parameters: dict[str, Any]
+    data_requirements: dict[str, Any]
+    code_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    created_at: datetime
+
+
+class BacktestCostModel(FrozenModel):
+    commission_per_share: Decimal = Field(default=Decimal("0.0049"), ge=0)
+    minimum_commission_per_order: Decimal = Field(default=Decimal("0.99"), ge=0)
+    slippage_bps_per_side: Decimal = Field(default=Decimal("2.0"), ge=0)
+
+
+class BacktestMetrics(FrozenModel):
+    initial_equity: Decimal = Field(gt=0)
+    final_equity: Decimal = Field(ge=0)
+    net_profit: Decimal
+    total_return: Decimal
+    annualized_return: Decimal
+    sharpe_ratio: Decimal
+    sortino_ratio: Decimal
+    max_drawdown: Decimal = Field(le=0)
+    trade_count: int = Field(ge=0)
+    win_rate: Decimal = Field(ge=0, le=1)
+    turnover: Decimal = Field(ge=0)
+    total_cost: Decimal = Field(ge=0)
+
+
+class BacktestTrade(FrozenModel):
+    trade_id: str
+    experiment_run_id: str
+    symbol: str
+    action: SignalAction
+    signal_as_of: datetime
+    entry_time: datetime
+    exit_time: datetime
+    quantity: int = Field(gt=0)
+    entry_price: Decimal = Field(gt=0)
+    exit_price: Decimal = Field(gt=0)
+    gross_pnl: Decimal
+    transaction_cost: Decimal = Field(ge=0)
+    net_pnl: Decimal
+    feature_snapshot_id: str
+    exit_reason: str
+
+    @model_validator(mode="after")
+    def execution_follows_signal(self) -> Self:
+        if self.entry_time < self.signal_as_of:
+            raise ValueError("Trade entry cannot precede signal availability")
+        if self.exit_time < self.entry_time:
+            raise ValueError("Trade exit cannot precede entry")
+        return self
+
+
+class ExperimentRun(FrozenModel):
+    experiment_run_id: str
+    strategy_spec_id: str
+    symbol: str
+    timeframe: str
+    as_of_start: datetime
+    as_of_end: datetime
+    dataset_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    code_git_sha: str
+    status: ExperimentStatus
+    cost_model: BacktestCostModel
+    metrics: BacktestMetrics
+    feature_snapshot_ids: tuple[str, ...]
+    started_at: datetime
+    finished_at: datetime
+
+    @model_validator(mode="after")
+    def run_interval_is_valid(self) -> Self:
+        if self.as_of_start >= self.as_of_end:
+            raise ValueError("Experiment as_of_start must be before as_of_end")
+        if self.finished_at < self.started_at:
+            raise ValueError("Experiment finished_at cannot precede started_at")
+        return self
+
+
+class BacktestResult(FrozenModel):
+    experiment: ExperimentRun
+    strategy_spec: StrategySpec
+    trades: tuple[BacktestTrade, ...]
 
 
 class StockBar(FrozenModel):

@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     social_aggregate_url: str | None = None
     social_aggregate_token: SecretStr | None = None
     market_calendar: str = "XNYS"
+    source_git_sha: str | None = None
     api_host: str = "127.0.0.1"
     api_port: int = Field(default=8000, ge=1, le=65535)
 

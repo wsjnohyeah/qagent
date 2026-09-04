@@ -2,7 +2,10 @@ name: agentic-quant
 
 services:
   api:
-    build: .
+    build:
+      context: .
+      args:
+        SOURCE_GIT_SHA: ${SOURCE_GIT_SHA:-UNAVAILABLE}
     env_file:
       - .env
     environment:

@@ -1,6 +1,6 @@
 # Agentic Quant Trading System
 
-A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton, the read-only **Phase 1** market-data foundation, and the completed **Phase 2** point-in-time event/document pipeline.
+A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton, the read-only **Phase 1** market-data foundation, the completed **Phase 2** event/document pipeline, and the first **Phase 3A** point-in-time research vertical slice.
 
 > Live-money execution is not implemented. `live` is not a valid mode, and setting `LIVE_TRADING_ENABLED=true` makes startup fail.
 
@@ -43,6 +43,11 @@ The Phase 2 path archives and normalizes SEC filings/company facts, approved iss
 feeds, and Alpaca News. It preserves document versions and source timing, resolves issuer
 entities, and links near-duplicate coverage to one catalyst without using an LLM.
 
+Phase 3A adds immutable evidence packets, research feature snapshots, strategy
+specifications, experiment runs, and backtest trades. Its baseline runner enforces
+next-bar execution and nonzero commission/slippage. This is research-infrastructure
+validation, not a profitable-strategy claim.
+
 ## Commands
 
 | Command | Purpose |
@@ -52,6 +57,7 @@ entities, and links near-duplicate coverage to one catalyst without using an LLM
 | `make doctor` | Boot the API, check readiness, and run the synthetic vertical slice |
 | `make run` | Start the local Control API/UI with reload |
 | `make demo` | Run the vertical slice in the terminal |
+| `make research-smoke` | Run and persist three deterministic Phase 3A research baselines |
 | `make docker-up` | Start PostgreSQL, Redis, MinIO, and API when Docker is installed |
 | `make docker-doctor` | Verify every container and the PostgreSQL-backed shadow slice |
 | `make docker-alpaca-probe` | Verify SIP/OPRA REST access and SIP WebSocket authentication |
@@ -113,6 +119,10 @@ Ingest historical one-minute bars:
   --end 2026-09-02T20:00:00Z
 ```
 
+Use `--timeframe 1Day` for a bounded daily-history backfill. Daily bars are marked
+available only on the following UTC day, preventing same-day close information from
+entering a decision.
+
 Ingest one bounded page of an option-chain snapshot:
 
 ```sh
@@ -159,6 +169,32 @@ Search normalized evidence with `quant-events search`, `GET /v1/documents/search
 Social aggregates are feature-flagged off until a licensed provider is selected. See
 `runbooks/event_documents.md` for the full operating and source-trust policy.
 
+## Phase 3A: point-in-time research
+
+Run the isolated research health check:
+
+```sh
+make research-smoke
+```
+
+It creates deterministic synthetic daily bars in ignored local storage, materializes
+point-in-time feature snapshots, and runs buy-and-hold, momentum, and mean-reversion
+baselines. Every experiment records its data hash, strategy/code version, cost model,
+metrics, trades, feature lineage, and ledger event.
+
+To run a baseline on stored real daily bars:
+
+```sh
+quant-research run AAPL \
+  --strategy momentum \
+  --timeframe 1Day \
+  --start 2023-10-01T00:00:00Z \
+  --end 2026-09-04T00:00:00Z
+```
+
+See `runbooks/research.md` and ADR 0006 for the exact point-in-time invariants, known
+limitations, and research/runtime authority boundary.
+
 ## Repository map
 
 ```text
@@ -169,7 +205,7 @@ docs/adr/                architectural decisions
 docs/DEPLOYMENT.md       exact handoff contract for a cloud deployment agent
 context.md               master context, architecture, discussions, iterations, commits
 infra/deploy/            guarded VPS deployment entry point
-runbooks/                 operational procedures, including market-data checks
+runbooks/                 market-data, event/document, and research operations
 PROJECT_STATE.md         Current / Next / Blocked / Decisions
 AGENTS.md                mandatory operating rules for coding/deployment agents
 ```
@@ -186,6 +222,7 @@ AGENTS.md                mandatory operating rules for coding/deployment agents
 - `GET /v1/data-health`
 - `GET /v1/documents/search`
 - `GET /v1/catalysts`
+- `GET /v1/research/experiments`
 - `POST /v1/market-data/alpaca/probe` — development only
 - `POST /v1/market-data/alpaca/backfill` — development only
 - `POST /v1/market-data/alpaca/option-snapshot` — development only

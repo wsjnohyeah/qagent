@@ -1,12 +1,12 @@
 # Master Project Context
 
-Last updated: 2026-09-03 PDT
+Last updated: 2026-09-04 PDT
 
 Context format: v1
 
-Current phase: Phase 2 complete; Phase 1B open-session verification pending
+Current phase: Phase 3A research foundation implemented; Phase 1B open-session verification pending
 
-Current documented baseline: C007 — `Record agentic research philosophy`
+Current documented baseline: C008 — `Add point-in-time research foundation`
 
 ## Purpose and authority
 
@@ -34,13 +34,19 @@ A Git commit cannot contain its own content-derived hash without changing that h
 
 ### Product state
 
-- The repository contains completed Phase 0 safety and Phase 2 event/document foundations, plus a Phase 1 read-only market-data foundation with open-session verification pending. It is not a profitable or production-ready trading system.
+- The repository contains completed Phase 0 safety and Phase 2 event/document foundations,
+  a Phase 1 read-only market-data foundation with open-session verification pending, and an
+  implemented Phase 3A point-in-time research vertical slice. It is not a profitable or
+  production-ready trading system.
 - Supported conceptual modes are `research`, `backtest`, `shadow`, and `paper`.
 - The executable settings intentionally omit `live`; `LIVE_TRADING_ENABLED=true` fails validation.
 - The original synthetic shadow path remains operational and makes no broker call.
 - A read-only Alpaca adapter now retrieves SIP historical stock bars, OPRA option-chain snapshots, and authenticates to the SIP stock WebSocket.
 - Real provider responses flow through content-addressed MinIO raw storage, normalized PostgreSQL tables, the append-only event ledger, and Redis Streams.
 - Alpaca News, SEC EDGAR, and an approved-host IR feed have passed live read-only ingestion. The social aggregate adapter is implemented but disabled by default. No LLM, predictive model, or broker adapter is connected.
+- Phase 3A persists immutable evidence packets, feature snapshots, strategy specifications,
+  experiment runs, and backtest trades. Three deterministic baselines run with next-bar
+  execution and nonzero commission/slippage; their output is infrastructure evidence only.
 - No GitHub remote or cloud host is configured yet.
 
 ### Repository state
@@ -79,8 +85,8 @@ Development service ports bind only to loopback. The local Compose credentials a
 
 - `make check`: passed.
 - Flake8: passed.
-- Strict mypy: passed for 29 source files.
-- Pytest: 22 passed.
+- Strict mypy: passed for 32 source files.
+- Pytest: 26 passed.
 - `make doctor`: passed against the local-lite SQLite profile.
 - `make docker-doctor`: passed against the PostgreSQL-backed Compose profile.
 - PostgreSQL query: passed; the first container replay stored six lineage events.
@@ -96,7 +102,16 @@ Development service ports bind only to loopback. The local Compose credentials a
 - Real primary-source test: 10 entries from Apple's official Newsroom RSS feed passed the same path; identical replay inserted zero documents, versions, catalysts, links, or events.
 - Real SEC test: 20 AAPL filing records produced 19 catalysts and 20 links; identical replay inserted zero new records or events. A bounded 250-record AAPL XBRL facts run also replayed with zero duplicates.
 - Phase 2 fixtures verify primary/secondary source distinction, correction-version retention, SEC filing and XBRL normalization, IR feed parsing, and cross-document catalyst deduplication.
-- Alembic migrations through `20260904_0006` own the Phase 2 schema, including issuer aliases and exact document-symbol tags.
+- Alembic migrations through `20260904_0007` own the Phase 3A schema; a fresh SQLite
+  upgrade/check/downgrade/re-upgrade cycle passed with no schema diff.
+- `make research-smoke`: passed with 100 deterministic daily bars, 79 deduplicated evidence
+  packets/features, three immutable experiments, and nonzero cost modeling.
+- Real daily-data test: 754 AAPL and 754 SPY SIP daily bars from 2023-09-01 through
+  2026-09-04 were archived and normalized; identical replays inserted zero bars.
+- Real baseline runs completed on stored daily bars. AAPL buy-and-hold, momentum, and mean
+  reversion and SPY buy-and-hold produced reproducible dataset hashes, feature lineage,
+  trades, costs, and metrics. These exploratory full-period results are not holdout evidence
+  and do not establish strategy validity.
 - Repository secret-pattern scan: passed after fixing a scanner self-match.
 
 ## Product intent and invariant boundaries
@@ -280,9 +295,23 @@ flowchart LR
     INGEST --> MINIO["MinIO raw archive"]
     INGEST --> DB
     INGEST --> REDIS["Redis Streams"]
+    DB --> PITEVIDENCE["PIT evidence packets"]
+    PITEVIDENCE --> PITFEATURES["PIT feature snapshots"]
+    PITSPEC["Versioned baseline StrategySpec"] --> BASELINE["Cost-aware baseline runner"]
+    PITFEATURES --> BASELINE
+    BASELINE --> EXPERIMENT["Immutable experiment + trades"]
+    EXPERIMENT --> DB
+    EXPERIMENT --> LEDGER
 ```
 
 Alembic migrations own the PostgreSQL/SQLite schema. Redis and MinIO are connected to both ingestion paths. The market stream client authenticates, reconnects with bounded exponential backoff, normalizes trades/quotes/minute bars, and requests historical repair for XNYS-session gaps; a real open-session frame capture remains outstanding. The Phase 2 path versions source documents, retains publication/ingestion/correction time, classifies source trust, resolves issuer entities, normalizes SEC facts, and deterministically links similar multi-source coverage to one catalyst.
+
+The Phase 3A research path selects only evidence whose event and availability times are no
+later than each snapshot's `as_of`, calculates a versioned price/event feature set, and runs
+buy-and-hold, long/cash momentum, or long/cash mean-reversion baselines. Signals fill no
+earlier than the next bar, every run has nonzero default costs, and source/feature/dataset/code
+hashes are retained. Walk-forward validation, universe history, corporate-action processing,
+and a production-grade event-driven fill simulator remain open.
 
 ### Target architecture
 
@@ -355,7 +384,7 @@ a versioned candidate, independent validation, and explicit promotion.
 | Area | Location | Current responsibility |
 |---|---|---|
 | Settings safety | `src/agentic_quant/config.py` | typed environments/modes; rejects live enablement |
-| Domain contracts | `src/agentic_quant/domain.py` | immutable feature, candidate, risk, plan, order, event models |
+| Domain contracts | `src/agentic_quant/domain.py` | immutable evidence, research, strategy, experiment, risk, plan, order, and event models |
 | IDs | `src/agentic_quant/ids.py` | RFC 9562 UUIDv7 generation |
 | Risk engine | `src/agentic_quant/risk.py` | deterministic gates and equity position sizing |
 | Event ledger | `src/agentic_quant/ledger.py` | append-only SQL event storage and lineage queries |
@@ -376,7 +405,10 @@ a versioned candidate, independent validation, and explicit promotion.
 | Event ingestion | `src/agentic_quant/document_ingestion.py` | raw-first document/fact ingestion and normalized events |
 | Document persistence | `src/agentic_quant/document_store.py` | immutable versions, entities, search, catalyst dedup, SEC facts |
 | Event operations | `src/agentic_quant/event_cli.py` | bounded provider ingestion, search, and health CLI |
-| Schema migrations | `migrations/` | Alembic schema history through Phase 2 |
+| Research engine | `src/agentic_quant/research.py` | point-in-time price/event features and cost-aware deterministic baselines |
+| Research persistence | `src/agentic_quant/research_store.py` | immutable evidence/features/specs/experiments/trades and as-of reads |
+| Research operations | `src/agentic_quant/research_cli.py` | synthetic smoke, stored-data baseline runs, and experiment listing |
+| Schema migrations | `migrations/` | Alembic schema history through Phase 3A |
 
 ## Current executable risk baseline
 
@@ -411,6 +443,7 @@ Implemented endpoints:
 - `GET /v1/data-health`
 - `GET /v1/documents/search`
 - `GET /v1/catalysts`
+- `GET /v1/research/experiments`
 - Development-only read-only Alpaca probe, bar backfill, and option snapshot endpoints.
 - Development-only Alpaca News, SEC filing, and SEC company-facts ingestion endpoints.
 - `POST /v1/commands/pause`
@@ -422,6 +455,7 @@ Routine commands:
 make bootstrap
 make check
 make doctor
+make research-smoke
 make docker-up
 make docker-doctor
 make docker-event-health
@@ -544,6 +578,23 @@ The Compose stack is currently intended to remain running for local inspection. 
   show material degradation of several headline LLM results.
 - This is a target-architecture decision. It does not move LLM work into the current phase,
   introduce a model dependency, authorize paper submission, or alter the live-money ban.
+
+### D013 — Phase 3A point-in-time research foundation
+
+- Date: 2026-09-04 PDT.
+- The user authorized the next milestone after reviewing the proposed Phase 3A scope.
+- Decision: implement the minimum complete research loop now—typed evidence/features/specs,
+  immutable experiment storage, point-in-time guards, next-bar execution, explicit costs,
+  simple baselines, a one-command smoke path, and real daily-data verification.
+- Daily Alpaca bars are supported with `adjustment=raw`; `available_from` is conservatively
+  assigned to the following UTC day. This prevents use of a completed daily bar in a
+  same-day decision but is not yet an exchange-close-exact availability model.
+- Buy-and-hold, momentum, and mean-reversion are infrastructure baselines. Their full-period
+  results are never promotion evidence and must not be described as discovered alpha.
+- Strategy content is immutable by name/version; the initial generated version includes a
+  strategy-code hash prefix. Every experiment separately records the complete strategy code
+  hash, source Git SHA, dataset hash, feature IDs, cost model, metrics, and trades.
+- Formal record: `docs/adr/0006-point-in-time-research-foundation.md`.
 
 ## Iteration and commit ledger
 
@@ -720,7 +771,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C007 — `Record agentic research philosophy`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `261d23f`
 - Date: 2026-09-03 PDT.
 - User intent: preserve the latest complete product understanding as the project's durable
   philosophical and architectural guidance, with citations to relevant papers and projects.
@@ -750,26 +801,75 @@ The Compose stack is currently intended to remain running for local inspection. 
   - No runtime code, dependency, provider configuration, current phase, or trading
     authorization changes.
 
+### C008 — `Add point-in-time research foundation`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-04 PDT.
+- User intent: proceed with Phase 3A and build the point-in-time feature/backtest research
+  vertical slice.
+- Scope:
+  - Added typed `EvidencePacket`, point-in-time feature, forecast, signal, `StrategySpec`,
+    cost, trade, metrics, and `ExperimentRun` contracts.
+  - Added Alembic revision `20260904_0007` for immutable evidence packets, feature
+    snapshots, strategy specifications, experiment runs, and backtest trades.
+  - Added an as-of research store that filters market, catalyst, and corporate-fact evidence
+    by both event and availability time and deduplicates identical evidence/features.
+  - Added the `price_event_pit@0.1.0` feature set: price returns, moving averages,
+    realized volatility, relative volume, and time-safe catalyst/fact counts.
+  - Added cost-aware buy-and-hold, long/cash momentum, and long/cash mean-reversion
+    baselines with next-bar execution and immutable result lineage.
+  - Added `quant-research smoke|run|list`, `make research-smoke`, and the read-only
+    `/v1/research/experiments` endpoint.
+  - Extended the read-only Alpaca adapter and CLI to ingest `1Day` bars with conservative
+    availability timestamps.
+  - Added ADR 0006, a research runbook, README setup/usage instructions, Docker build Git
+    provenance, project-state updates, and new invariant/API/provider tests.
+- Architecture/decision impact:
+  - The first implemented research plane now sits between normalized evidence and any
+    future LLM/ML generation. It produces empirical artifacts but has no path to broker
+    submission or new runtime authority.
+  - Fast baseline replay is deliberately a first-stage screen; production-grade
+    event-driven fills, corporate-action handling, universe history, walk-forward analysis,
+    and promotion gates remain required before predictive research.
+- Validation:
+  - Flake8, strict mypy across 32 source files, and 26 tests passed.
+  - Fresh SQLite upgrade/check/downgrade/re-upgrade through migration `20260904_0007`
+    passed with no schema diff.
+  - `make research-smoke` completed three synthetic baseline experiments with immutable
+    feature, experiment, trade, cost, hash, and ledger records.
+  - Docker image rebuild and PostgreSQL-backed doctor passed after one transient Docker Hub
+    metadata timeout resolved on retry.
+  - Real AAPL and SPY daily backfills each inserted 754 bars; identical replays inserted
+    zero. Four real-data baseline runs completed and were visible through the API.
+  - A concurrent real-data run exposed a strategy-registration race; registration now uses
+    database-native conflict handling, and the idempotent replay regression test passes.
+  - Final local doctor, Docker/PostgreSQL doctor, compact research API check, repository
+    secret scan, and `git diff --check` passed.
+- Expected global state after commit:
+  - Phase 3A's reproducible research foundation is operational in SQLite and PostgreSQL.
+  - Real daily data exists locally for AAPL and SPY; runtime data remains ignored and is not
+    part of Git.
+  - Phase 1B remains pending until the U.S. market is open. LLM/ML strategy generation,
+    final validation gates, paper broker submission, and live-money execution remain absent.
+
 ## Open work
 
 Ordered near-term work:
 
 1. During the next U.S. market session, finish Phase 1B real frame/reconnect/gap checks.
-2. Begin Phase 3 with point-in-time `EvidencePacket`/`FeatureSnapshot` contracts and
-   offline/online parity tests.
-3. Add `Forecast`, `Signal`, `StrategySpec`, and `ExperimentRun` contracts plus an immutable
-   experiment registry.
-4. Build simple rule/statistical baselines and realistic event-driven fill/cost simulation
-   before predictive ML or LLM strategy evaluation.
-5. Add walk-forward/regime reports and overfitting diagnostics, then define explicit
+2. Add exchange-close-exact daily availability, corporate-action processing, and
+   point-in-time historical universe membership.
+3. Add offline/online feature parity and a production-grade event-driven fill simulator.
+4. Add walk-forward/regime reports and overfitting diagnostics, then define explicit
    candidate/champion promotion thresholds.
+5. Expand the real research universe beyond AAPL/SPY and identify a long-history options
+   data source with suitable retention and licensing.
 6. Add Redis consumer groups, a transactional outbox, dead-letter replay, provider lag,
    sequence-gap, reconciliation, and data-quality dashboards.
 7. Build a labeled corpus and measure cross-provider catalyst dedup precision/recall.
-8. Confirm data retention/licensing and obtain sufficient point-in-time history, including
-   delisted constituents, corporate actions, and a long-history options vendor.
-9. Implement the LLM strategy-research orchestrator only after the experiment and validation
+8. Implement the LLM strategy-research orchestrator only after the experiment and validation
    contracts can independently reject its candidates.
+9. Add calibrated ML baselines and a deterministic ensemble/experiment scheduler.
 10. Add authentication/authorization, expand the Trading Control Center, create the GitHub
     remote, and later validate the guarded cloud pipeline on a selected VPS.
 

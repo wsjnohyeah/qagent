@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -45,6 +45,7 @@ from agentic_quant.providers.documents import (
 )
 from agentic_quant.providers.synthetic import SyntheticMarketDataProvider
 from agentic_quant.risk import RestrictionRegistry, RiskPolicy
+from agentic_quant.research_store import ResearchStore
 
 
 class OperatorCommand(BaseModel):
@@ -55,6 +56,7 @@ class BackfillRequest(BaseModel):
     symbol: str = Field(min_length=1, max_length=24, pattern=r"^[A-Za-z.\-]+$")
     start: datetime
     end: datetime
+    timeframe: Literal["1Min", "1Day"] = "1Min"
 
 
 class OptionSnapshotRequest(BaseModel):
@@ -88,6 +90,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app_settings = settings or Settings()
     ledger = EventLedger(app_settings.database_url)
     document_store = DocumentStore(ledger.engine)
+    research_store = ResearchStore(ledger.engine)
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):  # type: ignore[no-untyped-def]
@@ -103,6 +106,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         application.state.publisher = publisher
         application.state.market_store = MarketDataStore(ledger.engine)
         application.state.document_store = document_store
+        application.state.research_store = research_store
         application.state.new_exposure_paused = app_settings.global_new_exposure_paused
         yield
         ledger.engine.dispose()
@@ -149,7 +153,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "live_trading_enabled": False,
             "new_exposure_paused": application.state.new_exposure_paused,
             "database": "healthy" if ledger.health() else "unhealthy",
-            "phase": "2-complete",
+            "phase": "3a-research-foundation",
             "phase_1b_open_session_validation": "pending",
             "alpaca_configured": bool(
                 app_settings.alpaca_api_key and app_settings.alpaca_api_secret
@@ -161,6 +165,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {
             **application.state.market_store.health_summary(),
             **document_store.health_summary(),
+            **research_store.health_summary(),
             "raw_archive": "healthy" if application.state.archive.health() else "unhealthy",
             "event_bus": "healthy" if application.state.publisher.health() else "unhealthy",
             "alpaca_configured": bool(
@@ -187,6 +192,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.get("/v1/catalysts")
     def catalysts(limit: int = Query(default=50, ge=1, le=500)) -> list[dict[str, Any]]:
         return document_store.recent_catalysts(limit=limit)
+
+    @application.get("/v1/research/experiments")
+    def research_experiments(
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> list[dict[str, Any]]:
+        return research_store.recent_experiments(limit=limit)
 
     @application.get("/v1/events")
     def events(limit: int = Query(default=50, ge=1, le=500)) -> list[dict[str, Any]]:
@@ -317,6 +328,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         symbol=request.symbol.upper(),
                         start=request.start,
                         end=request.end,
+                        timeframe=request.timeframe,
                         feed=app_settings.alpaca_stock_feed,
                     )
                 )

@@ -2,7 +2,8 @@
 
 ## Current
 
-- Phases 0 and 2 are complete; Phase 1B open-session validation is pending until the next U.S. market session.
+- Phases 0 and 2 are complete; the Phase 3A point-in-time research foundation is implemented;
+  Phase 1B open-session validation is pending until the next U.S. market session.
 - Local-lite uses Python 3.12, a project-local `uv`, SQLite, and filesystem object storage.
 - The Control API, minimal web console, append-only event ledger, deterministic risk engine, and synthetic vertical slice exist.
 - `live` is not a valid trading mode; `LIVE_TRADING_ENABLED=true` fails configuration validation.
@@ -21,16 +22,24 @@
 - Ten Apple Newsroom primary-source entries passed the same path; replay inserted zero new records or events.
 - Twenty AAPL SEC filing records normalized into 19 deduplicated catalysts; replay inserted zero new records or events.
 - A bounded set of 250 AAPL SEC XBRL company facts normalized successfully; replay inserted zero duplicates.
+- Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
+  experiment runs, and backtest trades are stored under Alembic revision `20260904_0007`.
+- The Phase 3A runner provides buy-and-hold, long/cash momentum, and long/cash
+  mean-reversion baselines with next-bar execution, commission, slippage, metrics, hashes,
+  and append-only completion events.
+- `make research-smoke` exercises the complete research path in an isolated local database.
 
 ## Next
 
 1. Capture real SIP trade/quote/bar frames and reconnect/gap repair during the next open session.
-2. Begin Phase 3 with the point-in-time feature registry and offline/online parity tests.
-3. Add Redis consumer groups, durable offsets, a transactional outbox, and dead-letter replay.
-4. Add data-quality reconciliation and provider lag metrics.
-5. Build a labeled corpus to measure cross-provider catalyst dedup precision/recall.
-6. Add authentication/authorization before any production Control API exposure.
-7. Expand the Decision Inspector into the full frontend.
+2. Backfill a bounded multi-year daily equity dataset and verify the Phase 3A runner against
+   real stored data.
+3. Add offline/online feature parity, walk-forward/regime reports, and overfitting diagnostics.
+4. Add Redis consumer groups, durable offsets, a transactional outbox, and dead-letter replay.
+5. Add data-quality reconciliation and provider lag metrics.
+6. Build a labeled corpus to measure cross-provider catalyst dedup precision/recall.
+7. Implement the LLM strategy-research orchestrator after independent rejection gates exist.
+8. Add authentication/authorization and expand the Decision Inspector.
 
 ## Blocked
 
@@ -45,3 +54,5 @@
 - ADR 0003: a no-build Control Center page for Phase 0.
 - ADR 0004: Alpaca first, pending entitlement verification.
 - ADR 0005: version source evidence and deduplicate catalysts deterministically.
+- ADR 0006: persist point-in-time research artifacts and validate with next-bar, cost-aware
+  baselines before connecting LLM/ML strategy generation.

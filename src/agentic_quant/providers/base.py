@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Protocol, Self
+from typing import Any, Literal, Protocol, Self
 
 from pydantic import Field, model_validator
 
@@ -18,7 +18,7 @@ class StockBarsRequest(FrozenModel):
     symbol: str = Field(min_length=1, max_length=24)
     start: datetime
     end: datetime
-    timeframe: str = "1Min"
+    timeframe: Literal["1Min", "1Day"] = "1Min"
     feed: str = "sip"
     adjustment: str = "raw"
     limit: int = Field(default=10_000, ge=1, le=10_000)

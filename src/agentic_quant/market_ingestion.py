@@ -43,10 +43,11 @@ class MarketDataIngestionService:
         requested_at = datetime.now(UTC)
         run_id = uuid7()
         request_metadata = request.model_dump(mode="json")
+        data_type = f"stock_bars_{request.timeframe.casefold()}"
         self.store.start_run(
             ingestion_run_id=run_id,
             provider=self.provider.name,
-            data_type="stock_bars_1m",
+            data_type=data_type,
             requested_at=requested_at,
             request_metadata=request_metadata,
         )
@@ -62,7 +63,7 @@ class MarketDataIngestionService:
                 records_received += len(page.bars)
                 archived = self.archive.store_json(
                     provider=page.provider,
-                    data_type="stock_bars_1m",
+                    data_type=data_type,
                     payload=page.raw_payload,
                     request_metadata=page.request_metadata,
                     provider_received_at=page.provider_received_at,

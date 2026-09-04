@@ -82,6 +82,54 @@ def test_alpaca_adapter_normalizes_raw_one_minute_bars() -> None:
     assert page.bars[0].available_from == datetime(2026, 9, 3, 14, 31, tzinfo=UTC)
 
 
+def test_alpaca_adapter_supports_point_in_time_safe_daily_bars() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["timeframe"] == "1Day"
+        return httpx.Response(
+            200,
+            json={
+                "bars": [
+                    {
+                        "t": "2026-09-02T04:00:00Z",
+                        "o": 100,
+                        "h": 102,
+                        "l": 99,
+                        "c": 101,
+                        "v": 1000,
+                        "n": 100,
+                        "vw": 100.5,
+                    }
+                ],
+                "next_page_token": None,
+            },
+        )
+
+    async def scenario() -> StockBarsPage:
+        client = httpx.AsyncClient(
+            base_url="https://data.alpaca.markets",
+            transport=httpx.MockTransport(handler),
+        )
+        provider = AlpacaMarketDataProvider(
+            api_key="test-key",
+            api_secret="test-secret",
+            client=client,
+        )
+        result = await provider.fetch_stock_bars_page(
+            StockBarsRequest(
+                symbol="AAPL",
+                start=datetime(2026, 9, 2, tzinfo=UTC),
+                end=datetime(2026, 9, 4, tzinfo=UTC),
+                timeframe="1Day",
+            )
+        )
+        await client.aclose()
+        return result
+
+    page = asyncio.run(scenario())
+    assert page.bars[0].timeframe == "1Day"
+    assert page.bars[0].available_from == datetime(2026, 9, 3, 4, tzinfo=UTC)
+
+
 def test_alpaca_adapter_normalizes_option_snapshot() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/v1beta1/options/snapshots/AAPL"

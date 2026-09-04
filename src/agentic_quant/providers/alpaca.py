@@ -115,9 +115,6 @@ class AlpacaMarketDataProvider:
         end = _utc(request.end)
         if start >= end:
             raise ValueError("Stock bar request start must be before end")
-        if request.timeframe != "1Min":
-            raise ValueError("Phase 1 normalization currently supports only 1Min bars")
-
         params: dict[str, Any] = {
             "timeframe": request.timeframe,
             "start": start.isoformat().replace("+00:00", "Z"),
@@ -169,7 +166,11 @@ class AlpacaMarketDataProvider:
             symbol=symbol.upper(),
             timeframe=timeframe,
             event_time=event_time,
-            available_from=event_time + timedelta(minutes=1),
+            available_from=(
+                event_time + timedelta(minutes=1)
+                if timeframe == "1Min"
+                else event_time + timedelta(days=1)
+            ),
             open=Decimal(str(item["o"])),
             high=Decimal(str(item["h"])),
             low=Decimal(str(item["l"])),
