@@ -288,9 +288,17 @@ class MarketDataStore:
             "latest_bar_event_time": last_event,
         }
 
-    def latest_bar_event_time(self, *, symbol: str, source: str, feed: str) -> datetime | None:
+    def latest_bar_event_time(
+        self,
+        *,
+        symbol: str,
+        timeframe: str,
+        source: str,
+        feed: str,
+    ) -> datetime | None:
         statement = select(func.max(market_bars.c.event_time)).where(
             (market_bars.c.symbol == symbol.upper())
+            & (market_bars.c.timeframe == timeframe)
             & (market_bars.c.source == source)
             & (market_bars.c.feed == feed)
         )

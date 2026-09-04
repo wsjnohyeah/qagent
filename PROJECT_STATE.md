@@ -2,13 +2,13 @@
 
 ## Current
 
-- Phases 0, 2, 3D, 4, and 5 are complete in bounded-development form. Phase 1B open-session
-  validation remains pending, and Phase 6 shadow runtime has not started.
-  Phase 1B open-session validation is pending.
+- Phases 0–5 are complete in bounded-development form, including Phase 1B open-session
+  validation. The pre-Phase-6 architecture has been reviewed and hardened; Phase 6 shadow
+  runtime has not started.
 - Local-lite uses Python 3.12, a project-local `uv`, SQLite, and filesystem object storage.
 - The Control API, local model/research web console, append-only event ledger, deterministic risk engine, and synthetic vertical slice exist.
 - `live` is not a valid trading mode; `LIVE_TRADING_ENABLED=true` fails configuration validation.
-- Local lint, strict type checking, 65 tests, API readiness, the HTTP vertical slice, and the secret scan pass.
+- Local lint, strict type checking, 71 tests, API readiness, the HTTP vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
 - The full Compose stack is healthy: PostgreSQL 17, Redis 8, MinIO, and the API all passed direct checks; the PostgreSQL-backed shadow slice recorded six lineage events.
 - `context.md` is the required master record for architecture, discussions, iterations, commit contents, and post-commit global state.
@@ -17,6 +17,10 @@
 - A real AAPL backfill stored 391 unique minute bars; replay inserted zero duplicates. A bounded OPRA request stored 10 unique option snapshots; replay inserted zero duplicates.
 - Raw Alpaca responses are content-addressed in MinIO, normalized rows are stored in PostgreSQL, and new-record events are published to Redis Streams.
 - The live collector has bounded reconnects and XNYS-calendar-aware intraday gap detection with automatic REST repair.
+- A real open-session SPY run persisted SIP trades, quotes, and minute bars. A controlled
+  reconnect detected a missing minute, emitted its gap event, and repaired it through REST.
+- Historical windows are strictly half-open even though Alpaca's REST `end` is inclusive;
+  out-of-window normalized rows now fail `market_data_quality@0.2.0`.
 - Phase 2 stores immutable source-document versions, issuer entities, normalized SEC XBRL facts, and deduplicated catalysts.
 - Alpaca News, SEC EDGAR, approved-host IR, and disabled-by-default social aggregate adapters exist.
 - A real 10-article Alpaca News page passed MinIO/PostgreSQL/Redis ingestion; replay inserted zero new records or events.
@@ -66,24 +70,24 @@
 - `.env` explicitly selects `APP_ENV=development`; development daily/news backfills are
   capped at 120 days and one-minute backfills at 7 days by default. The active scope is
   exposed by `/v1/system/status`.
+- Production settings fail unless new exposure starts paused and automatic migration is
+  disabled. The production local raw archive is mounted on a persistent named volume.
 
 ## Next
 
 1. Review Phase 6 shadow-runtime scope and UI requirements with the user before implementation.
-2. Capture real SIP trade/quote/bar frames and reconnect/gap repair during the next open session.
-3. Size remote long-horizon backfill concurrency and storage; continue using bounded samples for local
+2. Size remote long-horizon backfill concurrency and storage; continue using bounded samples for local
    correctness verification.
-4. Extend fill realism with multi-bar partial fills, order cancellation, quote-derived
+3. Extend fill realism with multi-bar partial fills, order cancellation, quote-derived
    rather than configured spread, and symbol-change/delisting replay.
-5. Add Redis consumer groups, durable offsets, a transactional outbox, and dead-letter replay.
-6. Add authentication, budgets, and session audit before remotely exposing the Control
+4. Add Redis consumer groups, durable offsets, a transactional outbox, and dead-letter replay.
+5. Add authentication, budgets, and session audit before remotely exposing the Control
    Center; then expand its data, strategy, and Decision Inspector views.
 
 ## Blocked
 
 - Cloud deployment needs the user's GitHub repository, VPS/provider, domain/TLS plan, and secret delivery mechanism.
 - Paper submission remains blocked until the inherited percentage and dollar risk limits are reconciled.
-- Real-time frame persistence cannot be externally verified until an open U.S. market session, although WebSocket authentication and synthetic frame persistence pass.
 
 ## Decisions
 
@@ -112,3 +116,5 @@
   point-in-time evidence, structured output, and exact citations validate.
 - ADR 0015: train transparent chronological ML baselines, measure calibration/drift, store
   safe JSON artifacts, and require deterministic eligibility plus a human for champion status.
+- ADR 0016: verify real SIP persistence/recovery during an open session and enforce half-open
+  historical windows plus production fail-closed startup/persistence invariants.

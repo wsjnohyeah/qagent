@@ -114,6 +114,21 @@ def test_data_quality_uses_exchange_calendar_for_empty_request_windows() -> None
     assert open_session.issue_counts["missing_intervals"] == 1
 
 
+def test_data_quality_rejects_bars_outside_the_half_open_request_window() -> None:
+    report = inspect_market_bars(
+        (_minute_bar(30), _minute_bar(31)),
+        symbol="AAPL",
+        timeframe="1Min",
+        code_git_sha="test-sha",
+        expected_start=datetime(2026, 9, 3, 14, 30, tzinfo=UTC),
+        expected_end=datetime(2026, 9, 3, 14, 31, tzinfo=UTC),
+    )
+
+    assert report.status == DataQualityStatus.FAILED
+    assert report.issue_counts["out_of_bounds"] == 1
+    assert report.checks["within_requested_window"] is False
+
+
 def test_half_spread_is_charged_on_both_sides() -> None:
     portfolio = EventDrivenPortfolio(
         experiment_run_id="experiment",

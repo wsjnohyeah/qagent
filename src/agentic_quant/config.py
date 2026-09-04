@@ -73,6 +73,11 @@ class Settings(BaseSettings):
     def live_execution_is_impossible(self) -> Settings:
         if self.live_trading_enabled:
             raise ValueError("Live trading is prohibited; LIVE_TRADING_ENABLED must remain false")
+        if self.app_env == AppEnvironment.PRODUCTION:
+            if not self.global_new_exposure_paused:
+                raise ValueError("Production must start with new exposure paused")
+            if self.auto_migrate:
+                raise ValueError("Production requires AUTO_MIGRATE=false")
         if self.object_store_backend == ObjectStoreBackend.S3 and not all(
             (
                 self.object_store_endpoint,

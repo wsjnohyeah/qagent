@@ -283,7 +283,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if app_settings.app_env == AppEnvironment.DEVELOPMENT
                 else None
             ),
-            "phase_1b_open_session_validation": "pending",
+            "phase_1b_open_session_validation": "completed",
             "llm_routing_version": llm_status["routing_version"],
             "llm_route_source": llm_status["route_source"],
             "llm_budget_policy": llm_budget_manager.policy.version,
@@ -642,6 +642,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.post("/v1/demo/run")
     def demo_run() -> dict[str, Any]:
+        require_development()
         bundle = run_synthetic_vertical_slice(
             settings=app_settings,
             ledger=ledger,

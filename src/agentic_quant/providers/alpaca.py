@@ -133,7 +133,7 @@ class AlpacaMarketDataProvider:
         response = await self._get(endpoint, params)
         received_at = datetime.now(UTC)
         payload = response.json()
-        bars = tuple(
+        normalized_bars = (
             self._normalize_bar(
                 symbol=request.symbol,
                 timeframe=request.timeframe,
@@ -143,6 +143,12 @@ class AlpacaMarketDataProvider:
                 item=item,
             )
             for item in payload.get("bars") or ()
+        )
+        # Alpaca treats `end` as inclusive, while every internal request and store query
+        # uses [start, end). Preserve the raw response but never normalize a boundary bar
+        # into the requested dataset.
+        bars = tuple(
+            bar for bar in normalized_bars if start <= bar.event_time < end
         )
         return StockBarsPage(
             provider="alpaca",

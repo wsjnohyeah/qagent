@@ -78,9 +78,30 @@ def test_development_backfills_are_bounded_but_production_is_not() -> None:
             timeframe="1Min",
         )
 
-    production = Settings(_env_file=None, app_env=AppEnvironment.PRODUCTION)
+    production = Settings(
+        _env_file=None,
+        app_env=AppEnvironment.PRODUCTION,
+        auto_migrate=False,
+    )
     assert production.data_operating_scope == "durable_long_horizon"
     production.validate_backfill_window(start=start, end=end, timeframe="1Min")
+
+
+def test_production_boots_paused_and_never_auto_migrates() -> None:
+    with pytest.raises(ValidationError, match="new exposure paused"):
+        Settings(
+            _env_file=None,
+            app_env=AppEnvironment.PRODUCTION,
+            global_new_exposure_paused=False,
+            auto_migrate=False,
+        )
+    with pytest.raises(ValidationError, match="AUTO_MIGRATE=false"):
+        Settings(
+            _env_file=None,
+            app_env=AppEnvironment.PRODUCTION,
+            global_new_exposure_paused=True,
+            auto_migrate=True,
+        )
 
 
 def test_restricted_symbol_always_rejected(settings: Settings) -> None:

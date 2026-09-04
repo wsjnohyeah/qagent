@@ -243,6 +243,7 @@ async def _stream(settings: Settings, args: argparse.Namespace) -> None:
             max_frames=args.max_frames,
             totals=totals,
             feed=settings.alpaca_stock_feed,
+            channels=args.channels,
         )
     print(json.dumps({**totals, "status": "COMPLETED"}, indent=2))
 
@@ -257,10 +258,13 @@ async def _consume_stream(
     max_frames: int,
     totals: dict[str, int],
     feed: str,
+    channels: str,
 ) -> None:
     try:
         async with asyncio.timeout(seconds):
-            async for frame in stream.frames(symbols.split(",")):
+            async for frame in stream.frames(
+                symbols.split(","), channels=channels.split(",")
+            ):
                 summary = service.ingest_frame(frame)
                 totals["frames"] += 1
                 totals["messages_received"] += summary.messages_received
@@ -316,6 +320,11 @@ def main() -> None:
     stream.add_argument("--symbols", default="SPY")
     stream.add_argument("--seconds", type=int, default=60)
     stream.add_argument("--max-frames", type=int, default=100)
+    stream.add_argument(
+        "--channels",
+        default="trades,quotes,bars",
+        help="Comma-separated subset of trades,quotes,bars",
+    )
     args = parser.parse_args()
     settings = Settings()
     if args.command == "probe":

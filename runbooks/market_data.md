@@ -81,11 +81,35 @@ During a U.S. market session:
 
 ```sh
 SYMBOLS=SPY,AAPL SECONDS=60 MAX_FRAMES=100 make docker-alpaca-stream
+# Use a bounded channel subset when validating a minute boundary:
+SYMBOLS=SPY SECONDS=90 MAX_FRAMES=2 CHANNELS=bars make docker-alpaca-stream
 ```
 
-The command authenticates to the configured feed, subscribes to trades, quotes, and minute bars, archives each accepted frame, persists normalized records, and publishes events to Redis. It exits when either limit is reached. An XNYS-calendar-aware detector identifies missing minutes inside a session and requests a REST backfill for the missing interval.
+The command authenticates to the configured feed and subscribes to the comma-separated
+`CHANNELS` subset of `trades,quotes,bars` (all three by default). It archives each accepted
+frame, persists normalized records, and publishes events to Redis. It exits when either
+limit is reached. An XNYS-calendar-aware detector identifies missing minutes inside a
+session and requests a REST backfill for the missing half-open interval.
 
-Real live-frame persistence remains an explicit validation gate. Authentication alone is not evidence that frames were received.
+### Phase 1B open-session evidence
+
+Verified with SPY on SIP during the 2026-09-04 regular U.S. session:
+
+- Entitlement probe authorized SIP historical data, OPRA snapshots, and SIP WebSocket bars.
+- A bounded all-channel connection received 10 frames / 17 messages and inserted 4 trades
+  plus 13 quotes.
+- A bars-only connection persisted the 17:35 UTC minute bar. A later controlled reconnect
+  persisted 17:37, emitted one `market.data.gap_detected.v1` event for 17:36, and invoked a
+  completed REST repair that inserted the missing 17:36 bar.
+- PostgreSQL contained the consecutive 17:35, 17:36, and 17:37 bars with distinct raw
+  lineage; MinIO contained the underlying stream/REST objects and Redis advanced for every
+  newly inserted record plus the gap event.
+- A replay through the corrected `[start, end)` adapter returns only the missing interval and
+  inserts zero duplicates.
+
+This validates a controlled close/reconnect and recovery path. Consecutive connections that
+fail before delivering market data exhaust a tested retry budget; the CLI also has a hard
+duration limit. No order or broker endpoint exists in this path.
 
 ## Verify pipeline state
 
@@ -104,6 +128,6 @@ The Control Center at `http://127.0.0.1:8000` shows the same high-level state.
 - Invalid or unauthorized entitlements: explicit failed capability; no fallback to a weaker feed.
 - Duplicate historical bars, trades, quotes, or option snapshots: ignored by database uniqueness constraints and not republished.
 - Redis, MinIO, or database unavailable: readiness fails; ingestion does not pretend to be healthy.
-- Invalid OHLC/timing, duplicate timestamps, or missing exchange intervals: raw/normalized
+- Invalid OHLC/timing, duplicate timestamps, out-of-window rows, or missing exchange intervals: raw/normalized
   evidence remains inspectable, but the ingestion run and downstream research fail closed.
 - Docker Hub timeout during a local build: retry; do not change data-provider settings.

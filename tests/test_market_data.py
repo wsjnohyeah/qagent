@@ -44,7 +44,15 @@ def test_alpaca_adapter_normalizes_raw_one_minute_bars() -> None:
                         "v": 12345,
                         "n": 234,
                         "vw": 100.75,
-                    }
+                    },
+                    {
+                        "t": "2026-09-03T14:31:00Z",
+                        "o": 101.0,
+                        "h": 101.4,
+                        "l": 100.8,
+                        "c": 101.2,
+                        "v": 100,
+                    },
                 ],
                 "next_page_token": None,
                 "symbol": "AAPL",
@@ -79,9 +87,25 @@ def test_alpaca_adapter_normalizes_raw_one_minute_bars() -> None:
         "key": "test-key",
     }
     assert page.raw_payload["symbol"] == "AAPL"
+    assert len(page.raw_payload["bars"]) == 2
     assert len(page.bars) == 1
     assert page.bars[0].close == Decimal("101.0")
     assert page.bars[0].available_from == datetime(2026, 9, 3, 14, 31, tzinfo=UTC)
+
+
+def test_stock_bar_request_requires_a_valid_timezone_aware_window() -> None:
+    with pytest.raises(ValueError, match="timezone-aware"):
+        StockBarsRequest(
+            symbol="AAPL",
+            start=datetime(2026, 9, 3, 14, 30),
+            end=datetime(2026, 9, 3, 14, 31),
+        )
+    with pytest.raises(ValueError, match="start must be before end"):
+        StockBarsRequest(
+            symbol="AAPL",
+            start=datetime(2026, 9, 3, 14, 31, tzinfo=UTC),
+            end=datetime(2026, 9, 3, 14, 31, tzinfo=UTC),
+        )
 
 
 def test_alpaca_adapter_supports_point_in_time_safe_daily_bars() -> None:

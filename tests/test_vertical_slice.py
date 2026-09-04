@@ -46,7 +46,7 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert system_status["data_operating_scope"] == "bounded_correctness_samples"
         assert system_status["development_max_backfill_days"] == 120
         assert system_status["development_max_intraday_backfill_days"] == 7
-        assert system_status["phase_1b_open_session_validation"] == "pending"
+        assert system_status["phase_1b_open_session_validation"] == "completed"
         assert system_status["llm_routing_version"] == "llm_routing@0.1.0"
         assert system_status["llm_budget_policy"] == "llm_budget@0.1.0"
         assert system_status["ml_policy"] == "ml_policy@0.1.0"
@@ -160,7 +160,13 @@ def test_api_health_and_demo(settings: Settings) -> None:
 def test_unauthenticated_llm_controls_fail_closed_in_production(
     settings: Settings,
 ) -> None:
-    production = settings.model_copy(update={"app_env": AppEnvironment.PRODUCTION})
+    production = settings.model_copy(
+        update={
+            "app_env": AppEnvironment.PRODUCTION,
+            "auto_migrate": False,
+            "global_new_exposure_paused": True,
+        }
+    )
     routes = {
         "interactive_explanation": "meta",
         "routine_pipeline": "meta",
@@ -177,6 +183,8 @@ def test_unauthenticated_llm_controls_fail_closed_in_production(
             "/v1/llm/chat",
             json={"message": "Must be rejected", "provider": "openai"},
         )
+        demo = client.post("/v1/demo/run")
 
     assert route_update.status_code == 403
     assert chat.status_code == 403
+    assert demo.status_code == 403

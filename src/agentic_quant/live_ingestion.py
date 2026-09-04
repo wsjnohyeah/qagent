@@ -79,6 +79,7 @@ class LiveMarketDataService:
                 bar.symbol,
                 self.store.latest_bar_event_time(
                     symbol=bar.symbol,
+                    timeframe=bar.timeframe,
                     source=bar.source,
                     feed=bar.feed,
                 ),

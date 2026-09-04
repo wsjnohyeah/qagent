@@ -4,9 +4,9 @@ Last updated: 2026-09-04 PDT
 
 Context format: v1
 
-Current phase: Phase 5 ML registry and all bounded pre-Phase-6 workflows implemented; Phase 1B open-session verification pending
+Current phase: Phases 0–5 and Phase 1B verified; pre-Phase-6 review complete; Phase 6 intentionally unstarted
 
-Current documented baseline: C019 — `Add calibrated ML model registry`
+Current documented baseline: C020 — `Verify Phase 1B and harden pre-Phase-6 baseline`
 
 ## Purpose and authority
 
@@ -35,7 +35,7 @@ A Git commit cannot contain its own content-derived hash without changing that h
 ### Product state
 
 - The repository contains completed Phase 0 safety and Phase 2 event/document foundations,
-  a Phase 1 read-only market-data foundation with open-session verification pending, and an
+  a Phase 1 read-only market-data foundation with open-session verification complete, and an
   implemented Phase 3A point-in-time research vertical slice. It is not a profitable or
   production-ready trading system.
 - Supported conceptual modes are `research`, `backtest`, `shadow`, and `paper`.
@@ -126,7 +126,7 @@ Development service ports bind only to loopback. The local Compose credentials a
 - `make check`: passed.
 - Flake8: passed.
 - Strict mypy: passed for 43 source files.
-- Pytest: 65 passed.
+- Pytest: 71 passed.
 - `make doctor`: passed against the local-lite SQLite profile.
 - `make docker-doctor`: passed against the PostgreSQL-backed Compose profile.
 - PostgreSQL query: passed; the first container replay stored six lineage events.
@@ -137,11 +137,18 @@ Development service ports bind only to loopback. The local Compose credentials a
 - Alpaca entitlements: SIP historical REST, OPRA option snapshot REST, and SIP WebSocket authentication passed.
 - Real historical test: 391 AAPL one-minute bars inserted, zero duplicates after identical replay.
 - Real options test: 10 AAPL option snapshots inserted from one bounded page, zero duplicates after replay.
-- Live trade/quote/bar normalization, persistence, and XNYS-session gap detection: synthetic frames passed; real frames await an open market session.
+- Phase 1B live evidence: on 2026-09-04 a bounded SPY SIP connection persisted 4 trades and
+  13 quotes from 10 frames, and two bars-only connections persisted live minute bars. The
+  controlled reconnect observed a one-minute gap, emitted `market.data.gap_detected.v1`, and
+  completed a REST repair that inserted the missing bar while deduplicating the live boundary.
+- Phase 1B lineage: PostgreSQL held consecutive 17:35/17:36/17:37 UTC SPY bars, MinIO held
+  stream and repair payloads, and Redis advanced for all new records and the gap event.
 - Real news test: 10 AAPL-related articles passed Alpaca News → MinIO → PostgreSQL → Redis; identical replay inserted zero documents, versions, catalysts, links, or events.
 - Real primary-source test: 10 entries from Apple's official Newsroom RSS feed passed the same path; identical replay inserted zero documents, versions, catalysts, links, or events.
 - Real SEC test: 20 AAPL filing records produced 19 catalysts and 20 links; identical replay inserted zero new records or events. A bounded 250-record AAPL XBRL facts run also replayed with zero duplicates.
 - Phase 2 fixtures verify primary/secondary source distinction, correction-version retention, SEC filing and XBRL normalization, IR feed parsing, and cross-document catalyst deduplication.
+- Alpaca REST results are now normalized to the internal half-open `[start, end)` contract;
+  `market_data_quality@0.2.0` rejects out-of-window rows and live gap seeds use only 1Min bars.
 - Alembic migrations through `20260904_0018` own the Phase 3D/4/5 schema; a fresh SQLite
   upgrade/check/downgrade/re-upgrade cycle passed with no schema diff.
 - `make research-smoke`: passed with 100 deterministic daily bars, three immutable baseline
@@ -401,7 +408,7 @@ flowchart LR
     FORECAST --> DB
 ```
 
-Alembic migrations own the PostgreSQL/SQLite schema. Redis and MinIO are connected to both ingestion paths. The market stream client authenticates, reconnects with bounded exponential backoff, normalizes trades/quotes/minute bars, and requests historical repair for XNYS-session gaps; a real open-session frame capture remains outstanding. The Phase 2 path versions source documents, retains publication/ingestion/correction time, classifies source trust, resolves issuer entities, normalizes SEC facts, and deterministically links similar multi-source coverage to one catalyst.
+Alembic migrations own the PostgreSQL/SQLite schema. Redis and MinIO are connected to both ingestion paths. The market stream client authenticates, reconnects with bounded exponential backoff, normalizes trades/quotes/minute bars, and requests half-open historical repair for XNYS-session gaps; real open-session persistence and controlled reconnect/repair passed on 2026-09-04. The Phase 2 path versions source documents, retains publication/ingestion/correction time, classifies source trust, resolves issuer entities, normalizes SEC facts, and deterministically links similar multi-source coverage to one catalyst.
 
 The Phase 3A research path selects only evidence whose event and availability times are no
 later than each snapshot's `as_of`, calculates a versioned price/event feature set, and runs
@@ -448,8 +455,8 @@ reserves conservative token and estimated-cost ceilings across project/provider/
 windows. The Decision Inspector renders the stored evidence-to-call-to-analysis graph.
 
 The Phase 5A reliability layer validates every historical ingestion and backtest dataset
-against `market_data_quality@0.1.0`, including identity, chronology, OHLC, availability, and
-expected exchange intervals. Fills now charge configured half-spread on each side. Reviewed
+against `market_data_quality@0.2.0`, including identity, chronology, OHLC, availability,
+strict request bounds, and expected exchange intervals. Fills now charge configured half-spread on each side. Reviewed
 corporate-action/universe batches carry source, source-version, availability, and content
 hashes. Long backfills are deterministic date partitions whose durable job state skips
 completed work and retries interrupted work with bounded attempts.
@@ -1024,6 +1031,23 @@ The Compose stack is currently intended to remain running for local inspection. 
 - Model champion is a serving designation only. Any strategy using its forecast still needs
   independent `research_gate@0.1.0` eligibility, human review, and later runtime risk checks.
 - Formal record: `docs/adr/0015-calibrated-ml-and-human-gated-model-registry.md`.
+
+### D026 — Phase 1B requires real lineage and half-open repair semantics
+
+- Date: 2026-09-04 PDT.
+- Authentication is necessary but not sufficient for a live market-data milestone. Phase 1B
+  requires real trade, quote, and minute-bar records to cross raw archive, normalized SQL,
+  ledger, and Redis boundaries during an open session.
+- Internal historical windows are uniformly `[start, end)`. Because Alpaca REST includes its
+  `end` boundary, the adapter retains that provider evidence in raw storage but excludes the
+  boundary from normalization. Data-quality rule v0.2 independently rejects out-of-window
+  rows.
+- A controlled close/reconnect is an acceptable bounded open-session recovery test. The
+  2026-09-04 run intentionally crossed a minute, detected the missing 17:36 UTC SPY bar,
+  recorded the gap, and repaired it without duplicating the already-live 17:37 boundary.
+- Production startup now enforces pause and manual migrations in Settings. A named volume
+  retains the local production object archive across API replacement.
+- Formal record: `docs/adr/0016-open-session-market-data-verification.md`.
 
 ## Iteration and commit ledger
 
@@ -1633,7 +1657,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C019 — `Add calibrated ML model registry`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `216af8f`.
 - Date: 2026-09-04 PDT.
 - User intent: autonomously finish every implementable phase before Phase 6 using bounded
   local data to prove workflow correctness rather than claim statistical alpha.
@@ -1668,20 +1692,57 @@ The Compose stack is currently intended to remain running for local inspection. 
   - Phase 6 shadow runtime and its UI/product choices remain intentionally unstarted pending
     user review; no locally trained model or strategy is approved.
 
+### C020 — `Verify Phase 1B and harden pre-Phase-6 baseline`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-04 PDT.
+- User intent: complete Phase 1B now that the U.S. market is open, then independently review
+  and repair every implemented phase before Phase 6.
+- Scope:
+  - Completed real SIP entitlement, trade, quote, and minute-bar persistence checks with
+    bounded SPY samples; verified PostgreSQL, MinIO, ledger, and Redis lineage.
+  - Exercised a controlled disconnect/reconnect across a skipped minute. The live detector
+    emitted a one-minute gap event and the REST path restored the missing bar idempotently.
+  - Added explicit stream channel subsets so bar-boundary tests do not fill a development
+    database with unnecessary high-frequency messages.
+  - Enforced half-open provider windows, out-of-bound data-quality rejection, 1Min-only live
+    gap seeding, timezone-aware request invariants, paused/manual-migration production startup,
+    development-only demo writes, and a persistent production object-store volume.
+  - Locked the Hatchling build backend, disabled untracked Docker build isolation, and made
+    the runtime package non-editable so an image cannot silently resolve undeclared tooling.
+  - Updated README, deployment/market-data runbooks, project state, master context, and ADR
+    0016 with reproducible evidence and the resulting architecture.
+- Architecture/decision impact:
+  - Phase 1B is no longer time-blocked. Every implemented Phase 0–5 workflow has now received
+    a cross-phase safety/PIT/idempotency/scaling review before Phase 6.
+  - Alpaca's inclusive REST boundary is isolated at the adapter; every internal data window
+    and partition remains `[start, end)`.
+  - The audit does not claim alpha or production throughput, add broker connectivity, or
+    authorize Phase 6 design choices.
+- Validation:
+  - Flake8, strict mypy across 43 source files, and 71 tests passed.
+  - Local doctor, dependency-lock check, repository secret scan, and diff checks passed.
+  - Open-session SIP evidence and the exact gap-repair SQL/ledger/Redis/MinIO checks described
+    above passed. Final migration, Docker/PostgreSQL doctor, replay, and image-SHA checks are
+    completed before commit.
+- Expected global state after commit:
+  - Phases 0–5, including Phase 1B, are locally verified in the bounded development scope.
+  - Phase 6 remains intentionally unstarted pending the user's UI/runtime direction; all
+    models and strategies remain unpromoted and no order submission capability exists.
+
 ## Open work
 
 Ordered near-term work:
 
 1. Review Phase 6 shadow-runtime and operator-UI scope with the user before implementation.
-2. During the next U.S. market session, finish Phase 1B real frame/reconnect/gap checks.
-3. Size remote backfill concurrency and identify equity/options sources with suitable historical
+2. Size remote backfill concurrency and identify equity/options sources with suitable historical
    coverage, retention, and licensing; do not require those large downloads for local tests.
-4. Extend replay with multi-bar partial fills, cancellation, symbol changes, delistings, and
+3. Extend replay with multi-bar partial fills, cancellation, symbol changes, delistings, and
    later capacity calibration on production-scale data.
-5. Add Redis consumer groups, a transactional outbox, dead-letter replay, provider lag,
+4. Add Redis consumer groups, a transactional outbox, dead-letter replay, provider lag,
    sequence-gap, reconciliation, and data-quality dashboards.
-6. Build a labeled corpus and measure cross-provider catalyst dedup precision/recall.
-7. Add authentication/authorization, rate limiting, and session audit before remote Control
+5. Build a labeled corpus and measure cross-provider catalyst dedup precision/recall.
+6. Add authentication/authorization, rate limiting, and session audit before remote Control
    Center exposure; create the GitHub remote and later validate the guarded cloud pipeline on
    a selected VPS.
 

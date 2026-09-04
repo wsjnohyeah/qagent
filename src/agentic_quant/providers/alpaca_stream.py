@@ -136,10 +136,16 @@ class AlpacaStockStream:
             "Unable to authenticate Alpaca stock stream after retries"
         ) from last_error
 
-    async def frames(self, symbols: Iterable[str]) -> AsyncIterator[list[dict[str, Any]]]:
+    async def frames(
+        self,
+        symbols: Iterable[str],
+        channels: Iterable[str] = ("trades", "quotes", "bars"),
+    ) -> AsyncIterator[list[dict[str, Any]]]:
         normalized = self._symbols(symbols)
+        subscriptions = self._subscriptions(channels, normalized)
         attempts = 0
         while attempts <= self.max_reconnect_attempts:
+            delivered_market_data = False
             try:
                 async with websockets.connect(
                     self.url,
@@ -149,19 +155,9 @@ class AlpacaStockStream:
                     ping_timeout=20,
                 ) as socket:
                     await self._authenticate(socket)
-                    await socket.send(
-                        json.dumps(
-                            {
-                                "action": "subscribe",
-                                "trades": normalized,
-                                "quotes": normalized,
-                                "bars": normalized,
-                            }
-                        )
-                    )
+                    await socket.send(json.dumps({"action": "subscribe", **subscriptions}))
                     subscription = self._decode(await socket.recv())
                     self._raise_for_error(subscription)
-                    attempts = 0
                     async for raw_message in socket:
                         messages = self._decode(raw_message)
                         self._raise_for_error(messages)
@@ -171,11 +167,14 @@ class AlpacaStockStream:
                             if message.get("T") in {"t", "q", "b"}
                         ]
                         if market_messages:
+                            delivered_market_data = True
+                            attempts = 0
                             yield market_messages
+                    raise AlpacaStreamError("Alpaca stock stream closed")
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                attempts += 1
+                attempts = 1 if delivered_market_data else attempts + 1
                 if attempts > self.max_reconnect_attempts:
                     raise AlpacaStreamError(
                         "Alpaca stock stream exhausted reconnect attempts"
@@ -199,6 +198,21 @@ class AlpacaStockStream:
         if not normalized:
             raise ValueError("At least one symbol is required")
         return normalized
+
+    @staticmethod
+    def _subscriptions(
+        channels: Iterable[str], symbols: list[str]
+    ) -> dict[str, list[str]]:
+        allowed = {"trades", "quotes", "bars"}
+        normalized = {channel.strip().lower() for channel in channels if channel.strip()}
+        unsupported = normalized - allowed
+        if unsupported:
+            raise ValueError(
+                f"Unsupported stream channels: {', '.join(sorted(unsupported))}"
+            )
+        if not normalized:
+            raise ValueError("At least one stream channel is required")
+        return {channel: symbols for channel in sorted(normalized)}
 
     @staticmethod
     def _decode(raw_message: str | bytes) -> list[dict[str, Any]]:

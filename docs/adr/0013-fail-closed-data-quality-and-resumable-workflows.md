@@ -13,7 +13,8 @@ workflow must scale without silently accepting malformed data or assuming fricti
 ## Consequences
 
 - Market-bar quality checks cover identity consistency, chronological uniqueness, OHLC
-  envelopes, availability time, expected XNYS sessions/minutes, and zero-volume warnings.
+  envelopes, availability time, strict half-open request bounds, expected XNYS
+  sessions/minutes, and zero-volume warnings.
   Reports are content-addressed and persisted; ingestion and backtests fail closed on fatal
   findings.
 - Equity fills now charge a configurable half-spread on both entry and exit in addition to

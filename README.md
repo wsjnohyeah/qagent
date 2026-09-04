@@ -1,6 +1,6 @@
 # Agentic Quant Trading System
 
-A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton, the read-only **Phase 1** market-data foundation, the completed **Phase 2** event/document pipeline, a **Phase 3D** bias-aware research validation gate, the completed **Phase 4** evidence-bound LLM analyst, and the completed **Phase 5** ML/registry tooling. Phase 6 shadow runtime is not implemented.
+A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton, the verified read-only **Phase 1** market-data foundation, the completed **Phase 2** event/document pipeline, a **Phase 3D** bias-aware research validation gate, the completed **Phase 4** evidence-bound LLM analyst, and the completed **Phase 5** ML/registry tooling. Phase 6 shadow runtime is not implemented.
 
 > Live-money execution is not implemented. `live` is not a valid mode, and setting `LIVE_TRADING_ENABLED=true` makes startup fail.
 
@@ -100,6 +100,7 @@ development-only until the remote interface has authentication and budget enforc
 | `make docker-up` | Start PostgreSQL, Redis, MinIO, and API when Docker is installed |
 | `make docker-doctor` | Verify every container and the PostgreSQL-backed shadow slice |
 | `make docker-alpaca-probe` | Verify SIP/OPRA REST access and SIP WebSocket authentication |
+| `make docker-alpaca-stream` | Persist a bounded SIP trade/quote/bar stream during market hours |
 | `make docker-event-health` | Report Phase 2 document/entity/catalyst/fact counts |
 | `make docker-down` | Stop the full local stack without deleting volumes |
 
@@ -128,7 +129,9 @@ RESEARCH_PROMOTION_POLICY_PATH=./configs/research_promotion_policy.yaml
 deployment uses `APP_ENV=production` for durable services and governed long-horizon jobs;
 this distinction does not relax point-in-time, safety, or audit invariants.
 
-Production overrides `GLOBAL_NEW_EXPOSURE_PAUSED=true`. The red pause operation is distinct from liquidation; this build has no liquidation or live broker endpoint.
+Production requires `GLOBAL_NEW_EXPOSURE_PAUSED=true` and `AUTO_MIGRATE=false` at settings
+validation, not only in Compose. The red pause operation is distinct from liquidation; this
+build has no liquidation or live broker endpoint.
 
 Risk values are versioned in `configs/risk_policy.yaml`. Restricted securities are effective-dated in `configs/restricted_securities.yaml`. Changes require tests and review.
 
@@ -190,12 +193,16 @@ Capture a bounded live SIP stream during market hours:
 
 ```sh
 SYMBOLS=SPY,AAPL SECONDS=60 MAX_FRAMES=100 make docker-alpaca-stream
+# Wait for minute boundaries without persisting high-frequency trades/quotes:
+SYMBOLS=SPY SECONDS=90 MAX_FRAMES=2 CHANNELS=bars make docker-alpaca-stream
 ```
 
 Every accepted provider response is content-addressed in MinIO, normalized into PostgreSQL with uniqueness constraints, recorded in the event ledger, and published to Redis Streams. Replaying identical historical data does not create duplicate normalized records or events. The live collector uses the official XNYS exchange calendar to detect missing minutes within a trading session and requests a bounded REST repair.
 
-The final Phase 1B open-session capture/reconnect verification is intentionally pending
-until the next U.S. market session.
+Phase 1B passed during the 2026-09-04 U.S. session: a bounded SPY run persisted real SIP
+trades and quotes, bars-only sessions persisted minute bars, and a controlled reconnect
+detected one missing minute and repaired it through half-open REST backfill without duplicating
+the already-live boundary bar. See `runbooks/market_data.md` for the evidence and replay checks.
 
 ## Phase 2: events and documents
 

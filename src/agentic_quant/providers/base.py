@@ -23,6 +23,14 @@ class StockBarsRequest(FrozenModel):
     adjustment: str = "raw"
     limit: int = Field(default=10_000, ge=1, le=10_000)
 
+    @model_validator(mode="after")
+    def window_is_half_open_and_timezone_aware(self) -> Self:
+        if self.start.tzinfo is None or self.end.tzinfo is None:
+            raise ValueError("Stock bar request timestamps must be timezone-aware")
+        if self.start >= self.end:
+            raise ValueError("Stock bar request start must be before end")
+        return self
+
 
 class StockBarsPage(FrozenModel):
     provider: str

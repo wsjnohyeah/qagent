@@ -23,7 +23,7 @@ from agentic_quant.ledger import EventLedger
 from agentic_quant.market_calendar import MarketGapDetector
 
 
-DATA_QUALITY_RULESET_VERSION = "market_data_quality@0.1.0"
+DATA_QUALITY_RULESET_VERSION = "market_data_quality@0.2.0"
 
 
 class DataQualityError(RuntimeError):
@@ -87,7 +87,13 @@ def inspect_market_bars(
     )
     zero_volume = sum(bar.volume == 0 for bar in ordered)
     missing_intervals = 0
+    out_of_bounds = 0
     expected_interval_count: int | None = None
+    if expected_start is not None and expected_end is not None:
+        out_of_bounds = sum(
+            bar.event_time < expected_start or bar.event_time >= expected_end
+            for bar in ordered
+        )
     if require_complete:
         calendar = exchange_calendars.get_calendar(calendar_name)
         if expected_start is not None and expected_end is not None:
@@ -146,6 +152,7 @@ def inspect_market_bars(
         "invalid_availability": invalid_availability,
         "non_monotonic": non_monotonic,
         "missing_intervals": missing_intervals,
+        "out_of_bounds": out_of_bounds,
         "zero_volume_warnings": zero_volume,
     }
     fatal_issue_count = sum(
@@ -160,6 +167,7 @@ def inspect_market_bars(
         "ohlc_envelope_valid": invalid_ohlc == 0,
         "availability_valid": invalid_availability == 0,
         "expected_intervals_present": missing_intervals == 0,
+        "within_requested_window": out_of_bounds == 0,
         "require_complete": require_complete,
         "calendar": calendar_name,
         "expected_interval_count": expected_interval_count or 0,

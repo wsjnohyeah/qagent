@@ -24,6 +24,9 @@ dependencies = [
 ]
 
 [dependency-groups]
+build = [
+  "hatchling>=1.27,<2",
+]
 dev = [
   "flake8>=7.3,<8",
   "hypothesis>=6.138,<7",

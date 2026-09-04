@@ -60,7 +60,7 @@ docker-alpaca-probe:
 	./scripts/compose.sh exec -T api quant-alpaca probe
 
 docker-alpaca-stream:
-	./scripts/compose.sh exec -T api quant-alpaca stream --symbols "$${SYMBOLS:-SPY}" --seconds "$${SECONDS:-60}" --max-frames "$${MAX_FRAMES:-100}"
+	./scripts/compose.sh exec -T api quant-alpaca stream --symbols "$${SYMBOLS:-SPY}" --seconds "$${SECONDS:-60}" --max-frames "$${MAX_FRAMES:-100}" --channels "$${CHANNELS:-trades,quotes,bars}"
 
 docker-event-health:
 	./scripts/compose.sh exec -T api quant-events health

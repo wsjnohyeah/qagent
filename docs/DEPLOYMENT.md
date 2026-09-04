@@ -40,6 +40,7 @@ APP_ENV=production
 TRADING_MODE=shadow
 LIVE_TRADING_ENABLED=false
 GLOBAL_NEW_EXPOSURE_PAUSED=true
+AUTO_MIGRATE=false
 POSTGRES_DB=quant
 POSTGRES_USER=quant
 POSTGRES_PASSWORD=GENERATE_IN_SECRET_STORE
@@ -47,6 +48,10 @@ DATABASE_URL=postgresql+psycopg://quant:URL_ENCODED_PASSWORD@postgres:5432/quant
 REDIS_URL=redis://redis:6379/0
 OBJECT_STORE_ROOT=/app/work/object-store
 ```
+
+The production Compose file mounts `/app/work/object-store` on the named
+`object-store-data` volume so raw evidence survives API replacement. Include that volume in
+backups, or deliberately configure an external S3-compatible object store before deployment.
 
 `APP_ENV=production` selects the durable, long-horizon operating profile. The development
 backfill cap does not apply, but long jobs must run through authenticated, observable worker
