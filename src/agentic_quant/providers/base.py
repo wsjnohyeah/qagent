@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Any, Protocol, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
-from agentic_quant.domain import FrozenModel, OptionSnapshot, StockBar
+from agentic_quant.domain import (
+    CorporateFact,
+    FrozenModel,
+    OptionSnapshot,
+    SourceDocument,
+    StockBar,
+)
 
 
 class StockBarsRequest(FrozenModel):
@@ -51,6 +57,51 @@ class EntitlementCheck(FrozenModel):
     detail: str
 
 
+class DocumentFetchRequest(FrozenModel):
+    symbols: tuple[str, ...] = Field(min_length=1)
+    start: datetime | None = None
+    end: datetime | None = None
+    limit: int = Field(default=50, ge=1, le=1_000)
+    max_pages: int = Field(default=1, ge=1, le=100)
+    cik: str | None = None
+    forms: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def timestamps_are_point_in_time_safe(self) -> Self:
+        for value in (self.start, self.end):
+            if value is not None and value.tzinfo is None:
+                raise ValueError("Document request timestamps must be timezone-aware")
+        if self.start is not None and self.end is not None and self.start >= self.end:
+            raise ValueError("Document request start must be before end")
+        return self
+
+
+class DocumentPage(FrozenModel):
+    provider: str
+    data_type: str
+    provider_received_at: datetime
+    request_metadata: dict[str, Any]
+    raw_payload: dict[str, Any]
+    documents: tuple[SourceDocument, ...]
+    next_page_token: str | None = None
+
+
+class CorporateFactsRequest(FrozenModel):
+    symbol: str = Field(min_length=1, max_length=24)
+    cik: str = Field(pattern=r"^\d{1,10}$")
+    max_facts: int = Field(default=1_000, ge=1, le=20_000)
+    taxonomies: tuple[str, ...] = ("us-gaap",)
+
+
+class CorporateFactsPage(FrozenModel):
+    provider: str
+    data_type: str
+    provider_received_at: datetime
+    request_metadata: dict[str, Any]
+    raw_payload: dict[str, Any]
+    facts: tuple[CorporateFact, ...]
+
+
 class EquityMarketDataProvider(Protocol):
     name: str
 
@@ -71,6 +122,17 @@ class OptionMarketDataProvider(Protocol):
         *,
         page_token: str | None = None,
     ) -> OptionSnapshotsPage: ...
+
+
+class DocumentProvider(Protocol):
+    name: str
+
+    async def fetch_documents_page(
+        self,
+        request: DocumentFetchRequest,
+        *,
+        page_token: str | None = None,
+    ) -> DocumentPage: ...
 
 
 class EventPublisher(Protocol):

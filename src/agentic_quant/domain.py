@@ -124,6 +124,56 @@ class OptionSnapshot(FrozenModel):
     ingested_at: datetime
 
 
+class SourceTier(StrEnum):
+    PRIMARY = "primary"
+    SECONDARY = "secondary"
+    AGGREGATE = "aggregate"
+
+
+class SourceDocument(FrozenModel):
+    document_id: str
+    provider_document_id: str
+    provider: str
+    canonical_url: str
+    source_kind: str
+    source_tier: SourceTier
+    publisher: str
+    title: str
+    summary: str | None = None
+    body_text: str | None = None
+    symbols: tuple[str, ...]
+    issuer_name: str | None = None
+    cik: str | None = None
+    published_at: datetime
+    updated_at: datetime | None = None
+    ingested_at: datetime
+    raw_object_id: str
+
+
+class CorporateFact(FrozenModel):
+    fact_id: str
+    fact_fingerprint: str
+    symbol: str
+    cik: str
+    issuer_name: str
+    taxonomy: str
+    tag: str
+    unit: str
+    period_start: datetime | None = None
+    period_end: datetime
+    filed_at: datetime
+    accepted_at: datetime | None = None
+    fiscal_year: int | None = None
+    fiscal_period: str | None = None
+    form: str
+    accession_number: str | None = None
+    numeric_value: Decimal | None = None
+    value_text: str
+    available_from: datetime
+    raw_object_id: str
+    ingested_at: datetime
+
+
 class SignalCandidate(FrozenModel):
     candidate_id: str
     symbol: str

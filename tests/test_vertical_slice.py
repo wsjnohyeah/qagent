@@ -49,6 +49,8 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert market_demo.json()["records_inserted"] == 1
         data_health = client.get("/v1/data-health").json()
         assert data_health["market_bars"] == 1
+        assert data_health["source_documents"] == 0
+        assert data_health["catalysts"] == 0
         assert data_health["alpaca_configured"] is False
         missing_credentials = client.post("/v1/market-data/alpaca/probe")
         assert missing_credentials.status_code == 503

@@ -1,6 +1,6 @@
 # Agentic Quant Trading System
 
-A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton and the first **Phase 1** read-only Alpaca market-data path.
+A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton, the read-only **Phase 1** market-data foundation, and an in-progress **Phase 2** point-in-time event/document pipeline.
 
 > Live-money execution is not implemented. `live` is not a valid mode, and setting `LIVE_TRADING_ENABLED=true` makes startup fail.
 
@@ -39,6 +39,10 @@ The risk engine currently enforces mode, global pause, effective-dated restricte
 
 This is infrastructure validation, not evidence that a strategy is profitable.
 
+The Phase 2 path archives and normalizes SEC filings/company facts, approved issuer IR
+feeds, and Alpaca News. It preserves document versions and source timing, resolves issuer
+entities, and links near-duplicate coverage to one catalyst without using an LLM.
+
 ## Commands
 
 | Command | Purpose |
@@ -51,6 +55,7 @@ This is infrastructure validation, not evidence that a strategy is profitable.
 | `make docker-up` | Start PostgreSQL, Redis, MinIO, and API when Docker is installed |
 | `make docker-doctor` | Verify every container and the PostgreSQL-backed shadow slice |
 | `make docker-alpaca-probe` | Verify SIP/OPRA REST access and SIP WebSocket authentication |
+| `make docker-event-health` | Report Phase 2 document/entity/catalyst/fact counts |
 | `make docker-down` | Stop the full local stack without deleting volumes |
 
 ## Safe configuration
@@ -123,10 +128,41 @@ SYMBOLS=SPY,AAPL SECONDS=60 MAX_FRAMES=100 make docker-alpaca-stream
 
 Every accepted provider response is content-addressed in MinIO, normalized into PostgreSQL with uniqueness constraints, recorded in the event ledger, and published to Redis Streams. Replaying identical historical data does not create duplicate normalized records or events. The live collector uses the official XNYS exchange calendar to detect missing minutes within a trading session and requests a bounded REST repair.
 
+The final Phase 1B open-session capture/reconnect verification is intentionally pending
+until the next U.S. market session.
+
+## Phase 2: events and documents
+
+Alpaca News uses the existing ignored Alpaca credentials:
+
+```sh
+./scripts/compose.sh exec -T api quant-events news AAPL --limit 10 --max-pages 1
+```
+
+SEC EDGAR requires an operator identity and monitored contact email in ignored `.env`:
+
+```dotenv
+SEC_USER_AGENT=Agentic Quant Research your-email@example.com
+```
+
+Then ingest bounded primary-source filing metadata and normalized XBRL company facts:
+
+```sh
+./scripts/compose.sh exec -T api quant-events sec-filings AAPL \
+  --cik 0000320193 --forms 8-K,10-K,10-Q --limit 50
+./scripts/compose.sh exec -T api quant-events sec-facts AAPL \
+  --cik 0000320193 --max-facts 1000
+```
+
+Search normalized evidence with `quant-events search`, `GET /v1/documents/search`, or
+`GET /v1/catalysts`. Investor-relations feeds require an explicit HTTPS hostname match.
+Social aggregates are feature-flagged off until a licensed provider is selected. See
+`runbooks/event_documents.md` for the full operating and source-trust policy.
+
 ## Repository map
 
 ```text
-src/agentic_quant/       API, domain contracts, risk engine, ledger, demo pipeline
+src/agentic_quant/       API, market/event ingestion, domain, risk, ledger, demo pipeline
 configs/                 versioned risk, restrictions, strategy, data manifest
 tests/                   invariants and end-to-end replay tests
 docs/adr/                architectural decisions
@@ -138,7 +174,7 @@ PROJECT_STATE.md         Current / Next / Blocked / Decisions
 AGENTS.md                mandatory operating rules for coding/deployment agents
 ```
 
-## API surface in Phase 0
+## Current API surface
 
 - `GET /health/live`
 - `GET /health/ready`
@@ -148,9 +184,14 @@ AGENTS.md                mandatory operating rules for coding/deployment agents
 - `POST /v1/demo/run`
 - `POST /v1/demo/market-data`
 - `GET /v1/data-health`
+- `GET /v1/documents/search`
+- `GET /v1/catalysts`
 - `POST /v1/market-data/alpaca/probe` — development only
 - `POST /v1/market-data/alpaca/backfill` — development only
 - `POST /v1/market-data/alpaca/option-snapshot` — development only
+- `POST /v1/documents/alpaca-news/backfill` — development only
+- `POST /v1/documents/sec/filings` — development only
+- `POST /v1/documents/sec/company-facts` — development only
 - `POST /v1/commands/pause`
 - `POST /v1/commands/resume` — development + shadow only
 

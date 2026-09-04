@@ -37,6 +37,7 @@ dev = [
 quant-api = "agentic_quant.api:run"
 quant-demo = "agentic_quant.demo:main"
 quant-alpaca = "agentic_quant.alpaca_cli:main"
+quant-events = "agentic_quant.event_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agentic_quant"]

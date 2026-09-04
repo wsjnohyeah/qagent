@@ -11,6 +11,11 @@ from pydantic import BaseModel, Field
 
 from agentic_quant.archive import build_raw_archive
 from agentic_quant.config import AppEnvironment, Settings, TradingMode
+from agentic_quant.document_ingestion import (
+    DocumentIngestionService,
+    FundamentalsIngestionService,
+)
+from agentic_quant.document_store import DocumentStore
 from agentic_quant.domain import EventEnvelope
 from agentic_quant.event_bus import NullEventPublisher, RedisStreamPublisher
 from agentic_quant.ids import uuid7
@@ -26,7 +31,18 @@ from agentic_quant.providers.alpaca import (
     AlpacaResponseError,
 )
 from agentic_quant.providers.alpaca_stream import AlpacaStockStream, AlpacaStreamError
-from agentic_quant.providers.base import OptionChainRequest, StockBarsRequest
+from agentic_quant.providers.base import (
+    CorporateFactsRequest,
+    DocumentFetchRequest,
+    OptionChainRequest,
+    StockBarsRequest,
+)
+from agentic_quant.providers.documents import (
+    AlpacaNewsProvider,
+    DocumentProviderConfigurationError,
+    DocumentProviderResponseError,
+    SecEdgarProvider,
+)
 from agentic_quant.providers.synthetic import SyntheticMarketDataProvider
 from agentic_quant.risk import RestrictionRegistry, RiskPolicy
 
@@ -47,9 +63,31 @@ class OptionSnapshotRequest(BaseModel):
     max_pages: int = Field(default=1, ge=1, le=1_000)
 
 
+class NewsBackfillRequest(BaseModel):
+    symbols: tuple[str, ...] = Field(min_length=1)
+    start: datetime | None = None
+    end: datetime | None = None
+    limit: int = Field(default=50, ge=1, le=1_000)
+    max_pages: int = Field(default=1, ge=1, le=100)
+
+
+class SecFilingsRequest(BaseModel):
+    symbol: str = Field(min_length=1, max_length=24, pattern=r"^[A-Za-z.\-]+$")
+    cik: str = Field(pattern=r"^\d{1,10}$")
+    forms: tuple[str, ...] = ("8-K", "10-K", "10-Q", "6-K")
+    limit: int = Field(default=50, ge=1, le=1_000)
+
+
+class SecFactsRequest(BaseModel):
+    symbol: str = Field(min_length=1, max_length=24, pattern=r"^[A-Za-z.\-]+$")
+    cik: str = Field(pattern=r"^\d{1,10}$")
+    max_facts: int = Field(default=1_000, ge=1, le=20_000)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     app_settings = settings or Settings()
     ledger = EventLedger(app_settings.database_url)
+    document_store = DocumentStore(ledger.engine)
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):  # type: ignore[no-untyped-def]
@@ -64,6 +102,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         application.state.archive = archive
         application.state.publisher = publisher
         application.state.market_store = MarketDataStore(ledger.engine)
+        application.state.document_store = document_store
         application.state.new_exposure_paused = app_settings.global_new_exposure_paused
         yield
         ledger.engine.dispose()
@@ -110,7 +149,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "live_trading_enabled": False,
             "new_exposure_paused": application.state.new_exposure_paused,
             "database": "healthy" if ledger.health() else "unhealthy",
-            "phase": "1-in-progress",
+            "phase": "2-in-progress",
+            "phase_1b_open_session_validation": "pending",
             "alpaca_configured": bool(
                 app_settings.alpaca_api_key and app_settings.alpaca_api_secret
             ),
@@ -120,6 +160,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def data_health() -> dict[str, Any]:
         return {
             **application.state.market_store.health_summary(),
+            **document_store.health_summary(),
             "raw_archive": "healthy" if application.state.archive.health() else "unhealthy",
             "event_bus": "healthy" if application.state.publisher.health() else "unhealthy",
             "alpaca_configured": bool(
@@ -127,7 +168,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ),
             "stock_feed": app_settings.alpaca_stock_feed,
             "option_feed": app_settings.alpaca_option_feed,
+            "sec_configured": bool(app_settings.sec_user_agent),
+            "social_aggregates_enabled": app_settings.enable_social_aggregates,
         }
+
+    @application.get("/v1/documents/search")
+    def document_search(
+        query: str = Query(default="", max_length=300),
+        symbol: str | None = Query(default=None, max_length=24),
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> list[dict[str, Any]]:
+        return document_store.search_documents(
+            query=query,
+            symbol=symbol,
+            limit=limit,
+        )
+
+    @application.get("/v1/catalysts")
+    def catalysts(limit: int = Query(default=50, ge=1, le=500)) -> list[dict[str, Any]]:
+        return document_store.recent_catalysts(limit=limit)
 
     @application.get("/v1/events")
     def events(limit: int = Query(default=50, ge=1, le=500)) -> list[dict[str, Any]]:
@@ -188,6 +247,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             api_secret=app_settings.alpaca_api_secret.get_secret_value(),
             base_url=app_settings.alpaca_data_base_url,
         )
+
+    def alpaca_news_provider() -> AlpacaNewsProvider:
+        if app_settings.alpaca_api_key is None or app_settings.alpaca_api_secret is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Alpaca credentials are not configured in the local environment",
+            )
+        return AlpacaNewsProvider(
+            api_key=app_settings.alpaca_api_key.get_secret_value(),
+            api_secret=app_settings.alpaca_api_secret.get_secret_value(),
+            base_url=app_settings.alpaca_data_base_url,
+        )
+
+    def sec_provider() -> SecEdgarProvider:
+        if not app_settings.sec_user_agent:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "SEC_USER_AGENT must identify an operator and contact email before "
+                    "using SEC APIs"
+                ),
+            )
+        return SecEdgarProvider(user_agent=app_settings.sec_user_agent)
 
     @application.post("/v1/market-data/alpaca/probe")
     async def alpaca_probe() -> dict[str, Any]:
@@ -263,6 +345,88 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     )
                 )
         except (AlpacaConfigurationError, AlpacaResponseError) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return summary.model_dump(mode="json")
+
+    @application.post("/v1/documents/alpaca-news/backfill")
+    async def alpaca_news_backfill(request: NewsBackfillRequest) -> dict[str, Any]:
+        require_development()
+        if any(
+            value is not None and value.tzinfo is None
+            for value in (request.start, request.end)
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="start and end must include timezones",
+            )
+        if request.start and request.end and request.start >= request.end:
+            raise HTTPException(status_code=422, detail="start must be before end")
+        try:
+            async with alpaca_news_provider() as provider:
+                summary = await DocumentIngestionService(
+                    provider=provider,
+                    archive=application.state.archive,
+                    market_store=application.state.market_store,
+                    document_store=document_store,
+                    ledger=ledger,
+                    publisher=application.state.publisher,
+                ).ingest_documents(
+                    DocumentFetchRequest(
+                        symbols=tuple(symbol.upper() for symbol in request.symbols),
+                        start=request.start,
+                        end=request.end,
+                        limit=request.limit,
+                        max_pages=request.max_pages,
+                    )
+                )
+        except (DocumentProviderConfigurationError, DocumentProviderResponseError) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return summary.model_dump(mode="json")
+
+    @application.post("/v1/documents/sec/filings")
+    async def sec_filings(request: SecFilingsRequest) -> dict[str, Any]:
+        require_development()
+        try:
+            async with sec_provider() as provider:
+                summary = await DocumentIngestionService(
+                    provider=provider,
+                    archive=application.state.archive,
+                    market_store=application.state.market_store,
+                    document_store=document_store,
+                    ledger=ledger,
+                    publisher=application.state.publisher,
+                ).ingest_documents(
+                    DocumentFetchRequest(
+                        symbols=(request.symbol.upper(),),
+                        cik=request.cik,
+                        forms=tuple(form.upper() for form in request.forms),
+                        limit=request.limit,
+                    )
+                )
+        except (DocumentProviderConfigurationError, DocumentProviderResponseError) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return summary.model_dump(mode="json")
+
+    @application.post("/v1/documents/sec/company-facts")
+    async def sec_company_facts(request: SecFactsRequest) -> dict[str, Any]:
+        require_development()
+        try:
+            async with sec_provider() as provider:
+                page = await provider.fetch_company_facts(
+                    CorporateFactsRequest(
+                        symbol=request.symbol.upper(),
+                        cik=request.cik,
+                        max_facts=request.max_facts,
+                    )
+                )
+            summary = FundamentalsIngestionService(
+                archive=application.state.archive,
+                market_store=application.state.market_store,
+                document_store=document_store,
+                ledger=ledger,
+                publisher=application.state.publisher,
+            ).ingest_page(page)
+        except (DocumentProviderConfigurationError, DocumentProviderResponseError) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         return summary.model_dump(mode="json")
 

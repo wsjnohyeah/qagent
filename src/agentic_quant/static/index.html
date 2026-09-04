@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Agentic Quant — Phase 0</title>
+  <title>Agentic Quant — Control Center</title>
   <style>
     :root { color-scheme: dark; font-family: ui-sans-serif, system-ui, sans-serif; }
     body { margin: 0; background: #08111f; color: #e6edf7; }
@@ -22,9 +22,9 @@
 <body>
 <main>
   <p class="label">Trading Control Center</p>
-  <h1>Phase 0 Safety Console</h1>
-  <p class="muted">Synthetic replay only. Live execution does not exist in this build.</p>
-  <div class="banner">The risk engine owns approval and sizing. The demo creates only a shadow record.</div>
+  <h1>Research Control Center</h1>
+  <p class="muted">Market and event research plus shadow replay. Live execution does not exist.</p>
+  <div class="banner">The risk engine owns approval and sizing. All demo orders remain shadow records.</div>
   <section class="grid">
     <div class="card"><div class="label">Environment</div><div id="environment" class="value">—</div></div>
     <div class="card"><div class="label">Mode</div><div id="mode" class="value">—</div></div>
@@ -33,6 +33,9 @@
     <div class="card"><div class="label">Alpaca credentials</div><div id="alpaca" class="value">—</div></div>
     <div class="card"><div class="label">Market bars</div><div id="bars" class="value">—</div></div>
     <div class="card"><div class="label">Option snapshots</div><div id="options" class="value">—</div></div>
+    <div class="card"><div class="label">Source documents</div><div id="documents" class="value">—</div></div>
+    <div class="card"><div class="label">Catalysts</div><div id="catalysts" class="value">—</div></div>
+    <div class="card"><div class="label">Corporate facts</div><div id="facts" class="value">—</div></div>
     <div class="card"><div class="label">Data services</div><div id="data-services" class="value">—</div></div>
   </section>
   <p>
@@ -57,6 +60,9 @@ async function status() {
   const data = await fetch('/v1/data-health').then(r => r.json());
   document.querySelector('#bars').textContent = data.market_bars;
   document.querySelector('#options').textContent = data.option_snapshots;
+  document.querySelector('#documents').textContent = data.source_documents;
+  document.querySelector('#catalysts').textContent = data.catalysts;
+  document.querySelector('#facts').textContent = data.corporate_facts;
   document.querySelector('#data-services').textContent = `${data.raw_archive} / ${data.event_bus}`;
 }
 async function post(url, body) {

@@ -1,7 +1,7 @@
 SHELL := /bin/sh
 UV := work/tools/uv
 
-.PHONY: bootstrap sync migrate test lint typecheck check doctor run demo alpaca-probe docker-up docker-doctor docker-alpaca-probe docker-alpaca-stream docker-down clean
+.PHONY: bootstrap sync migrate test lint typecheck check doctor run demo alpaca-probe docker-up docker-doctor docker-alpaca-probe docker-alpaca-stream docker-event-health docker-down clean
 
 bootstrap:
 	./scripts/bootstrap.sh
@@ -46,6 +46,9 @@ docker-alpaca-probe:
 
 docker-alpaca-stream:
 	./scripts/compose.sh exec -T api quant-alpaca stream --symbols "$${SYMBOLS:-SPY}" --seconds "$${SECONDS:-60}" --max-frames "$${MAX_FRAMES:-100}"
+
+docker-event-health:
+	./scripts/compose.sh exec -T api quant-events health
 
 docker-down:
 	./scripts/compose.sh down

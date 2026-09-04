@@ -12,6 +12,7 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    ForeignKey,
 )
 
 
@@ -184,4 +185,166 @@ ingestion_runs = Table(
     Column("records_received", Integer, nullable=False, default=0),
     Column("records_inserted", Integer, nullable=False, default=0),
     Column("error_code", String(80), nullable=True),
+)
+
+entities = Table(
+    "entities",
+    metadata,
+    Column("entity_id", String(36), primary_key=True),
+    Column("primary_symbol", String(24), nullable=False, index=True),
+    Column("canonical_name", Text, nullable=True),
+    Column("cik", String(10), nullable=True, index=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint("primary_symbol", name="uq_entities_primary_symbol"),
+    UniqueConstraint("cik", name="uq_entities_cik"),
+)
+
+entity_symbols = Table(
+    "entity_symbols",
+    metadata,
+    Column(
+        "entity_id",
+        String(36),
+        ForeignKey("entities.entity_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("symbol", String(24), primary_key=True, index=True),
+)
+
+source_documents = Table(
+    "source_documents",
+    metadata,
+    Column("document_id", String(36), primary_key=True),
+    Column("provider", String(40), nullable=False),
+    Column("provider_document_id", String(160), nullable=False),
+    Column("canonical_url", Text, nullable=False),
+    Column("source_kind", String(40), nullable=False, index=True),
+    Column("source_tier", String(16), nullable=False, index=True),
+    Column("publisher", Text, nullable=False),
+    Column("published_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("first_seen_at", DateTime(timezone=True), nullable=False),
+    Column("last_seen_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint(
+        "provider",
+        "provider_document_id",
+        name="uq_source_documents_provider_identity",
+    ),
+)
+
+source_document_versions = Table(
+    "source_document_versions",
+    metadata,
+    Column("version_id", String(36), primary_key=True),
+    Column(
+        "document_id",
+        String(36),
+        ForeignKey("source_documents.document_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("content_sha256", String(64), nullable=False),
+    Column("title", Text, nullable=False),
+    Column("summary", Text, nullable=True),
+    Column("body_text", Text, nullable=True),
+    Column("corrected_at", DateTime(timezone=True), nullable=True),
+    Column("ingested_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("raw_object_id", String(36), nullable=False),
+    UniqueConstraint(
+        "document_id",
+        "content_sha256",
+        name="uq_source_document_versions_content",
+    ),
+)
+
+document_entities = Table(
+    "document_entities",
+    metadata,
+    Column(
+        "document_id",
+        String(36),
+        ForeignKey("source_documents.document_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "entity_id",
+        String(36),
+        ForeignKey("entities.entity_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
+
+document_symbols = Table(
+    "document_symbols",
+    metadata,
+    Column(
+        "document_id",
+        String(36),
+        ForeignKey("source_documents.document_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("symbol", String(24), primary_key=True, index=True),
+)
+
+catalysts = Table(
+    "catalysts",
+    metadata,
+    Column("catalyst_id", String(36), primary_key=True),
+    Column("canonical_key", String(64), nullable=False, unique=True),
+    Column("catalyst_type", String(40), nullable=False, index=True),
+    Column("primary_symbol", String(24), nullable=False, index=True),
+    Column("event_time", DateTime(timezone=True), nullable=False, index=True),
+    Column("available_from", DateTime(timezone=True), nullable=False),
+    Column("last_updated_at", DateTime(timezone=True), nullable=False),
+    Column("headline", Text, nullable=False),
+    Column("primary_source_document_id", String(36), nullable=True),
+    Column("status", String(24), nullable=False),
+    Column("source_count", Integer, nullable=False),
+)
+
+catalyst_documents = Table(
+    "catalyst_documents",
+    metadata,
+    Column(
+        "catalyst_id",
+        String(36),
+        ForeignKey("catalysts.catalyst_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "document_id",
+        String(36),
+        ForeignKey("source_documents.document_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("match_method", String(40), nullable=False),
+    Column("match_score", Numeric(8, 6), nullable=False),
+    Column("linked_at", DateTime(timezone=True), nullable=False),
+)
+
+corporate_facts = Table(
+    "corporate_facts",
+    metadata,
+    Column("fact_id", String(36), primary_key=True),
+    Column("fact_fingerprint", String(64), nullable=False, unique=True),
+    Column("entity_id", String(36), nullable=True, index=True),
+    Column("symbol", String(24), nullable=False, index=True),
+    Column("cik", String(10), nullable=False, index=True),
+    Column("issuer_name", Text, nullable=False),
+    Column("taxonomy", String(80), nullable=False),
+    Column("tag", String(160), nullable=False, index=True),
+    Column("unit", String(40), nullable=False),
+    Column("period_start", DateTime(timezone=True), nullable=True),
+    Column("period_end", DateTime(timezone=True), nullable=False),
+    Column("filed_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("accepted_at", DateTime(timezone=True), nullable=True),
+    Column("fiscal_year", Integer, nullable=True),
+    Column("fiscal_period", String(20), nullable=True),
+    Column("form", String(20), nullable=False),
+    Column("accession_number", String(32), nullable=True),
+    Column("numeric_value", Numeric(30, 10), nullable=True),
+    Column("value_text", Text, nullable=False),
+    Column("available_from", DateTime(timezone=True), nullable=False),
+    Column("raw_object_id", String(36), nullable=False),
+    Column("ingested_at", DateTime(timezone=True), nullable=False),
 )

@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     alpaca_stock_stream_base_url: str = "wss://stream.data.alpaca.markets/v2"
     alpaca_stock_feed: str = "sip"
     alpaca_option_feed: str = "opra"
+    sec_user_agent: str | None = None
+    enable_social_aggregates: bool = False
+    social_aggregate_url: str | None = None
+    social_aggregate_token: SecretStr | None = None
     market_calendar: str = "XNYS"
     api_host: str = "127.0.0.1"
     api_port: int = Field(default=8000, ge=1, le=65535)
@@ -65,4 +69,10 @@ class Settings(BaseSettings):
             )
         ):
             raise ValueError("S3 object storage requires endpoint, access key, and secret key")
+        if self.enable_social_aggregates and not all(
+            (self.social_aggregate_url, self.social_aggregate_token)
+        ):
+            raise ValueError(
+                "Social aggregates require SOCIAL_AGGREGATE_URL and SOCIAL_AGGREGATE_TOKEN"
+            )
         return self

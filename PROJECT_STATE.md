@@ -2,11 +2,11 @@
 
 ## Current
 
-- Phase 0 safety scaffold is complete; Phase 1 market-data work is in progress.
+- Phase 0 is complete; Phase 1B open-session validation is pending; Phase 2 is in progress.
 - Local-lite uses Python 3.12, a project-local `uv`, SQLite, and filesystem object storage.
 - The Control API, minimal web console, append-only event ledger, deterministic risk engine, and synthetic vertical slice exist.
 - `live` is not a valid trading mode; `LIVE_TRADING_ENABLED=true` fails configuration validation.
-- Local lint, strict type checking, 14 tests, API readiness, the HTTP vertical slice, and the secret scan pass.
+- Local lint, strict type checking, 22 tests, API readiness, the HTTP vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
 - The full Compose stack is healthy: PostgreSQL 17, Redis 8, MinIO, and the API all passed direct checks; the PostgreSQL-backed shadow slice recorded six lineage events.
 - `context.md` is the required master record for architecture, discussions, iterations, commit contents, and post-commit global state.
@@ -15,21 +15,28 @@
 - A real AAPL backfill stored 391 unique minute bars; replay inserted zero duplicates. A bounded OPRA request stored 10 unique option snapshots; replay inserted zero duplicates.
 - Raw Alpaca responses are content-addressed in MinIO, normalized rows are stored in PostgreSQL, and new-record events are published to Redis Streams.
 - The live collector has bounded reconnects and XNYS-calendar-aware intraday gap detection with automatic REST repair.
+- Phase 2 stores immutable source-document versions, issuer entities, normalized SEC XBRL facts, and deduplicated catalysts.
+- Alpaca News, SEC EDGAR, approved-host IR, and disabled-by-default social aggregate adapters exist.
+- A real 10-article Alpaca News page passed MinIO/PostgreSQL/Redis ingestion; replay inserted zero new records or events.
+- Ten Apple Newsroom primary-source entries passed the same path; replay inserted zero new records or events.
 
 ## Next
 
-1. Capture and validate real SIP trade/quote/bar frames during an open market session.
-2. Exercise disconnect/reconnect and automatic gap repair against a live session.
-3. Add Redis consumer groups, durable offsets, a transactional outbox, and dead-letter replay.
-4. Add data-quality reconciliation and provider lag metrics.
-5. Add authentication/authorization before any production Control API exposure.
-6. Expand the Decision Inspector into the full frontend.
+1. Configure a compliant SEC User-Agent and verify filing/company-facts ingestion live.
+2. Select and verify official issuer IR feeds, then measure cross-provider catalyst dedup.
+3. Capture real SIP trade/quote/bar frames and reconnect/gap repair during the next open session.
+4. Add Redis consumer groups, durable offsets, a transactional outbox, and dead-letter replay.
+5. Add data-quality reconciliation and provider lag metrics.
+6. Add authentication/authorization before any production Control API exposure.
+7. Expand the Decision Inspector into the full frontend.
 
 ## Blocked
 
 - Cloud deployment needs the user's GitHub repository, VPS/provider, domain/TLS plan, and secret delivery mechanism.
 - Paper submission remains blocked until the inherited percentage and dollar risk limits are reconciled.
 - Real-time frame persistence cannot be externally verified until an open U.S. market session, although WebSocket authentication and synthetic frame persistence pass.
+- Live SEC verification needs a real operator/contact email in `SEC_USER_AGENT`.
+- Real IR validation needs a confirmed issuer-controlled feed URL and hostname.
 
 ## Decisions
 
@@ -37,3 +44,4 @@
 - ADR 0002: PostgreSQL for full environments; SQLite only for local-lite.
 - ADR 0003: a no-build Control Center page for Phase 0.
 - ADR 0004: Alpaca first, pending entitlement verification.
+- ADR 0005: version source evidence and deduplicate catalysts deterministically.

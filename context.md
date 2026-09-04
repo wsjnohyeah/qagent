@@ -4,9 +4,9 @@ Last updated: 2026-09-03 PDT
 
 Context format: v1
 
-Current phase: Phase 1 — market-data foundation (in progress)
+Current phase: Phase 2 — event and document pipeline (in progress); Phase 1B open-session verification pending
 
-Current committed baseline: `ab7e620 Add durable master project context`
+Current committed baseline: `1d075ec Add market-session gap repair`
 
 ## Purpose and authority
 
@@ -34,13 +34,13 @@ A Git commit cannot contain its own content-derived hash without changing that h
 
 ### Product state
 
-- The repository contains a completed Phase 0 safety foundation and an in-progress Phase 1 read-only market-data foundation. It is not a profitable or production-ready trading system.
+- The repository contains a completed Phase 0 safety foundation, a Phase 1 read-only market-data foundation with open-session verification pending, and an in-progress Phase 2 event/document pipeline. It is not a profitable or production-ready trading system.
 - Supported conceptual modes are `research`, `backtest`, `shadow`, and `paper`.
 - The executable settings intentionally omit `live`; `LIVE_TRADING_ENABLED=true` fails validation.
 - The original synthetic shadow path remains operational and makes no broker call.
 - A read-only Alpaca adapter now retrieves SIP historical stock bars, OPRA option-chain snapshots, and authenticates to the SIP stock WebSocket.
 - Real provider responses flow through content-addressed MinIO raw storage, normalized PostgreSQL tables, the append-only event ledger, and Redis Streams.
-- No news provider, LLM, predictive model, or broker adapter is connected yet.
+- Alpaca News is connected; SEC EDGAR, approved-host IR, and disabled-by-default social aggregate adapters are implemented. No LLM, predictive model, or broker adapter is connected.
 - No GitHub remote or cloud host is configured yet.
 
 ### Repository state
@@ -79,8 +79,8 @@ Development service ports bind only to loopback. The local Compose credentials a
 
 - `make check`: passed.
 - Flake8: passed.
-- Strict mypy: passed for 10 source files.
-- Pytest: 14 passed.
+- Strict mypy: passed for 29 source files.
+- Pytest: 22 passed.
 - `make doctor`: passed against the local-lite SQLite profile.
 - `make docker-doctor`: passed against the PostgreSQL-backed Compose profile.
 - PostgreSQL query: passed; the first container replay stored six lineage events.
@@ -92,6 +92,10 @@ Development service ports bind only to loopback. The local Compose credentials a
 - Real historical test: 391 AAPL one-minute bars inserted, zero duplicates after identical replay.
 - Real options test: 10 AAPL option snapshots inserted from one bounded page, zero duplicates after replay.
 - Live trade/quote/bar normalization, persistence, and XNYS-session gap detection: synthetic frames passed; real frames await an open market session.
+- Real news test: 10 AAPL-related articles passed Alpaca News → MinIO → PostgreSQL → Redis; identical replay inserted zero documents, versions, catalysts, links, or events.
+- Real primary-source test: 10 entries from Apple's official Newsroom RSS feed passed the same path; identical replay inserted zero documents, versions, catalysts, links, or events.
+- Phase 2 fixtures verify primary/secondary source distinction, correction-version retention, SEC filing and XBRL normalization, IR feed parsing, and cross-document catalyst deduplication.
+- Alembic migrations through `20260904_0006` own the Phase 2 schema, including issuer aliases and exact document-symbol tags.
 - Repository secret-pattern scan: passed after fixing a scanner self-match.
 
 ## Product intent and invariant boundaries
@@ -127,12 +131,18 @@ flowchart LR
     SHADOW --> LEDGER
     LEDGER --> DB["SQLite local-lite / PostgreSQL Compose"]
     ALPACA["Alpaca SIP / OPRA read-only"] --> INGEST["Historical + snapshot + stream adapters"]
+    SOURCES["SEC / approved IR / Alpaca News"] --> DOCINGEST["Document + facts adapters"]
+    DOCINGEST --> CATALYST["Entity resolution + catalyst dedup"]
+    DOCINGEST --> MINIO
+    DOCINGEST --> DB
+    CATALYST --> DB
+    CATALYST --> REDIS
     INGEST --> MINIO["MinIO raw archive"]
     INGEST --> DB
     INGEST --> REDIS["Redis Streams"]
 ```
 
-Alembic migrations own the PostgreSQL/SQLite schema. Redis and MinIO are connected to the Phase 1 ingestion path. The live stream client authenticates, reconnects with bounded exponential backoff, normalizes trades/quotes/minute bars, and requests historical repair for XNYS-session gaps; a real open-session frame capture remains outstanding.
+Alembic migrations own the PostgreSQL/SQLite schema. Redis and MinIO are connected to both ingestion paths. The market stream client authenticates, reconnects with bounded exponential backoff, normalizes trades/quotes/minute bars, and requests historical repair for XNYS-session gaps; a real open-session frame capture remains outstanding. The Phase 2 path versions source documents, retains publication/ingestion/correction time, classifies source trust, resolves issuer entities, normalizes SEC facts, and deterministically links similar multi-source coverage to one catalyst.
 
 ### Target architecture
 
@@ -203,7 +213,11 @@ flowchart TB
 | Market persistence | `src/agentic_quant/market_store.py` | idempotent bars, trades, quotes, options, ingestion runs |
 | Event transport | `src/agentic_quant/event_bus.py` | Redis Streams publisher with local no-op fallback |
 | Market calendar | `src/agentic_quant/market_calendar.py` | XNYS sessions and missing-minute detection |
-| Schema migrations | `migrations/` | Alembic schema history through Phase 1 |
+| Document providers | `src/agentic_quant/providers/documents.py` | Alpaca News, SEC EDGAR, approved-host IR, gated social adapters |
+| Event ingestion | `src/agentic_quant/document_ingestion.py` | raw-first document/fact ingestion and normalized events |
+| Document persistence | `src/agentic_quant/document_store.py` | immutable versions, entities, search, catalyst dedup, SEC facts |
+| Event operations | `src/agentic_quant/event_cli.py` | bounded provider ingestion, search, and health CLI |
+| Schema migrations | `migrations/` | Alembic schema history through Phase 2 |
 
 ## Current executable risk baseline
 
@@ -236,7 +250,10 @@ Implemented endpoints:
 - `POST /v1/demo/run`
 - `POST /v1/demo/market-data`
 - `GET /v1/data-health`
+- `GET /v1/documents/search`
+- `GET /v1/catalysts`
 - Development-only read-only Alpaca probe, bar backfill, and option snapshot endpoints.
+- Development-only Alpaca News, SEC filing, and SEC company-facts ingestion endpoints.
 - `POST /v1/commands/pause`
 - `POST /v1/commands/resume`, restricted to development + shadow mode
 
@@ -248,6 +265,7 @@ make check
 make doctor
 make docker-up
 make docker-doctor
+make docker-event-health
 make docker-down
 ```
 
@@ -318,6 +336,21 @@ The Compose stack is currently intended to remain running for local inspection. 
 - Live-money and broker order endpoints remain absent. Phase 1 uses only `data.alpaca.markets` and its market-data WebSocket.
 - SIP historical bars, OPRA option snapshots, and SIP WebSocket authentication were verified against the real service.
 - Because the credential was supplied through chat, rotation after the current validation is recommended.
+
+### D010 — Defer Phase 1B and begin Phase 2
+
+- Date: 2026-09-03 PDT.
+- The user directed that Phase 1B open-session work remain pending until the next market
+  open and that implementation proceed with Phase 2.
+- Phase 1B here includes real SIP frame capture plus live reconnect/gap-repair validation;
+  it is deferred, not waived.
+- Phase 2 begins with point-in-time event/document infrastructure and deterministic
+  catalyst deduplication. LLM analysis remains out of scope until Phase 4.
+- Source trust is explicit: SEC and verified issuer IR are primary, Alpaca News is
+  secondary, and social aggregates remain feature-flagged off pending a licensed vendor.
+- SEC network use requires a real operator/contact email in `SEC_USER_AGENT`; an agent
+  must not invent this identity.
+- Formal record: `docs/adr/0005-event-document-provenance.md`.
 
 ## Iteration and commit ledger
 
@@ -400,7 +433,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C004 — `Add market-session gap repair`
 
-- Git hash: resolve with `git log --grep='Add market-session gap repair'` after commit.
+- Git hash: `1d075ec`
 - Date: 2026-09-03 PDT.
 - User intent: continue Phase 1 after real Alpaca credentials and entitlements were validated.
 - Scope:
@@ -421,34 +454,83 @@ The Compose stack is currently intended to remain running for local inspection. 
   - Phase 1 code covers historical equity bars, option snapshots, live stock stream parsing, reconnects, and gap repair.
   - Historical and snapshot paths are externally verified; live frame persistence remains pending market hours.
 
+### C005 — `Add point-in-time event document pipeline`
+
+- Git hash: resolve with `git log --grep='Add point-in-time event document pipeline'` after commit.
+- Date: 2026-09-03 PDT.
+- User intent: keep Phase 1B pending until the next open market session and proceed with
+  Phase 2.
+- Scope:
+  - Added Alpaca News, SEC EDGAR filing/company-facts, approved-host RSS/Atom IR, and
+    disabled-by-default generic social aggregate adapters.
+  - Added immutable document/version, issuer entity, catalyst/link, and normalized
+    corporate-fact schemas under Alembic migrations `20260904_0004` through `0006`.
+  - Added raw-first document/fundamentals services that publish `document.ingested.v1`,
+    `catalyst.normalized.v1`, and `fundamental.fact.received.v1` only for new records.
+  - Added deterministic catalyst classification and conservative cross-document dedup by
+    symbol, class, time window, and headline similarity.
+  - Added document search, recent catalyst APIs, development-only ingestion APIs, the
+    `quant-events` CLI, health counts, and an operator runbook.
+  - Added ADR 0005 for versioned evidence, source trust, and deterministic catalyst identity.
+  - Marked Phase 1B open-session verification explicitly pending.
+- Architecture/decision impact:
+  - Documents have stable provider identities while every changed content version remains
+    immutable, preserving publication, ingestion, and correction times.
+  - Source tier is data, not inference: SEC/verified IR are primary; news is secondary;
+    social is aggregate and default-disabled.
+  - Catalyst dedup is deterministic and conservative; it does not depend on an LLM and is
+    not yet authorized as a production trading feature.
+- Validation:
+  - Flake8 and strict mypy passed across 29 source files; 22 tests passed.
+  - Tests cover duplicate coverage collapsing to one catalyst, replay idempotency,
+    correction versions, primary/secondary trust, SEC/XBRL normalization, IR parsing and
+    host validation, and the disabled social feature gate.
+  - Fresh SQLite Alembic upgrade-to-head, schema diff, and downgrade-to-base passed;
+    PostgreSQL upgraded through `20260904_0006`.
+  - Docker doctor passed with API, PostgreSQL, Redis, and MinIO healthy.
+  - A real bounded Alpaca News page inserted 10 documents, 10 versions, and 10 catalysts;
+    identical replay inserted zero documents, versions, catalysts, links, or events.
+  - Ten entries from Apple's official Newsroom feed passed as primary sources; identical
+    replay also inserted zero new records or events.
+- Expected global state after commit:
+  - The first complete Phase 2 event/document vertical slice is operational locally.
+  - Live SEC verification awaits a compliant contact identity; live IR verification awaits
+    an approved issuer feed; social remains intentionally disabled.
+  - No LLM, predictive strategy, broker submission, or live-money path is introduced.
+
 ## Open work
 
 Ordered near-term work:
 
-1. Capture real SIP trades/quotes/bars during an open market session and validate reconnect behavior.
-2. Exercise live reconnect and automatic gap repair during an open market session.
-3. Add Redis consumer groups, a transactional outbox, and dead-letter replay.
-4. Add provider lag, sequence-gap, bar/trade reconciliation, and data-quality dashboards.
-5. Confirm Alpaca retention/licensing and determine the long-history options vendor.
-6. Implement a point-in-time feature registry and offline/online parity tests.
-7. Add authentication and authorization before any remote Control API exposure.
-8. Add baseline strategies and realistic fill simulation before predictive ML.
-9. Expand the UI into the full Trading Control Center and Decision Inspector.
-10. Create a GitHub remote and later validate the cloud pipeline on a selected VPS.
+1. Configure a compliant SEC User-Agent and run live filing/company-facts ingestion.
+2. Select official issuer IR feeds and evaluate real cross-provider catalyst deduplication.
+3. During the next U.S. market session, finish Phase 1B real frame/reconnect/gap checks.
+4. Add Redis consumer groups, a transactional outbox, and dead-letter replay.
+5. Add provider lag, sequence-gap, bar/trade reconciliation, and data-quality dashboards.
+6. Confirm Alpaca retention/licensing and determine the long-history options vendor.
+7. Implement Phase 3 point-in-time features and offline/online parity tests.
+8. Add authentication and authorization before any remote Control API exposure.
+9. Add baseline strategies and realistic fill simulation before predictive ML.
+10. Expand the UI into the full Trading Control Center and Decision Inspector.
+11. Create a GitHub remote and later validate the cloud pipeline on a selected VPS.
 
 ## Blocked or unresolved decisions
 
 - GitHub organization/repository and branch-protection policy.
 - VPS/cloud provider, region, instance size, and domain/TLS approach.
 - Secure secret-delivery mechanism for the VPS and CI.
-- Historical options, news, fundamentals, and compliant social-data vendors/budgets.
+- Historical options, premium news/fundamentals, and compliant social-data vendors/budgets.
+- A monitored contact identity for compliant SEC fair-access requests.
+- Approved issuer IR feed URLs for live primary-source validation.
 - Final restricted-security list beyond META/work-related names.
 - Reconciled paper account size and percentage-versus-dollar risk limits.
 - Minimum shadow/paper sample sizes and promotion gates.
 - Notification channels beyond the dashboard.
 - Whether credit spreads enter the first paper release.
 
-None of these blocks continued local Phase 0 hardening. Provider credentials, public exposure, paper submission, and cloud deployment must remain gated until their corresponding decisions are made.
+None of these blocks local implementation or fixture testing. Provider credentials,
+public exposure, paper submission, and cloud deployment must remain gated until their
+corresponding decisions are made.
 
 ## Template for future commit entries
 
