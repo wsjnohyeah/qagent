@@ -25,6 +25,7 @@ ALLOWED_ACTIONS = {
     "runtime.resume",
     "pipeline.pause",
     "pipeline.resume",
+    "llm.budget.update",
     "llm.routes.update",
     "ml.model.promote",
     "strategy.adopt",
@@ -52,6 +53,10 @@ class AdminActionService:
         route_callback: Callable[
             [dict[str, str], str, str], dict[str, Any]
         ],
+        budget_preview_callback: Callable[[dict[str, Any]], dict[str, Any]],
+        budget_update_callback: Callable[
+            [dict[str, Any], str, str], dict[str, Any]
+        ],
         model_promote_callback: Callable[[str, str, str], dict[str, Any]],
         ledger: EventLedger | None = None,
     ) -> None:
@@ -61,6 +66,8 @@ class AdminActionService:
         self.code_changes = code_changes
         self.runtime_callback = runtime_callback
         self.route_callback = route_callback
+        self.budget_preview_callback = budget_preview_callback
+        self.budget_update_callback = budget_update_callback
         self.model_promote_callback = model_promote_callback
         self.ledger = ledger
 
@@ -342,6 +349,11 @@ class AdminActionService:
                 raise ValueError("LLM route action must define every workload exactly once")
             if set(str(value) for value in raw_routes.values()) - {"openai", "meta"}:
                 raise ValueError("LLM route action contains an unknown provider")
+        if action_type == "llm.budget.update":
+            raw_limits = parameters.get("workload_daily")
+            if not isinstance(raw_limits, dict):
+                raise ValueError("LLM budget action requires workload_daily limits")
+            return self.budget_preview_callback(raw_limits)
         if action_type == "code_change.open":
             try:
                 return self.code_changes.preview(
@@ -355,6 +367,7 @@ class AdminActionService:
             "runtime.resume": "Resume eligible shadow exposure",
             "pipeline.pause": "Pause this pipeline",
             "pipeline.resume": "Enable this pipeline",
+            "llm.budget.update": "Activate new daily LLM workload budget limits",
             "llm.routes.update": "Activate a new immutable LLM routing revision",
             "ml.model.promote": "Promote a gate-eligible ML challenger to champion",
             "strategy.adopt": "Adopt a gate-eligible strategy for shadow use",
@@ -429,6 +442,11 @@ class AdminActionService:
                 reason,
                 confirmed_by,
             )
+        if action_type == "llm.budget.update":
+            raw_limits = parameters.get("workload_daily")
+            if not isinstance(raw_limits, dict):
+                raise ValueError("LLM budget parameters are invalid")
+            return self.budget_update_callback(raw_limits, reason, confirmed_by)
         if action_type == "ml.model.promote":
             return self.model_promote_callback(target_id, reason, confirmed_by)
         if action_type == "strategy.adopt":

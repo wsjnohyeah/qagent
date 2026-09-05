@@ -191,6 +191,53 @@ def test_code_change_session_is_scoped_and_does_not_expose_a_shell(
         assert sessions[0]["worktree_path"] is None
 
 
+def test_workload_budget_update_requires_confirmation(settings: Settings) -> None:
+    with TestClient(create_app(settings)) as client:
+        initial = client.get("/v1/llm/budget").json()
+        limits = initial["limits"]["workload_daily"]
+        over_cap = {name: dict(limit) for name, limit in limits.items()}
+        over_cap["interactive_explanation"]["max_tokens"] = 500_001
+        rejected = client.put(
+            "/v1/llm/budget",
+            json={"workload_daily": over_cap, "reason": "Unsafe oversized limit"},
+        )
+        assert rejected.status_code == 422
+        limits["interactive_explanation"] = {
+            "max_tokens": 125_000,
+            "max_estimated_cost_usd": "4.00",
+        }
+        proposed = client.put(
+            "/v1/llm/budget",
+            json={
+                "workload_daily": limits,
+                "reason": "Tune each workload budget from Control Center",
+            },
+        )
+        assert proposed.status_code == 200
+        action = proposed.json()
+        assert action["status"] == "PENDING_CONFIRMATION"
+        assert action["preview"]["resets_consumption"] is False
+        assert client.get("/v1/llm/budget").json()["policy_source"] == "yaml_base"
+
+        confirmed = client.post(
+            f"/v1/actions/{action['action_request_id']}/confirm",
+            json={"confirmation_phrase": action["confirmation_phrase"]},
+        )
+        assert confirmed.status_code == 200
+        effective = client.get("/v1/llm/budget").json()
+        assert effective["policy_source"] == "control_center"
+        assert effective["limits"]["workload_daily"][
+            "interactive_explanation"
+        ] == {
+            "max_tokens": 125_000,
+            "max_estimated_cost_usd": "4.00",
+        }
+        history = client.get("/v1/llm/budget/history").json()
+        assert history[0]["reason"] == (
+            "Tune each workload budget from Control Center"
+        )
+
+
 def test_production_rejects_plaintext_admin_password() -> None:
     from pydantic import ValidationError
     import pytest

@@ -114,6 +114,12 @@ curl -fsS http://127.0.0.1:8000/v1/llm/budget
 The USD figures are operator planning estimates and must be reviewed against provider
 contracts before production. Exhaustion returns HTTP 429 before the provider is called.
 
+The authenticated Overview page can create a complete daily workload-limit revision through
+`PUT /v1/llm/budget`. The change remains pending until the administrator confirms its exact
+preview. Confirmed revisions are immutable, are valid only for their matching YAML base hash,
+and update the existing UTC-day window without resetting consumed or reserved capacity.
+Project and provider caps remain the outer hard limits.
+
 ## Evidence-bound research analysis
 
 The Phase 4 analyst accepts a persisted point-in-time feature snapshot, retrieves only

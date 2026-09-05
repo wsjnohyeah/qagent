@@ -6,7 +6,7 @@ Context format: v1
 
 Current phase: Phases 0–6 implemented and locally verified; Phase 6 UI review remains iterative
 
-Current documented baseline: C023 — `Show LLM budget usage on overview`
+Current documented baseline: C024 — `Add confirmed per-workload LLM budget controls`
 
 ## Purpose and authority
 
@@ -87,6 +87,9 @@ A Git commit cannot contain its own content-derived hash without changing that h
 - Overview displays the current UTC daily/monthly LLM token consumption and estimated cost
   against configured project limits, with provider/workload breakdowns and in-flight
   reservations sourced from the durable budget ledger.
+- Each LLM workload's daily token and estimated-cost ceiling can be revised from Overview.
+  A complete immutable revision and an exact second confirmation are required; current-day
+  consumption is preserved, and tracked project/provider caps remain hard outer limits.
 - One persistent System Steward receives a bounded current-state snapshot across data,
   quality, jobs, validations, analyses, models, strategies, lists, shadow state, and admin
   actions. It must cite supplied object IDs and may only propose allowlisted actions.
@@ -180,7 +183,7 @@ Development service ports bind only to loopback. The local Compose credentials a
 - Phase 2 fixtures verify primary/secondary source distinction, correction-version retention, SEC filing and XBRL normalization, IR feed parsing, and cross-document catalyst deduplication.
 - Alpaca REST results are now normalized to the internal half-open `[start, end)` contract;
   `market_data_quality@0.2.0` rejects out-of-window rows and live gap seeds use only 1Min bars.
-- Alembic migrations through `20260905_0020` own the Phase 3D/4/5/6 schema; the Phase 6
+- Alembic migrations through `20260905_0021` own the Phase 3D/4/5/6 schema; the Phase 6
   revision and a fresh SQLite base-to-head downgrade/re-upgrade roundtrip passed.
 - `make research-smoke`: passed with 100 deterministic daily bars, three immutable baseline
   experiments, nonzero cost modeling, matching offline/online feature hashes, and ordered
@@ -495,7 +498,9 @@ data. `research_analysis@0.1.0` accepts only research recommendations; non-absta
 must cite exact bundle IDs, malformed or invented citations are retained as rejected output,
 and missing independent evidence causes a zero-cost abstention. `llm_budget@0.1.0` atomically
 reserves conservative token and estimated-cost ceilings across project/provider/workload
-windows. The Decision Inspector renders the stored evidence-to-call-to-analysis graph.
+windows. Confirmed Control Center revisions can replace the complete workload-limit map
+without resetting current-period consumption or exceeding the YAML project cap. The Decision
+Inspector renders the stored evidence-to-call-to-analysis graph.
 
 The Phase 5A reliability layer validates every historical ingestion and backtest dataset
 against `market_data_quality@0.2.0`, including identity, chronology, OHLC, availability,
@@ -668,10 +673,10 @@ year or more of data.
 | LLM gateway | `src/agentic_quant/llm.py` | versioned workload routing and bounded OpenAI/Meta Responses calls |
 | LLM persistence | `src/agentic_quant/llm_store.py` | immutable route revisions, source/config lineage, output, usage, latency, and status |
 | LLM routing | `configs/model_routing.yaml` | premium/value model assignments and bounded provider settings |
-| LLM budgets | `src/agentic_quant/llm_budget.py`, `configs/llm_budget.yaml` | atomic reservation/settlement, versioned token/cost ceilings, and Control Center usage summary |
+| LLM budgets | `src/agentic_quant/llm_budget.py`, `configs/llm_budget.yaml` | atomic reservation/settlement, confirmed immutable workload-limit revisions, and Control Center usage summary |
 | Research intelligence | `src/agentic_quant/intelligence.py` | point-in-time retrieval, structured analyst, citation checks, abstention, Decision Inspector graph |
 | ML training/registry | `src/agentic_quant/ml.py`, `configs/ml_policy.yaml` | PIT labels, logistic/stump walk-forward, calibration, drift, JSON registry, forecasts |
-| Schema migrations | `migrations/` | Alembic schema history through completed Phase 6 (`20260905_0020`) |
+| Schema migrations | `migrations/` | Alembic schema history through completed Phase 6 (`20260905_0021`) |
 
 ## Current executable risk baseline
 
@@ -724,6 +729,8 @@ Implemented endpoints:
 - `GET /v1/research/validations/{validation_report_id}`
 - `GET /v1/llm/routes`
 - `GET /v1/llm/budget`
+- `PUT /v1/llm/budget`; proposes a confirmation-gated complete workload-limit revision
+- `GET /v1/llm/budget/history`
 - `PUT /v1/llm/routes`, restricted to development; proposes a confirmation-gated complete
   route revision
 - `GET /v1/llm/routes/history`
@@ -1193,6 +1200,20 @@ The Compose stack is currently intended to remain running for local inspection. 
 - Dollar amounts remain labeled estimates derived from configured planning rates, not
   provider invoices. This reporting surface does not change reservation enforcement or
   model authority.
+
+### D032 — Workload budgets are confirmation-gated immutable revisions
+
+- Date: 2026-09-05 PDT.
+- The user requested direct control of the LLM budget ceiling for every workflow.
+- Decision: Overview edits the complete five-workload daily limit map, including maximum
+  tokens and estimated USD for each workload. Saving creates a pending administrator action;
+  the revision becomes effective only after the existing exact confirmation protocol.
+- The tracked YAML remains the reviewed base and owns project/provider hard caps. A database
+  revision is accepted only against the current YAML content hash and cannot exceed the
+  project daily cap. A base-file change invalidates stale overrides.
+- Revision activation updates the limit on an existing current-day workload window instead
+  of generating a fresh accounting key. Previously consumed and in-flight amounts therefore
+  remain counted, preventing repeated edits from resetting the budget.
 
 ## Iteration and commit ledger
 
@@ -1958,7 +1979,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C023 — `Show LLM budget usage on overview`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `af16e77`.
 - Date: 2026-09-05 PDT.
 - User intent: show how much estimated LLM money and how many tokens the system has consumed
   directly on the main Overview screen.
@@ -1983,6 +2004,38 @@ The Compose stack is currently intended to remain running for local inspection. 
   - Overview makes current LLM resource consumption and remaining headroom visible without
     weakening the pre-call budget breaker or exposing credentials.
   - Costs remain planning estimates; provider invoices remain externally authoritative.
+
+### C024 — `Add confirmed per-workload LLM budget controls`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-05 PDT.
+- User intent: allow the administrator to adjust the LLM budget ceiling independently for
+  every workflow from the Control Center.
+- Scope:
+  - Added immutable `llm_budget_revisions` under Alembic revision `20260905_0021`, tied to
+    the content hash of the tracked YAML base policy.
+  - Added effective-policy resolution, revision history, complete-map validation, project-cap
+    enforcement, and activation that preserves current-window consumption/reservations.
+  - Added `llm.budget.update` to the administrator action allowlist with exact before/after
+    preview and second-step confirmation.
+  - Added authenticated budget update/history APIs and an Overview editor for all five
+    workload token and estimated-USD daily limits.
+  - Added manager, API, migration-health, unsafe-cap, UI-contract, and audit-event coverage;
+    updated README, runbooks, ADR 0014, project state, and master context.
+- Architecture/decision impact:
+  - YAML remains the outer project/provider authority while confirmed SQL revisions are the
+    runtime workload-control layer. A YAML base change makes prior revisions inapplicable.
+  - Limit changes cannot erase usage or create a fresh daily allowance. LLM authority,
+    trading boundaries, and provider billing semantics are unchanged.
+- Validation:
+  - JavaScript compilation, Flake8, strict mypy, and 16 targeted budget/Phase 6/API tests
+    passed before the full suite.
+  - `make check` passed: Flake8, strict mypy across 49 source files, and 80 tests.
+  - A fresh SQLite base-to-`20260905_0021` migration, zero-drift check, downgrade to 0020,
+    re-upgrade, authenticated local doctor, secret scan, and Git diff checks passed.
+- Expected global state after commit:
+  - The sole administrator can tune all workload budgets in the web UI with durable audit
+    history and explicit confirmation while project/provider hard caps continue to fail closed.
 
 ## Open work
 

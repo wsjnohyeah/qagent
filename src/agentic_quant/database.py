@@ -747,6 +747,20 @@ llm_routing_revisions = Table(
     Column("created_at", DateTime(timezone=True), nullable=False, index=True),
 )
 
+llm_budget_revisions = Table(
+    "llm_budget_revisions",
+    metadata,
+    Column("budget_revision_id", String(36), primary_key=True),
+    Column("base_policy_version", String(80), nullable=False),
+    Column("base_policy_sha256", String(64), nullable=False, index=True),
+    Column("policy_version", String(120), nullable=False, unique=True),
+    Column("policy_sha256", String(64), nullable=False),
+    Column("workload_limits_json", JSON, nullable=False),
+    Column("reason", Text, nullable=False),
+    Column("created_by", String(80), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+)
+
 llm_budget_windows = Table(
     "llm_budget_windows",
     metadata,

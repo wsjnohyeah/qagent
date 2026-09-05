@@ -14,6 +14,7 @@ from agentic_quant.domain import (
     EvidenceReference,
     LLMProviderName,
     LLMUsage,
+    LLMWorkload,
     PointInTimeFeatureSnapshot,
     ResearchAnalysisStatus,
     SourceDocument,
@@ -318,3 +319,78 @@ def test_budget_breaker_blocks_before_provider_call(
         )
     assert provider.calls == 0
     assert LLMStore(ledger.engine).health_summary()["llm_invocations"] == 1
+
+
+def test_workload_budget_revision_is_immutable_and_does_not_reset_usage(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    policy = load_llm_budget_policy(ROOT / "configs/llm_budget.yaml")
+    budget = LLMBudgetManager(ledger.engine, policy, ledger=ledger)
+    now = datetime.now(UTC)
+    budget.reserve(
+        invocation_id="budget-before-revision",
+        provider=LLMProviderName.META,
+        workload=LLMWorkload.INTERACTIVE_EXPLANATION,
+        input_text="x",
+        instructions="x",
+        max_output_tokens=5,
+        now=now,
+    )
+    budget.settle(
+        invocation_id="budget-before-revision",
+        usage=LLMUsage(input_tokens=3, output_tokens=2, total_tokens=5),
+        now=now,
+    )
+    revised = dict(policy.limits.workload_daily)
+    revised[LLMWorkload.INTERACTIVE_EXPLANATION] = LLMBudgetLimit(
+        max_tokens=10,
+        max_estimated_cost_usd=Decimal("5"),
+    )
+
+    preview = budget.preview_workload_limits(revised)
+    assert preview["before"]["interactive_explanation"]["max_tokens"] == 150_000
+    assert preview["after"]["interactive_explanation"]["max_tokens"] == 10
+    revision = budget.activate_workload_limits(
+        raw_limits=revised,
+        reason="Lower interactive test budget",
+        created_by="operator",
+        now=now,
+    )
+
+    summary = budget.summary()
+    assert summary["policy_source"] == "control_center"
+    assert summary["active_revision_id"] == revision["budget_revision_id"]
+    assert summary["limits"]["workload_daily"]["interactive_explanation"][
+        "max_tokens"
+    ] == 10
+    workload_window = next(
+        item
+        for item in summary["windows"]
+        if item["scope"] == "workload:interactive_explanation"
+    )
+    assert workload_window["consumed_tokens"] == 5
+    assert workload_window["token_limit"] == 10
+    assert len(budget.recent_revisions()) == 1
+    assert ledger.by_correlation_id(revision["budget_revision_id"])[-1][
+        "event_type"
+    ] == "llm.budget.activated.v1"
+
+    changed_policy = policy.model_copy(update={"version": "llm_budget@0.1.1"})
+    changed_summary = LLMBudgetManager(ledger.engine, changed_policy).summary()
+    assert changed_summary["policy_source"] == "yaml_base"
+    assert changed_summary["limits"]["workload_daily"][
+        "interactive_explanation"
+    ]["max_tokens"] == 150_000
+
+    with pytest.raises(LLMBudgetExceededError, match="interactive_explanation"):
+        budget.reserve(
+            invocation_id="budget-after-revision",
+            provider=LLMProviderName.META,
+            workload=LLMWorkload.INTERACTIVE_EXPLANATION,
+            input_text="x",
+            instructions="x",
+            max_output_tokens=5,
+            now=now,
+        )

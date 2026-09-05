@@ -418,6 +418,8 @@ AGENTS.md                mandatory operating rules for coding/deployment agents
 - `GET /v1/research/validations/{validation_report_id}`
 - `GET /v1/llm/routes`
 - `GET /v1/llm/budget`
+- `PUT /v1/llm/budget` — creates a confirmation-gated immutable workload-limit revision
+- `GET /v1/llm/budget/history`
 - `PUT /v1/llm/routes` — development only; creates an immutable complete routing revision
 - `GET /v1/llm/routes/history`
 - `POST /v1/llm/chat` — development only; incurs a bounded provider call

@@ -74,6 +74,7 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert data_health["llm_routing_revisions"] == 0
         assert data_health["llm_budget_windows"] == 0
         assert data_health["llm_budget_reservations"] == 0
+        assert data_health["llm_budget_revisions"] == 0
         assert data_health["research_analyses"] == 0
         assert data_health["ml_training_runs"] == 0
         assert data_health["ml_models"] == 0
@@ -162,6 +163,8 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert "function renderMarkdown" in page.text
         assert "LLM budget &amp; usage" in page.text
         assert "renderLLMBudget" in page.text
+        assert "Adjust workload limits" in page.text
+        assert "openBudgetEditor" in page.text
         assert '<aside id="steward"' not in page.text
         oversized_backfill = client.post(
             "/v1/market-data/alpaca/backfill",

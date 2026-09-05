@@ -48,6 +48,7 @@ from agentic_quant.llm import (
 )
 from agentic_quant.llm_budget import (
     LLMBudgetExceededError,
+    LLMBudgetLimit,
     LLMBudgetManager,
     load_llm_budget_policy,
 )
@@ -175,6 +176,19 @@ class LLMRouteUpdate(BaseModel):
         return self
 
 
+class LLMBudgetUpdate(BaseModel):
+    workload_daily: dict[LLMWorkload, LLMBudgetLimit]
+    reason: str = Field(min_length=3, max_length=500)
+
+    @model_validator(mode="after")
+    def workloads_are_complete(self) -> LLMBudgetUpdate:
+        if set(self.workload_daily) != set(LLMWorkload):
+            raise ValueError(
+                "workload_daily must define every supported workload exactly once"
+            )
+        return self
+
+
 class LLMChatTurn(BaseModel):
     role: Literal["user", "assistant"]
     content: str = Field(min_length=1, max_length=20_000)
@@ -244,6 +258,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     llm_budget_manager = LLMBudgetManager(
         ledger.engine,
         load_llm_budget_policy(app_settings.llm_budget_path),
+        ledger=ledger,
     )
     llm_gateway = build_llm_gateway(
         app_settings,
@@ -296,6 +311,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "effective_routing": llm_gateway.status(),
         }
 
+    def preview_budget(raw_limits: dict[str, Any]) -> dict[str, Any]:
+        return llm_budget_manager.preview_workload_limits(raw_limits)
+
+    def activate_budget(
+        raw_limits: dict[str, Any],
+        reason: str,
+        created_by: str,
+    ) -> dict[str, Any]:
+        revision = llm_budget_manager.activate_workload_limits(
+            raw_limits=raw_limits,
+            reason=reason,
+            created_by=created_by,
+        )
+        return {
+            "revision": revision,
+            "effective_budget": llm_budget_manager.summary(),
+        }
+
     def promote_model(
         model_id: str,
         reason: str,
@@ -315,6 +348,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         code_changes,
         runtime_callback=set_runtime_paused,
         route_callback=activate_routes,
+        budget_preview_callback=preview_budget,
+        budget_update_callback=activate_budget,
         model_promote_callback=promote_model,
         ledger=ledger,
     )
@@ -586,7 +621,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "phase_1b_open_session_validation": "completed",
             "llm_routing_version": llm_status["routing_version"],
             "llm_route_source": llm_status["route_source"],
-            "llm_budget_policy": llm_budget_manager.policy.version,
+            "llm_budget_policy": llm_budget_manager.effective_policy_version(),
             "ml_policy": ml_policy.version,
             "openai_configured": app_settings.openai_configured,
             "meta_model_configured": app_settings.meta_model_configured,
@@ -927,6 +962,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.get("/v1/llm/budget")
     def llm_budget() -> dict[str, Any]:
         return llm_budget_manager.summary()
+
+    @application.put("/v1/llm/budget")
+    def update_llm_budget(
+        payload: LLMBudgetUpdate,
+        request: Request,
+    ) -> dict[str, Any]:
+        try:
+            return actions.propose(
+                action_type="llm.budget.update",
+                target_type="llm_budget",
+                target_id="active",
+                parameters={
+                    "workload_daily": {
+                        workload.value: limit.model_dump(mode="json")
+                        for workload, limit in payload.workload_daily.items()
+                    }
+                },
+                reason=payload.reason,
+                requested_by=admin_username(request),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @application.get("/v1/llm/budget/history")
+    def llm_budget_history(
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> list[dict[str, Any]]:
+        return llm_budget_manager.recent_revisions(limit=limit)
 
     @application.put("/v1/llm/routes")
     def update_llm_routes(

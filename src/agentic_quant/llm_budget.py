@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import UTC, datetime
 from decimal import Decimal, ROUND_CEILING
 from pathlib import Path
@@ -11,13 +13,20 @@ from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 import yaml
 
-from agentic_quant.database import llm_budget_reservations, llm_budget_windows
+from agentic_quant.database import (
+    llm_budget_reservations,
+    llm_budget_revisions,
+    llm_budget_windows,
+)
 from agentic_quant.domain import (
+    EventEnvelope,
     FrozenModel,
     LLMProviderName,
     LLMUsage,
     LLMWorkload,
 )
+from agentic_quant.ids import uuid7
+from agentic_quant.ledger import EventLedger
 
 
 class LLMBudgetExceededError(RuntimeError):
@@ -69,14 +78,28 @@ def load_llm_budget_policy(path: Path) -> LLMBudgetPolicy:
         return LLMBudgetPolicy.model_validate(yaml.safe_load(handle))
 
 
+def _canonical_sha256(value: Any) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 class LLMBudgetManager:
     def __init__(
         self,
         engine: Engine,
         policy: LLMBudgetPolicy,
+        ledger: EventLedger | None = None,
     ) -> None:
         self.engine = engine
         self.policy = policy
+        self.ledger = ledger
+        self.base_policy_sha256 = _canonical_sha256(policy.model_dump(mode="json"))
 
     def reserve(
         self,
@@ -92,8 +115,9 @@ class LLMBudgetManager:
         timestamp = now or datetime.now(UTC)
         if timestamp.tzinfo is None:
             raise ValueError("Budget reservation time must be timezone-aware")
+        effective_policy = self._effective_policy()
         input_bytes = len((instructions + input_text).encode("utf-8"))
-        divisor = self.policy.reservation.input_bytes_per_token
+        divisor = effective_policy.reservation.input_bytes_per_token
         reserved_input = (input_bytes + divisor - 1) // divisor
         reserved_tokens = reserved_input + max_output_tokens
         reserved_cost = self._cost_microusd(
@@ -105,12 +129,13 @@ class LLMBudgetManager:
             provider=provider,
             workload=workload,
             now=timestamp,
+            policy=effective_policy,
         )
         with self.engine.begin() as connection:
             connection.execute(
                 insert(llm_budget_reservations).values(
                     invocation_id=invocation_id,
-                    policy_version=self.policy.version,
+                    policy_version=effective_policy.version,
                     provider=provider.value,
                     workload=workload.value,
                     reserved_input_tokens=reserved_input,
@@ -129,7 +154,7 @@ class LLMBudgetManager:
                 connection.execute(
                     self._insert_ignore(llm_budget_windows).values(
                         window_key=window_key,
-                        policy_version=self.policy.version,
+                        policy_version=effective_policy.version,
                         scope=scope,
                         period_kind=period_kind,
                         period_start=period_start,
@@ -141,6 +166,18 @@ class LLMBudgetManager:
                         consumed_tokens=0,
                         reserved_cost_microusd=0,
                         consumed_cost_microusd=0,
+                        updated_at=timestamp,
+                    )
+                )
+                connection.execute(
+                    update(llm_budget_windows)
+                    .where(llm_budget_windows.c.window_key == window_key)
+                    .values(
+                        policy_version=effective_policy.version,
+                        token_limit=limit.max_tokens,
+                        cost_limit_microusd=self._usd_to_microusd(
+                            limit.max_estimated_cost_usd
+                        ),
                         updated_at=timestamp,
                     )
                 )
@@ -274,6 +311,8 @@ class LLMBudgetManager:
             )
 
     def summary(self) -> dict[str, Any]:
+        revision = self.latest_revision()
+        effective_policy = self._effective_policy(revision=revision)
         with self.engine.connect() as connection:
             windows = [
                 dict(row._mapping)
@@ -308,12 +347,158 @@ class LLMBudgetManager:
                 self._microusd_to_usd(item.pop("consumed_cost_microusd"))
             )
         return {
-            "policy_version": self.policy.version,
+            "base_policy_version": self.policy.version,
+            "base_policy_sha256": self.base_policy_sha256,
+            "policy_version": effective_policy.version,
+            "policy_source": "control_center" if revision is not None else "yaml_base",
+            "active_revision_id": (
+                revision["budget_revision_id"] if revision is not None else None
+            ),
             "pricing_is_estimate": True,
-            "limits": self.policy.limits.model_dump(mode="json"),
+            "limits": effective_policy.limits.model_dump(mode="json"),
             "windows": windows,
             "reservation_counts": reservation_counts,
         }
+
+    def preview_workload_limits(self, raw_limits: dict[str, Any]) -> dict[str, Any]:
+        limits = self._validate_workload_limits(raw_limits)
+        current = self._effective_policy().limits.workload_daily
+        return {
+            "summary": "Activate new daily LLM workload budget limits",
+            "before": {
+                workload.value: current[workload].model_dump(mode="json")
+                for workload in LLMWorkload
+            },
+            "after": {
+                workload.value: limits[workload].model_dump(mode="json")
+                for workload in LLMWorkload
+            },
+            "project_daily_hard_cap": (
+                self.policy.limits.project_daily.model_dump(mode="json")
+            ),
+            "resets_consumption": False,
+            "live_broker_effect": False,
+        }
+
+    def effective_policy_version(self) -> str:
+        return self._effective_policy().version
+
+    def activate_workload_limits(
+        self,
+        *,
+        raw_limits: dict[str, Any],
+        reason: str,
+        created_by: str,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        limits = self._validate_workload_limits(raw_limits)
+        timestamp = now or datetime.now(UTC)
+        if timestamp.tzinfo is None:
+            raise ValueError("Budget revision time must be timezone-aware")
+        if not 3 <= len(reason.strip()) <= 500:
+            raise ValueError("Budget revision reason must contain 3 to 500 characters")
+        revision_id = uuid7()
+        policy_version = f"{self.policy.version}+control.{revision_id}"
+        workload_json = {
+            workload.value: limits[workload].model_dump(mode="json")
+            for workload in LLMWorkload
+        }
+        effective_limits = self.policy.limits.model_copy(
+            update={"workload_daily": limits}
+        )
+        policy_sha256 = _canonical_sha256(
+            {
+                "base_policy_sha256": self.base_policy_sha256,
+                "limits": effective_limits.model_dump(mode="json"),
+            }
+        )
+        values = {
+            "budget_revision_id": revision_id,
+            "base_policy_version": self.policy.version,
+            "base_policy_sha256": self.base_policy_sha256,
+            "policy_version": policy_version,
+            "policy_sha256": policy_sha256,
+            "workload_limits_json": workload_json,
+            "reason": reason.strip(),
+            "created_by": created_by,
+            "created_at": timestamp,
+        }
+        daily_start = timestamp.astimezone(UTC).replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        with self.engine.begin() as connection:
+            connection.execute(insert(llm_budget_revisions).values(**values))
+            for workload, limit in limits.items():
+                window_key = self._window_key(
+                    scope=f"workload:{workload.value}",
+                    kind="daily",
+                    start=daily_start,
+                )
+                connection.execute(
+                    update(llm_budget_windows)
+                    .where(llm_budget_windows.c.window_key == window_key)
+                    .values(
+                        policy_version=policy_version,
+                        token_limit=limit.max_tokens,
+                        cost_limit_microusd=self._usd_to_microusd(
+                            limit.max_estimated_cost_usd
+                        ),
+                        updated_at=timestamp,
+                    )
+                )
+        if self.ledger is not None:
+            self.ledger.append(
+                EventEnvelope(
+                    event_id=uuid7(),
+                    event_type="llm.budget.activated.v1",
+                    event_time=timestamp,
+                    emitted_at=datetime.now(UTC),
+                    producer="llm-budget-manager",
+                    correlation_id=revision_id,
+                    payload={
+                        "policy_version": policy_version,
+                        "policy_sha256": policy_sha256,
+                        "workload_daily": workload_json,
+                        "created_by": created_by,
+                    },
+                )
+            )
+        return self._serialize_revision(values)
+
+    def latest_revision(self) -> dict[str, Any] | None:
+        statement = (
+            select(llm_budget_revisions)
+            .where(
+                llm_budget_revisions.c.base_policy_sha256
+                == self.base_policy_sha256
+            )
+            .order_by(
+                llm_budget_revisions.c.created_at.desc(),
+                llm_budget_revisions.c.budget_revision_id.desc(),
+            )
+            .limit(1)
+        )
+        with self.engine.connect() as connection:
+            row = connection.execute(statement).one_or_none()
+        return self._serialize_revision(dict(row._mapping)) if row is not None else None
+
+    def recent_revisions(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        statement = (
+            select(llm_budget_revisions)
+            .order_by(
+                llm_budget_revisions.c.created_at.desc(),
+                llm_budget_revisions.c.budget_revision_id.desc(),
+            )
+            .limit(limit)
+        )
+        with self.engine.connect() as connection:
+            return [
+                self._serialize_revision(dict(row._mapping))
+                for row in connection.execute(statement)
+            ]
 
     def health_summary(self) -> dict[str, int]:
         with self.engine.connect() as connection:
@@ -328,6 +513,11 @@ class LLMBudgetManager:
                         select(func.count()).select_from(llm_budget_reservations)
                     ).scalar_one()
                 ),
+                "llm_budget_revisions": int(
+                    connection.execute(
+                        select(func.count()).select_from(llm_budget_revisions)
+                    ).scalar_one()
+                ),
             }
 
     def _window_specs(
@@ -336,29 +526,30 @@ class LLMBudgetManager:
         provider: LLMProviderName,
         workload: LLMWorkload,
         now: datetime,
+        policy: LLMBudgetPolicy,
     ) -> tuple[tuple[str, str, str, datetime, LLMBudgetLimit], ...]:
         utc_now = now.astimezone(UTC)
         daily_start = utc_now.replace(hour=0, minute=0, second=0, microsecond=0)
         monthly_start = daily_start.replace(day=1)
         definitions = (
-            ("project", "daily", daily_start, self.policy.limits.project_daily),
-            ("project", "monthly", monthly_start, self.policy.limits.project_monthly),
+            ("project", "daily", daily_start, policy.limits.project_daily),
+            ("project", "monthly", monthly_start, policy.limits.project_monthly),
             (
                 f"provider:{provider.value}",
                 "daily",
                 daily_start,
-                self.policy.limits.provider_daily[provider],
+                policy.limits.provider_daily[provider],
             ),
             (
                 f"workload:{workload.value}",
                 "daily",
                 daily_start,
-                self.policy.limits.workload_daily[workload],
+                policy.limits.workload_daily[workload],
             ),
         )
         return tuple(
             (
-                f"{self.policy.version}:{scope}:{kind}:{start.date().isoformat()}",
+                self._window_key(scope=scope, kind=kind, start=start),
                 scope,
                 kind,
                 start,
@@ -366,6 +557,65 @@ class LLMBudgetManager:
             )
             for scope, kind, start, limit in definitions
         )
+
+    def _effective_policy(
+        self,
+        *,
+        revision: dict[str, Any] | None = None,
+    ) -> LLMBudgetPolicy:
+        selected = revision if revision is not None else self.latest_revision()
+        if selected is None:
+            return self.policy
+        workload_limits = {
+            LLMWorkload(workload): LLMBudgetLimit.model_validate(limit)
+            for workload, limit in selected["workload_daily"].items()
+        }
+        return self.policy.model_copy(
+            update={
+                "version": str(selected["policy_version"]),
+                "limits": self.policy.limits.model_copy(
+                    update={"workload_daily": workload_limits}
+                ),
+            }
+        )
+
+    def _validate_workload_limits(
+        self,
+        raw_limits: dict[str, Any],
+    ) -> dict[LLMWorkload, LLMBudgetLimit]:
+        normalized = {
+            (key.value if isinstance(key, LLMWorkload) else str(key)): value
+            for key, value in raw_limits.items()
+        }
+        expected = {workload.value for workload in LLMWorkload}
+        if set(normalized) != expected:
+            raise ValueError("Budget revision must define every workload exactly once")
+        limits = {
+            workload: LLMBudgetLimit.model_validate(normalized[workload.value])
+            for workload in LLMWorkload
+        }
+        project_cap = self.policy.limits.project_daily
+        for workload, limit in limits.items():
+            if limit.max_tokens > project_cap.max_tokens:
+                raise ValueError(
+                    f"{workload.value} token limit exceeds the project daily hard cap"
+                )
+            if limit.max_estimated_cost_usd > project_cap.max_estimated_cost_usd:
+                raise ValueError(
+                    f"{workload.value} cost limit exceeds the project daily hard cap"
+                )
+        return limits
+
+    def _window_key(self, *, scope: str, kind: str, start: datetime) -> str:
+        return f"{self.policy.version}:{scope}:{kind}:{start.date().isoformat()}"
+
+    @staticmethod
+    def _serialize_revision(item: dict[str, Any]) -> dict[str, Any]:
+        created_at = item["created_at"]
+        if isinstance(created_at, datetime) and created_at.tzinfo is None:
+            item["created_at"] = created_at.replace(tzinfo=UTC)
+        item["workload_daily"] = item.pop("workload_limits_json")
+        return item
 
     def _cost_microusd(
         self,

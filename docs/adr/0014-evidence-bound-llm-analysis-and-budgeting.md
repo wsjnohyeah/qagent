@@ -24,6 +24,10 @@ gain an execution path. Provider response success is not equivalent to a valid a
 - Calls reserve conservative token and estimated-cost capacity atomically across project,
   provider, and workload windows. Successful calls settle actual usage and failed provider
   calls release their reservation. Pricing is a versioned planning estimate, not an invoice.
+- An authenticated administrator may replace all workload daily limits through an immutable,
+  confirmation-gated revision tied to the current YAML base hash. A revision updates the
+  active window limits without resetting its consumption; project/provider ceilings remain
+  hard outer limits.
 - `ai_infrastructure_graph@0.1.0` exposes evidence-to-invocation-to-analysis lineage through
   the Decision Inspector API. The graph grants no promotion, risk, portfolio, or broker
   authority.

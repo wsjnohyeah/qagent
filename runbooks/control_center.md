@@ -60,6 +60,12 @@ settled consumption from in-flight reservations, shows project limits, and break
 capacity down by provider and workload. Dollar values are estimates calculated from
 `configs/llm_budget.yaml`; they are planning controls and may differ from provider invoices.
 
+Use **Adjust workload limits** to edit the daily token and estimated-cost ceilings for all
+five workloads. Saving only creates a pending action; review its exact before/after preview
+and confirm it separately. The confirmed revision is immutable and applies to subsequent
+reservations without clearing consumption already recorded in the current UTC window. The
+tracked YAML project limit remains a non-editable hard cap in this interface.
+
 ## Confirmation protocol
 
 The System Steward and UI may create only allowlisted `PENDING_CONFIRMATION` actions. A

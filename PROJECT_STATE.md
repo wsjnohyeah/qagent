@@ -31,7 +31,7 @@
 - Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
   experiment runs, backtest trades, corporate actions, historical universe membership,
   feature parity checks, and walk-forward reports are stored through Alembic revision
-  `20260905_0020`.
+  `20260905_0021`.
 - The Phase 3 runner provides buy-and-hold, long/cash momentum, and long/cash
   mean-reversion baselines with next-bar execution, commission, slippage, metrics, hashes,
   and append-only completion events.
@@ -64,13 +64,16 @@
   overview, lists, data, strategy, shadow, pipeline, model, activity, and code-change objects.
 - Overview reads the persistent LLM budget ledger and shows current daily/monthly token and
   estimated-cost consumption, reservations, limits, and provider/workload utilization.
+- Each workload's daily token and estimated-cost limit is editable through an immutable,
+  explicit-confirmation revision; changes preserve rather than reset current-period usage,
+  and the YAML project daily limit remains a hard cap.
 - One System Steward reads a bounded current-state snapshot, returns validated object
   citations, persists conversations, and can propose allowlisted admin actions. It cannot
   execute them; a separate exact confirmation is required.
 - The persistent broker-free shadow runtime admits only gate-eligible, human-confirmed
   strategies, processes newly stored bars idempotently, and records modeled virtual
   signal/order/fill events, cash, and P&L. No broker adapter exists.
-- Final Phase 6 validation passes 78 tests, authenticated local and PostgreSQL/MinIO/Redis
+- Current Phase 6 validation passes 80 tests, authenticated local and PostgreSQL/MinIO/Redis
   doctors, JavaScript parsing, a fresh migration roundtrip, zero PostgreSQL schema drift, and
   one bounded live Meta System Steward snapshot/citation call.
 - Phase 4 adds point-in-time document retrieval, `research_analysis@0.1.0`, exact citation
