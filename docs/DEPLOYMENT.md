@@ -15,7 +15,8 @@ Do not deploy until all of the following are true:
 - `TRADING_MODE` is `shadow` or `paper`.
 - `LIVE_TRADING_ENABLED=false`.
 - Paper-broker credentials, if present, are verified unable to access a live account.
-- The Control API is not public until authentication, authorization, and TLS are implemented.
+- Phase 6 single-admin authentication is enabled with a production Argon2 hash.
+- The Control API is not public until TLS termination is configured and verified.
 
 If any gate is missing, stop and report the exact missing item. Do not improvise around it.
 
@@ -40,6 +41,13 @@ APP_ENV=production
 TRADING_MODE=shadow
 LIVE_TRADING_ENABLED=false
 GLOBAL_NEW_EXPOSURE_PAUSED=true
+AUTH_REQUIRED=true
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD_HASH=ARGON2ID_HASH_FROM_APPROVED_SECRET_STORE
+SESSION_SECRET=AT_LEAST_32_RANDOM_CHARACTERS
+SESSION_MAX_AGE_DAYS=90
+SHADOW_RUNTIME_ENABLED=true
+SHADOW_POLL_SECONDS=30
 AUTO_MIGRATE=false
 POSTGRES_DB=quant
 POSTGRES_USER=quant
@@ -58,6 +66,16 @@ backfill cap does not apply, but long jobs must run through authenticated, obser
 operations rather than unauthenticated public API endpoints.
 
 Provider keys are added only when their integration phase is approved. Redact them from logs and health responses.
+
+Generate the production hash interactively without putting the password in shell history:
+
+```sh
+work/tools/uv run python -c \
+  'from getpass import getpass; from argon2 import PasswordHasher; print(PasswordHasher().hash(getpass()))'
+```
+
+Store only the resulting hash as `ADMIN_PASSWORD_HASH`; generate `SESSION_SECRET` with the
+approved secret manager. Do not set `ADMIN_PASSWORD` in production.
 
 ## Build and publish
 
@@ -84,7 +102,8 @@ cd /opt/agentic-quant
 curl -fsS http://127.0.0.1:8000/health/ready
 ```
 
-The API is loopback-only. Add a TLS reverse proxy only after Control API authentication exists. Do not expose ports 5432 or 6379.
+The API is loopback-only. Add a TLS reverse proxy only after verifying login, session-cookie,
+CSRF, and logout behavior through that proxy. Do not expose ports 5432 or 6379.
 
 The guarded deploy script starts PostgreSQL, waits for readiness, applies Alembic migrations as a one-shot task, and only then replaces the API. `AUTO_MIGRATE` remains false in the long-running production service.
 
@@ -99,8 +118,14 @@ Verify and record:
 - Restart behavior after one controlled API restart.
 - Backup output and a restore test before durable operation.
 - No credentials appear in container logs.
+- An unauthenticated request to `/v1/system/status` returns `401` while health probes remain
+  available.
+- Login succeeds through TLS, mutating requests reject a missing CSRF header, logout revokes
+  the session, and the administrator credential is not plaintext in the environment file.
 
-Phase 0 is not production-ready for remote access because authentication, migrations, backups, monitoring, and TLS are still open in `PROJECT_STATE.md`. A deployment at this stage may only be an isolated engineering preview.
+Phase 6 supplies application authentication, but a public production deployment still needs
+TLS, backups, monitoring, secret delivery, and infrastructure access controls. Until those
+gates pass, deployment may only be an isolated engineering preview.
 
 ## Rollback
 

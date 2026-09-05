@@ -1,12 +1,12 @@
 # Master Project Context
 
-Last updated: 2026-09-04 PDT
+Last updated: 2026-09-05 PDT
 
 Context format: v1
 
-Current phase: Phases 0–5 and Phase 1B verified; pre-Phase-6 review complete; Phase 6 intentionally unstarted
+Current phase: Phases 0–6 implemented and locally verified; Phase 6 UI review remains iterative
 
-Current documented baseline: C020 — `Verify Phase 1B and harden pre-Phase-6 baseline`
+Current documented baseline: C021 — `Build authenticated Phase 6 control center`
 
 ## Purpose and authority
 
@@ -76,6 +76,24 @@ A Git commit cannot contain its own content-derived hash without changing that h
   them with embargoed chronological folds and a later calibrated OOS holdout, measures PSI
   drift, persists safe JSON artifacts/forecasts, and requires deterministic eligibility plus
   an explicit human action for model champion status. Local candidates remain unpromoted.
+- Phase 6 authenticates one administrator with a revocable server-side cookie session and
+  CSRF protection. All non-health system interaction is locked when authentication is enabled;
+  production requires an Argon2 password hash.
+- The Phase 6 Control Center is object-centric: overview, governed lists, bounded raw-data
+  inspection, strategies, shadow deployments/events, pipeline controls, model routing,
+  activity, code-change sessions, and per-object discussion timelines share one interface.
+- One persistent System Steward receives a bounded current-state snapshot across data,
+  quality, jobs, validations, analyses, models, strategies, lists, shadow state, and admin
+  actions. It must cite supplied object IDs and may only propose allowlisted actions.
+- Sensitive operations are two-step: a proposal records parameters and preview, then expires
+  after 15 minutes unless the administrator submits its exact single-use confirmation phrase.
+- The broker-free shadow runtime admits only a strategy whose deterministic validation gate
+  marked it eligible for human review and whose adoption/deployment were separately confirmed.
+  It reuses point-in-time features and modeled portfolio costs, maintains virtual cash/P&L,
+  and processes each stored bar idempotently. No broker order path exists.
+- Code modification is represented by scoped change sessions. The web process exposes no
+  shell; a trusted external coding worker must produce a diff and passing test record before
+  a separate local-commit approval. Push and deployment remain external actions.
 - No GitHub remote or cloud host is configured yet.
 
 ### Repository state
@@ -106,6 +124,9 @@ A Git commit cannot contain its own content-derived hash without changing that h
   `DEVELOPMENT_MAX_BACKFILL_DAYS=120`, with a stricter 7-day one-minute-bar cap;
   `.env.example` documents the same safe defaults.
   `/v1/system/status` exposes the effective data operating scope without exposing secrets.
+- The ignored local `.env` enables the Phase 6 single-admin session. A new bootstrap generates
+  the password and session secret and writes only the initial password to ignored
+  `work/initial-admin-password.txt`; no credential is recorded in this context.
 
 ### Running local services
 
@@ -125,8 +146,8 @@ Development service ports bind only to loopback. The local Compose credentials a
 
 - `make check`: passed.
 - Flake8: passed.
-- Strict mypy: passed for 43 source files.
-- Pytest: 71 passed.
+- Strict mypy: passed for 49 source files.
+- Pytest: 78 passed.
 - `make doctor`: passed against the local-lite SQLite profile.
 - `make docker-doctor`: passed against the PostgreSQL-backed Compose profile.
 - PostgreSQL query: passed; the first container replay stored six lineage events.
@@ -134,6 +155,11 @@ Development service ports bind only to loopback. The local Compose credentials a
 - MinIO live health endpoint: passed.
 - API `/health/ready`: ready, database healthy, risk/restriction versions loaded, live trading false.
 - Container vertical slice: risk verdict `APPROVE`; order state `RECORDED_NOT_SUBMITTED`.
+- Phase 6 validation: 78 tests pass; JavaScript parses; authenticated SQLite and PostgreSQL
+  doctors pass; PostgreSQL Alembic reports no schema drift at `20260905_0020`.
+- A live Meta `muse-spark-1.3` System Steward request read the bounded system snapshot,
+  returned only the valid `SYSTEM:summary` citation, proposed no action, persisted both
+  messages, and logged out successfully.
 - Alpaca entitlements: SIP historical REST, OPRA option snapshot REST, and SIP WebSocket authentication passed.
 - Real historical test: 391 AAPL one-minute bars inserted, zero duplicates after identical replay.
 - Real options test: 10 AAPL option snapshots inserted from one bounded page, zero duplicates after replay.
@@ -149,8 +175,8 @@ Development service ports bind only to loopback. The local Compose credentials a
 - Phase 2 fixtures verify primary/secondary source distinction, correction-version retention, SEC filing and XBRL normalization, IR feed parsing, and cross-document catalyst deduplication.
 - Alpaca REST results are now normalized to the internal half-open `[start, end)` contract;
   `market_data_quality@0.2.0` rejects out-of-window rows and live gap seeds use only 1Min bars.
-- Alembic migrations through `20260904_0018` own the Phase 3D/4/5 schema; a fresh SQLite
-  upgrade/check/downgrade/re-upgrade cycle passed with no schema diff.
+- Alembic migrations through `20260905_0020` own the Phase 3D/4/5/6 schema; the Phase 6
+  revision and a fresh SQLite base-to-head downgrade/re-upgrade roundtrip passed.
 - `make research-smoke`: passed with 100 deterministic daily bars, three immutable baseline
   experiments, nonzero cost modeling, matching offline/online feature hashes, and ordered
   event-driven portfolio ledgers. Stored counts accumulate safely in the persistent ignored
@@ -192,7 +218,9 @@ Non-negotiable boundaries:
 - No autonomous live-money execution in the current project scope.
 - META and all user employment/work-related or manually restricted securities fail closed.
 - No naked short options, 0DTE, penny stocks, illiquid instruments, martingale sizing, unplanned averaging down, or pre-earnings binary gambling.
-- The LLM cannot change risk limits, approve risk, change operating mode, widen stops, write trading state directly, or access a broker.
+- The unified System Steward may inspect the whole application and propose administrator
+  changes, including scoped code work, but cannot self-confirm an action, bypass deterministic
+  gates, write trading state directly, or access a broker.
 - Every decision must be reconstructable from information available at its decision timestamp.
 - Persistent state lives in Git, PostgreSQL, object storage, and the append-only event ledger—not chat history or model memory.
 - Production initially means `shadow` or `paper`; promotion is earned through research, backtest, shadow, and paper gates.
@@ -228,7 +256,7 @@ The durable description of the product is therefore:
 
 | Authority | May do | Must not do |
 |---|---|---|
-| LLM research orchestrator | Read citation-bound evidence and ML summaries; propose hypotheses, features, `StrategySpec` candidates, and experiments; critique and synthesize results | Approve risk, alter hard limits, size or submit orders, promote itself, or treat narrative confidence as validation |
+| System Steward / LLM research orchestrator | Read citation-bound system/evidence state; explain objects; propose hypotheses, experiments, and allowlisted administrator actions | Self-confirm an action, approve risk, bypass hard limits, size or submit broker orders, promote itself, or treat narrative confidence as validation |
 | Specialist evidence agents | Extract structured events, surprise, direction, horizon, uncertainty, and evidence links from filings/news/IR data | Invent unavailable facts, use post-decision information, or silently merge contradictory sources |
 | Statistical/ML layer | Train point-in-time models; emit calibrated forecasts, ranks, uncertainty, and diagnostics | Select its own test period, hide failed trials, or bypass portfolio/risk policy |
 | Backtest and validation layer | Replay realistic market state; model costs/fills; compare baselines; run out-of-sample and overfitting diagnostics | Rewrite source history, use future constituents/corrections, or certify a strategy from in-sample performance alone |
@@ -342,7 +370,11 @@ quality and safe promotion, not for reproducing a headline backtest.
 
 ```mermaid
 flowchart LR
-    UI["Phase 0 web console"] --> API["FastAPI Control API"]
+    AUTH["Single admin session + CSRF"] --> UI["Phase 6 Control Center"]
+    UI --> API["FastAPI Control API"]
+    UI --> STEWARD["System Steward + cited snapshot"]
+    STEWARD --> ACTIONS["Expiring admin action proposals"]
+    ACTIONS -->|explicit confirm| API
     API --> PIPE["Synthetic replay pipeline"]
     PIPE --> FEAT["Immutable feature snapshot"]
     FEAT --> STRAT["Deterministic candidate"]
@@ -386,7 +418,7 @@ flowchart LR
     REPORT --> LEDGER
     MODELROUTES["Reviewed YAML routing base"] --> LLMGW["Provider-neutral LLM gateway"]
     BUDGET["Atomic token + estimated-cost budgets"] --> LLMGW
-    UI --> LLMCONTROL["Dev route editor + Research Copilot"]
+    UI --> LLMCONTROL["Confirmed model routing + System Steward"]
     LLMCONTROL --> ROUTEREVS["Immutable routing revisions"]
     ROUTEREVS --> LLMGW
     LLMCONTROL --> LLMGW
@@ -406,6 +438,14 @@ flowchart LR
     FORECAST --> ANALYST
     MLTRAIN --> DB
     FORECAST --> DB
+    REPORT --> ADOPT["Human-confirmed adoption"]
+    ADOPT --> SHRUNTIME["Persistent broker-free shadow runtime"]
+    PITFEATURES --> SHRUNTIME
+    SHRUNTIME --> SHEVENTS["Virtual event journal + P&L"]
+    SHEVENTS --> DB
+    UI --> OBJECTS["Lists + object threads + raw explorer"]
+    OBJECTS --> DB
+    ACTIONS --> CODESESS["Scoped code-change sessions"]
 ```
 
 Alembic migrations own the PostgreSQL/SQLite schema. Redis and MinIO are connected to both ingestion paths. The market stream client authenticates, reconnects with bounded exponential backoff, normalizes trades/quotes/minute bars, and requests half-open historical repair for XNYS-session gaps; real open-session persistence and controlled reconnect/repair passed on 2026-09-04. The Phase 2 path versions source documents, retains publication/ingestion/correction time, classifies source trust, resolves issuer entities, normalizes SEC facts, and deterministically links similar multi-source coverage to one catalyst.
@@ -437,13 +477,11 @@ Every attempt is bounded and audited; raw inputs are hashed rather than copied i
 row. No generative strategy loop is connected yet, and neither model can reach runtime risk,
 portfolio, execution, or broker components.
 
-Phase 4B adds a local no-build model control surface. A route save appends a complete SQL
-revision tied to the reviewed YAML base hash; the newest compatible revision becomes active.
-The Research Copilot can use that automatic interactive route or explicitly select either
-provider for one invocation. Browser history is bounded and session-local, while output,
-usage, latency, model, source SHA, and effective routing lineage remain durable. Both write
-and paid-call endpoints fail closed outside development until production authentication and
-authorization exist.
+Phase 4B introduced the no-build model control surface. Phase 6 now places route saves behind
+administrator confirmation and replaces session-local Research Copilot history with persistent
+System Steward conversations. The automatic interactive route or either explicit provider can
+serve a request; output, usage, latency, model, source SHA, and routing lineage remain durable.
+Paid research operations remain development-scoped while the remote environment is commissioned.
 
 Phase 4 adds a point-in-time evidence retriever and an evidence-bound analyst. It selects
 the latest source-document version actually ingested by the requested cutoff, combines it
@@ -468,6 +506,27 @@ fits only the earlier half of OOS predictions and is evaluated on the later half
 Brier, log loss, accuracy, ECE, and per-feature PSI remain durable. Models are portable JSON
 artifacts. Deterministic thresholds may create a challenger, but only an explicit human action
 can mark it champion, and that serving status does not bypass the separate strategy gate.
+
+Phase 6 puts all system interaction behind one administrator session when authentication is
+enabled. Opaque session tokens are stored only as hashes, a changed credential invalidates
+old sessions, login attempts are rate-limited, and state-changing requests require a
+double-submit CSRF token. Production rejects plaintext administrator passwords. The UI is a
+three-column object workspace: navigation, system-object detail/discussion, and one persistent
+System Steward carrying page context.
+
+The steward is one user-facing administrator persona, not three separately managed agents.
+Internally it queries a bounded database snapshot and the existing LLM gateway. It can explain
+current state with validated object citations and propose allowlisted operations, but model
+text never executes a tool. Lists, global/pipeline controls, route changes, strategy
+adoption/retirement, shadow operations, and code sessions all require an expiring, exact,
+single-use administrator confirmation. The web process has no shell.
+
+The Phase 6 shadow runtime reads already-ingested normalized bars, builds the same
+point-in-time feature snapshots, applies immutable strategy parameters, and records virtual
+signal/order/fill state with modeled costs and participation limits. Admission requires a
+matching validation report with `eligible_for_human_review=true` plus confirmed human
+adoption. Scheduler and manual ticks share one lock and one idempotent bar cursor. The
+runtime contains no broker SDK or order-submission route.
 
 ### Target architecture
 
@@ -535,9 +594,9 @@ There is intentionally no direct edge from the LLM to portfolio, risk, execution
 broker. Research feedback may loop from validation to the LLM; crossing into runtime requires
 a versioned candidate, independent validation, and explicit promotion.
 
-### Target Web Control Center
+### Implemented Phase 6 Web Control Center
 
-The remotely deployed application is expected to provide one authenticated interface with:
+The application provides one authenticated interface with:
 
 - a data explorer for normalized market data, filings, news, catalysts, feature snapshots,
   freshness, gaps, source provenance, and raw-object lineage;
@@ -550,11 +609,9 @@ The remotely deployed application is expected to provide one authenticated inter
 - an operations view for ingestion health, experiment jobs, shadow/paper status, alerts,
   audit lineage, pause controls, and deployment readiness.
 
-The conversational interface is explanatory and research-oriented. It must answer from
-versioned, time-scoped project data with citations and must not receive credentials or gain a
-direct command path to portfolio, risk, execution, or broker services. Authentication,
-authorization, session auditing, prompt-injection defenses, and safe tool capability gates are
-prerequisites before this UI is exposed remotely.
+The conversational interface answers from versioned project state with validated citations.
+It can create a typed pending administrator action but cannot self-confirm or reach a broker.
+Remote exposure still requires verified TLS, backup, monitoring, and secret delivery.
 
 Long-horizon data acquisition and compute-heavy research belong on the remote server after its
 storage, scheduling, observability, and data-license controls are configured. Local development
@@ -571,8 +628,14 @@ year or more of data.
 | Risk engine | `src/agentic_quant/risk.py` | deterministic gates and equity position sizing |
 | Event ledger | `src/agentic_quant/ledger.py` | append-only SQL event storage and lineage queries |
 | Vertical slice | `src/agentic_quant/pipeline.py` | synthetic catalyst through shadow-order record |
-| Control API | `src/agentic_quant/api.py` | health, status, LLM routing/chat, events, decision inspection, demo, pause/resume |
-| Control page | `src/agentic_quant/static/index.html` | model routing, bounded research chat, status, and local operations |
+| Control API | `src/agentic_quant/api.py` | authenticated object APIs, stewardship, confirmation actions, health, research, models, and shadow operations |
+| Control page | `src/agentic_quant/static/index.html` | object explorer, forum timelines, System Steward, pipeline/model/shadow administration |
+| Administrator auth | `src/agentic_quant/auth.py` | single-admin login rate limit, hashed sessions, CSRF cookies, revoke/audit |
+| System objects | `src/agentic_quant/control_plane.py` | versioned lists, data catalog/raw explorer, strategy summaries, discussion threads |
+| Admin actions | `src/agentic_quant/admin_actions.py` | allowlist, immutable preview, expiry, exact confirmation, execution audit |
+| System Steward | `src/agentic_quant/steward.py` | current-state snapshot, exact citations, persistent conversations, action proposals |
+| Shadow runtime | `src/agentic_quant/shadow.py` | adopted-strategy deployments, idempotent virtual events, modeled cash/P&L |
+| Code sessions | `src/agentic_quant/code_changes.py` | scoped no-shell request/diff/test/commit-approval state machine |
 | Risk configuration | `configs/risk_policy.yaml` | versioned conservative limits |
 | Restriction configuration | `configs/restricted_securities.yaml` | effective-dated denylist containing META |
 | Local orchestration | `docker-compose.yml` | API, PostgreSQL, Redis, MinIO |
@@ -602,7 +665,7 @@ year or more of data.
 | LLM budgets | `src/agentic_quant/llm_budget.py`, `configs/llm_budget.yaml` | atomic reservation/settlement and versioned token/cost ceilings |
 | Research intelligence | `src/agentic_quant/intelligence.py` | point-in-time retrieval, structured analyst, citation checks, abstention, Decision Inspector graph |
 | ML training/registry | `src/agentic_quant/ml.py`, `configs/ml_policy.yaml` | PIT labels, logistic/stump walk-forward, calibration, drift, JSON registry, forecasts |
-| Schema migrations | `migrations/` | Alembic schema history through completed Phase 5 |
+| Schema migrations | `migrations/` | Alembic schema history through completed Phase 6 (`20260905_0020`) |
 
 ## Current executable risk baseline
 
@@ -629,7 +692,17 @@ Implemented endpoints:
 
 - `GET /health/live`
 - `GET /health/ready`
+- `POST /v1/auth/login`; `GET /v1/auth/session`; `POST /v1/auth/logout` and
+  `/v1/auth/revoke-all`
 - `GET /v1/system/status`
+- `GET /v1/control/summary`; versioned `/v1/lists`; `/v1/explorer/data` and bounded
+  `/v1/explorer/raw/*`
+- `GET /v1/strategies`; `/v1/threads/{object_type}/{object_id}` discussion reads/posts
+- `GET|POST /v1/actions`; `POST /v1/actions/{id}/confirm`
+- `POST /v1/steward/ask`; persistent steward conversation reads
+- `GET /v1/shadow/deployments`, `/v1/shadow/events`, and `/v1/shadow/runs`
+- `GET /v1/runtime/controls`; confirmation-gated global and per-pipeline controls
+- `GET /v1/code-changes`; tested candidate recording and separate commit approval
 - `GET /v1/events`
 - `GET /v1/decisions/{correlation_id}`
 - `POST /v1/demo/run`
@@ -645,7 +718,8 @@ Implemented endpoints:
 - `GET /v1/research/validations/{validation_report_id}`
 - `GET /v1/llm/routes`
 - `GET /v1/llm/budget`
-- `PUT /v1/llm/routes`, restricted to development; appends a complete route revision
+- `PUT /v1/llm/routes`, restricted to development; proposes a confirmation-gated complete
+  route revision
 - `GET /v1/llm/routes/history`
 - `POST /v1/llm/chat`, restricted to development; makes a bounded paid call
 - `GET /v1/llm/invocations`
@@ -664,8 +738,8 @@ Implemented endpoints:
 - `POST /v1/llm/probe/{provider}`, restricted to development
 - Development-only read-only Alpaca probe, bar backfill, and option snapshot endpoints.
 - Development-only Alpaca News, SEC filing, and SEC company-facts ingestion endpoints.
-- `POST /v1/commands/pause`
-- `POST /v1/commands/resume`, restricted to development + shadow mode
+- `POST /v1/commands/pause` and `/resume`, both returning pending confirmation actions;
+  resume is limited to shadow mode
 
 Routine commands:
 
@@ -1048,6 +1122,44 @@ The Compose stack is currently intended to remain running for local inspection. 
 - Production startup now enforces pause and manual migrations in Settings. A named volume
   retains the local production object archive across API replacement.
 - Formal record: `docs/adr/0016-open-session-market-data-verification.md`.
+
+### D027 — Phase 6 presents one administrator System Steward
+
+- Date: 2026-09-05 PDT.
+- The operator does not want to choose among multiple visible agents. One persistent System
+  Steward should understand data, strategies, shadow state, pipelines, models, and code-change
+  state, and carry the currently viewed object as conversational context.
+- The steward may propose administrator operations, but sensitive changes pause at an exact
+  confirmation preview. The LLM cannot confirm its own proposal or derive authority from user,
+  model, or stored-document text.
+- Code changes use isolated scoped sessions, diff and test evidence, and a separate commit
+  approval. The application process exposes no general shell; push and deployment remain
+  distinct operations.
+- Formal record: `docs/adr/0017-authenticated-system-steward-control-plane.md`.
+
+### D028 — Phase 6 uses single-admin session authentication
+
+- Date: 2026-09-05 PDT.
+- There is one `.env`-configured administrator, no registration, no multi-user role system,
+  and no public system-data endpoints beyond minimal liveness/readiness.
+- Browser access uses a long-lived revocable opaque session cookie plus a separate CSRF
+  cookie/header. Tokens are hashed in SQL, login failures are rate-limited, credential
+  rotation invalidates prior sessions, and production accepts only an Argon2 password hash.
+- New local bootstraps generate credentials and retain the initial password only in ignored
+  `work/`. Remote exposure still requires TLS and infrastructure security gates.
+
+### D029 — Universe objects and shadow operation are explicit and scalable
+
+- Date: 2026-09-05 PDT.
+- The initial universe is hybrid: a governed trading universe and benchmarks, a manual focus
+  watchlist, a dynamic candidate shortlist, runtime-managed shadow-active symbols, and a
+  policy-managed restricted list. Every list revision is durable and discussed as an object.
+- Local data volume proves workflow correctness only. The same ID, partition, point-in-time,
+  idempotency, admission, and audit contracts apply when production carries multi-year data.
+- Only a deterministic gate-eligible report plus human adoption can reach the broker-free
+  shadow runtime. Virtual events model costs and liquidity, retain cash/P&L, and never become
+  broker orders.
+- Formal record: `docs/adr/0018-persistent-broker-free-shadow-runtime.md`.
 
 ## Iteration and commit ledger
 
@@ -1694,7 +1806,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C020 — `Verify Phase 1B and harden pre-Phase-6 baseline`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `44a717c`.
 - Date: 2026-09-04 PDT.
 - User intent: complete Phase 1B now that the U.S. market is open, then independently review
   and repair every implemented phase before Phase 6.
@@ -1730,11 +1842,59 @@ The Compose stack is currently intended to remain running for local inspection. 
   - Phase 6 remains intentionally unstarted pending the user's UI/runtime direction; all
     models and strategies remain unpromoted and no order submission capability exists.
 
+### C021 — `Build authenticated Phase 6 control center`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-05 PDT.
+- User intent: autonomously implement the Phase 6 core after confirming one System Steward,
+  single-admin authentication, forum-style object exploration, governed lists, confirmed
+  administrative operations, and a persistent broker-free shadow runtime.
+- Scope:
+  - Added one-admin login rate limiting, hashed/revocable/sliding sessions, credential-rotation
+    invalidation, CSRF enforcement, auth audit, production hash-only validation, and bootstrap-
+    generated local credentials.
+  - Added versioned system lists, bounded raw-data inspection, strategy/adoption views,
+    object discussion threads, runtime pipeline controls, and aggregate system snapshots.
+  - Added the persistent System Steward with stored conversations, current object context,
+    bounded database state, exact citation validation, and allowlisted action proposals.
+  - Added 15-minute, single-use administrator action confirmations for lists, pause/resume,
+    pipelines, model routing, strategy adoption/retirement, shadow controls, and code sessions.
+  - Added a persistent broker-free shadow scheduler with validation-gated admission,
+    point-in-time features, modeled virtual fills/costs, cash/P&L, event journal, and
+    idempotent bar processing.
+  - Rebuilt the no-build UI as a responsive three-column Control Center with overview, list,
+    data, strategy, shadow, pipeline, model, activity, code, discussion, and persistent
+    steward surfaces.
+  - Added scoped no-shell code-change sessions, Alembic revisions `20260905_0019`–`0020`, API/tests,
+    authenticated doctors, ADRs 0017–0018, runbooks, README, state, and context updates.
+- Architecture/decision impact:
+  - The LLM is now the single user-facing system manager and may propose broad administrator
+    changes, while explicit human confirmation and deterministic validation remain the
+    authority boundary. The web process has no broker path and no arbitrary shell.
+  - Local bounded samples and future production-scale data use the same stateful,
+    point-in-time, idempotent workflow.
+- Validation:
+  - Flake8, strict mypy across 49 source files, 78 tests, JavaScript parse, fresh SQLite
+    migration roundtrip, authenticated local/Docker doctors, PostgreSQL zero-drift check,
+    secret scan, and Git diff checks passed.
+  - Tests cover login/session/logout, CSRF, two-step/single-use actions, list revisions,
+    pipeline controls, cited steward proposals, scoped code sessions, validation-gated shadow
+    admission, virtual events, and replay idempotency.
+  - One bounded live Meta Steward request returned the exact `SYSTEM:summary` citation,
+    persisted its conversation, proposed no action, and logged out; this is connectivity and
+    contract evidence, not a trading-performance claim.
+- Expected global state after commit:
+  - Phase 6 core is implemented and locally usable behind one administrator login. It remains
+    shadow-only; no locally bounded strategy is claimed profitable and no broker order path
+    exists.
+  - Interactive visual refinement and cloud infrastructure choices remain future work; they
+    do not block bounded Phase 6 workflow verification.
+
 ## Open work
 
 Ordered near-term work:
 
-1. Review Phase 6 shadow-runtime and operator-UI scope with the user before implementation.
+1. Review the implemented Phase 6 UI interactively with the user and refine layout/workflows.
 2. Size remote backfill concurrency and identify equity/options sources with suitable historical
    coverage, retention, and licensing; do not require those large downloads for local tests.
 3. Extend replay with multi-bar partial fills, cancellation, symbol changes, delistings, and
@@ -1742,9 +1902,8 @@ Ordered near-term work:
 4. Add Redis consumer groups, a transactional outbox, dead-letter replay, provider lag,
    sequence-gap, reconciliation, and data-quality dashboards.
 5. Build a labeled corpus and measure cross-provider catalyst dedup precision/recall.
-6. Add authentication/authorization, rate limiting, and session audit before remote Control
-   Center exposure; create the GitHub remote and later validate the guarded cloud pipeline on
-   a selected VPS.
+6. Create the GitHub remote and validate the guarded TLS/cloud pipeline on a selected VPS;
+   add backup/restore, monitoring, and notification integrations.
 
 ## Blocked or unresolved decisions
 

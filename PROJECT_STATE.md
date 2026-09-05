@@ -2,13 +2,14 @@
 
 ## Current
 
-- Phases 0–5 are complete in bounded-development form, including Phase 1B open-session
-  validation. The pre-Phase-6 architecture has been reviewed and hardened; Phase 6 shadow
-  runtime has not started.
+- Phases 0–6 are complete in bounded-development form, including Phase 1B open-session
+  validation and the Phase 6 authenticated Control Center/System Steward/shadow runtime.
 - Local-lite uses Python 3.12, a project-local `uv`, SQLite, and filesystem object storage.
-- The Control API, local model/research web console, append-only event ledger, deterministic risk engine, and synthetic vertical slice exist.
+- The Control API, single-admin object-centric web console, persistent System Steward,
+  append-only event ledger, deterministic risk engine, and shadow runtime exist.
 - `live` is not a valid trading mode; `LIVE_TRADING_ENABLED=true` fails configuration validation.
-- Local lint, strict type checking, 71 tests, API readiness, the HTTP vertical slice, and the secret scan pass.
+- Local lint, strict type checking, the full test suite, API readiness, the authenticated HTTP
+  vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
 - The full Compose stack is healthy: PostgreSQL 17, Redis 8, MinIO, and the API all passed direct checks; the PostgreSQL-backed shadow slice recorded six lineage events.
 - `context.md` is the required master record for architecture, discussions, iterations, commit contents, and post-commit global state.
@@ -30,7 +31,7 @@
 - Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
   experiment runs, backtest trades, corporate actions, historical universe membership,
   feature parity checks, and walk-forward reports are stored through Alembic revision
-  `20260904_0018`.
+  `20260905_0020`.
 - The Phase 3 runner provides buy-and-hold, long/cash momentum, and long/cash
   mean-reversion baselines with next-bar execution, commission, slippage, metrics, hashes,
   and append-only completion events.
@@ -57,9 +58,18 @@
   status, and output.
 - Both Responses API adapters pass mocked contract tests and bounded live probes using
   project-specific credentials in ignored `.env`.
-- The local web Control Center shows provider readiness, saves complete workload maps as
-  immutable SQL revisions, and offers bounded chat through Auto/OpenAI/Meta. Route writes and
-  paid chat calls are development-only; every call retains source/config/model/usage lineage.
+- The local web Control Center is locked behind one persistent administrator session and
+  CSRF protection. It exposes overview, lists, data, strategy, shadow, pipeline, model,
+  activity, and code-change objects with discussion timelines.
+- One System Steward reads a bounded current-state snapshot, returns validated object
+  citations, persists conversations, and can propose allowlisted admin actions. It cannot
+  execute them; a separate exact confirmation is required.
+- The persistent broker-free shadow runtime admits only gate-eligible, human-confirmed
+  strategies, processes newly stored bars idempotently, and records modeled virtual
+  signal/order/fill events, cash, and P&L. No broker adapter exists.
+- Final Phase 6 validation passes 78 tests, authenticated local and PostgreSQL/MinIO/Redis
+  doctors, JavaScript parsing, a fresh migration roundtrip, zero PostgreSQL schema drift, and
+  one bounded live Meta System Steward snapshot/citation call.
 - Phase 4 adds point-in-time document retrieval, `research_analysis@0.1.0`, exact citation
   validation, deterministic abstention, atomic LLM budget reservations, and Decision
   Inspector graph `ai_infrastructure_graph@0.1.0`.
@@ -70,19 +80,21 @@
 - `.env` explicitly selects `APP_ENV=development`; development daily/news backfills are
   capped at 120 days and one-minute backfills at 7 days by default. The active scope is
   exposed by `/v1/system/status`.
-- Production settings fail unless new exposure starts paused and automatic migration is
-  disabled. The production local raw archive is mounted on a persistent named volume.
+- Production settings fail unless authentication is enabled with a hash-only password, new
+  exposure starts paused, and automatic migration is disabled. The production local raw
+  archive is mounted on a persistent named volume.
 
 ## Next
 
-1. Review Phase 6 shadow-runtime scope and UI requirements with the user before implementation.
+1. Review the Phase 6 UI interactively with the user and refine visual/interaction details
+   without changing the security and runtime contracts.
 2. Size remote long-horizon backfill concurrency and storage; continue using bounded samples for local
    correctness verification.
 3. Extend fill realism with multi-bar partial fills, order cancellation, quote-derived
    rather than configured spread, and symbol-change/delisting replay.
 4. Add Redis consumer groups, durable offsets, a transactional outbox, and dead-letter replay.
-5. Add authentication, budgets, and session audit before remotely exposing the Control
-   Center; then expand its data, strategy, and Decision Inspector views.
+5. Select TLS/reverse proxy, backup, monitoring, and secret delivery before remotely exposing
+   the already-authenticated Control Center.
 
 ## Blocked
 
@@ -118,3 +130,6 @@
   safe JSON artifacts, and require deterministic eligibility plus a human for champion status.
 - ADR 0016: verify real SIP persistence/recovery during an open session and enforce half-open
   historical windows plus production fail-closed startup/persistence invariants.
+- ADR 0017: use one authenticated System Steward with object context and explicit,
+  expiring, single-use confirmation for sensitive operations.
+- ADR 0018: run adopted strategies in a persistent, idempotent, broker-free shadow runtime.

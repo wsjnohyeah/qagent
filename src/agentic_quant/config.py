@@ -32,6 +32,14 @@ class Settings(BaseSettings):
     trading_mode: TradingMode = TradingMode.SHADOW
     live_trading_enabled: bool = False
     global_new_exposure_paused: bool = True
+    auth_required: bool = False
+    admin_username: str | None = None
+    admin_password: SecretStr | None = None
+    admin_password_hash: SecretStr | None = None
+    session_secret: SecretStr | None = None
+    session_max_age_days: int = Field(default=90, ge=1, le=365)
+    shadow_runtime_enabled: bool = True
+    shadow_poll_seconds: int = Field(default=30, ge=5, le=3_600)
     auto_migrate: bool = True
     database_url: str = "sqlite+pysqlite:///./work/agentic_quant.db"
     redis_url: str | None = None
@@ -78,6 +86,22 @@ class Settings(BaseSettings):
                 raise ValueError("Production must start with new exposure paused")
             if self.auto_migrate:
                 raise ValueError("Production requires AUTO_MIGRATE=false")
+            if not self.auth_required:
+                raise ValueError("Production requires AUTH_REQUIRED=true")
+            if self.admin_password is not None:
+                raise ValueError("Production authentication requires ADMIN_PASSWORD_HASH")
+        if self.auth_required:
+            if not self.admin_username or not self.admin_username.strip():
+                raise ValueError("AUTH_REQUIRED=true requires ADMIN_USERNAME")
+            if not self.admin_password and not self.admin_password_hash:
+                raise ValueError(
+                    "AUTH_REQUIRED=true requires ADMIN_PASSWORD or ADMIN_PASSWORD_HASH"
+                )
+            if (
+                self.session_secret is None
+                or len(self.session_secret.get_secret_value()) < 32
+            ):
+                raise ValueError("AUTH_REQUIRED=true requires a 32+ character SESSION_SECRET")
         if self.object_store_backend == ObjectStoreBackend.S3 and not all(
             (
                 self.object_store_endpoint,
@@ -113,6 +137,20 @@ class Settings(BaseSettings):
             self.llm_meta_api_key
             and self.llm_meta_api_key.get_secret_value().strip()
         )
+
+    @property
+    def admin_credential_fingerprint(self) -> str:
+        import hashlib
+
+        password_material = self.admin_password_hash or self.admin_password
+        if not self.admin_username or password_material is None:
+            return "UNCONFIGURED"
+        material = (
+            self.admin_username
+            + ":"
+            + password_material.get_secret_value()
+        )
+        return hashlib.sha256(material.encode()).hexdigest()
 
     def validate_backfill_window(
         self,

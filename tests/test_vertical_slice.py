@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from agentic_quant.api import create_app
 from agentic_quant.config import AppEnvironment, Settings
@@ -41,7 +42,7 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert ready.json()["live_trading_enabled"] is False
         system_status = client.get("/v1/system/status").json()
         assert system_status["phase"] == (
-            "5-ml-registry-plus-4-evidence-bound-analyst"
+            "6-authenticated-system-steward-control-center"
         )
         assert system_status["data_operating_scope"] == "bounded_correctness_samples"
         assert system_status["development_max_backfill_days"] == 120
@@ -113,8 +114,16 @@ def test_api_health_and_demo(settings: Settings) -> None:
             },
         )
         assert route_update.status_code == 200
-        assert route_update.json()["effective_routing"]["route_source"] == "control_center"
-        assert route_update.json()["effective_routing"]["routes"][
+        assert route_update.json()["status"] == "PENDING_CONFIRMATION"
+        route_action = route_update.json()
+        confirmed_route_update = client.post(
+            f"/v1/actions/{route_action['action_request_id']}/confirm",
+            json={"confirmation_phrase": route_action["confirmation_phrase"]},
+        )
+        assert confirmed_route_update.status_code == 200
+        effective_routes = client.get("/v1/llm/routes").json()
+        assert effective_routes["route_source"] == "control_center"
+        assert effective_routes["routes"][
             "interactive_explanation"
         ] == "openai"
         history = client.get("/v1/llm/routes/history").json()
@@ -142,7 +151,7 @@ def test_api_health_and_demo(settings: Settings) -> None:
         page = client.get("/")
         assert page.status_code == 200
         assert "Model routing" in page.text
-        assert "Research Copilot" in page.text
+        assert "System Steward" in page.text
         oversized_backfill = client.post(
             "/v1/market-data/alpaca/backfill",
             json={
@@ -165,6 +174,10 @@ def test_unauthenticated_llm_controls_fail_closed_in_production(
             "app_env": AppEnvironment.PRODUCTION,
             "auto_migrate": False,
             "global_new_exposure_paused": True,
+            "auth_required": True,
+            "admin_username": "admin",
+            "admin_password_hash": SecretStr("not-used-test-hash"),
+            "session_secret": SecretStr("x" * 64),
         }
     )
     routes = {
@@ -185,6 +198,6 @@ def test_unauthenticated_llm_controls_fail_closed_in_production(
         )
         demo = client.post("/v1/demo/run")
 
-    assert route_update.status_code == 403
-    assert chat.status_code == 403
-    assert demo.status_code == 403
+    assert route_update.status_code == 401
+    assert chat.status_code == 401
+    assert demo.status_code == 401

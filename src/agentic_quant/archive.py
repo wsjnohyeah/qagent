@@ -40,6 +40,8 @@ class RawArchive(Protocol):
         provider_received_at: datetime,
     ) -> RawArchiveResult: ...
 
+    def read_json(self, uri: str, *, max_bytes: int = 1_000_000) -> dict[str, Any]: ...
+
     def health(self) -> bool: ...
 
 
@@ -91,6 +93,21 @@ class FileRawArchive:
 
     def health(self) -> bool:
         return self.root.exists() and self.root.is_dir()
+
+    def read_json(self, uri: str, *, max_bytes: int = 1_000_000) -> dict[str, Any]:
+        parsed = urlparse(uri)
+        if parsed.scheme != "file":
+            raise ValueError("Local raw archive only accepts file URIs")
+        candidate = Path(parsed.path).resolve()
+        root = self.root.resolve()
+        if not candidate.is_relative_to(root):
+            raise ValueError("Raw object is outside the configured archive root")
+        if candidate.stat().st_size > max_bytes:
+            raise ValueError("Raw object exceeds the preview size limit")
+        payload = json.loads(candidate.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("Raw object is not a JSON object")
+        return payload
 
 
 class MinioRawArchive:
@@ -150,6 +167,24 @@ class MinioRawArchive:
 
     def health(self) -> bool:
         return bool(self.client.bucket_exists(self.bucket))
+
+    def read_json(self, uri: str, *, max_bytes: int = 1_000_000) -> dict[str, Any]:
+        parsed = urlparse(uri)
+        if parsed.scheme != "s3" or parsed.netloc != self.bucket:
+            raise ValueError("Raw object URI does not match the configured bucket")
+        key = parsed.path.lstrip("/")
+        response = self.client.get_object(self.bucket, key)
+        try:
+            content = response.read(max_bytes + 1)
+        finally:
+            response.close()
+            response.release_conn()
+        if len(content) > max_bytes:
+            raise ValueError("Raw object exceeds the preview size limit")
+        payload = json.loads(content)
+        if not isinstance(payload, dict):
+            raise ValueError("Raw object is not a JSON object")
+        return payload
 
 
 def build_raw_archive(settings: Settings) -> RawArchive:

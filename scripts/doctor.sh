@@ -42,6 +42,5 @@ done
 
 curl -fsS "http://127.0.0.1:$port/health/ready"
 echo
-curl -fsS -X POST "http://127.0.0.1:$port/v1/demo/run" >"$project_root/work/doctor-demo.json"
-"$uv_bin" run python -c 'import json, pathlib; data=json.loads(pathlib.Path("work/doctor-demo.json").read_text()); assert data["risk_decision"]["verdict"] == "APPROVE"; assert data["shadow_order"]["status"] == "RECORDED_NOT_SUBMITTED"; print("vertical-slice: healthy")'
+"$uv_bin" run python scripts/authenticated_doctor.py "http://127.0.0.1:$port"
 echo "doctor: PASS"

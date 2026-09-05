@@ -12,8 +12,15 @@ if [ ! -x "$uv_bin" ]; then
 fi
 
 if [ ! -f "$project_root/.env" ]; then
+  umask 077
   cp "$project_root/.env.example" "$project_root/.env"
-  echo "Created .env from safe local defaults."
+  admin_password=$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')
+  session_secret=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+  sed -i.bak "s/__GENERATE_ADMIN_PASSWORD__/$admin_password/" "$project_root/.env"
+  sed -i.bak "s/__GENERATE_SESSION_SECRET__/$session_secret/" "$project_root/.env"
+  rm -f "$project_root/.env.bak"
+  printf '%s\n' "$admin_password" > "$project_root/work/initial-admin-password.txt"
+  echo "Created .env and work/initial-admin-password.txt with local admin credentials."
 fi
 
 cd "$project_root"

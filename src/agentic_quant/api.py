@@ -1,26 +1,39 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+import hmac
 import json
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import inspect
 
+from agentic_quant.admin_actions import AdminActionService
 from agentic_quant.archive import build_raw_archive
+from agentic_quant.auth import (
+    CSRF_COOKIE,
+    SESSION_COOKIE,
+    AdminAuthService,
+    AuthenticationError,
+    LoginRateLimitedError,
+    cookie_settings,
+)
+from agentic_quant.code_changes import CodeChangeStore
 from agentic_quant.config import AppEnvironment, Settings, TradingMode
+from agentic_quant.control_plane import SystemObjectStore
 from agentic_quant.document_ingestion import (
     DocumentIngestionService,
     FundamentalsIngestionService,
 )
 from agentic_quant.document_store import DocumentStore
 from agentic_quant.data_quality import MarketDataQualityService
-from agentic_quant.domain import EventEnvelope, LLMProviderName, LLMWorkload
+from agentic_quant.domain import LLMProviderName, LLMWorkload
 from agentic_quant.event_bus import NullEventPublisher, RedisStreamPublisher
-from agentic_quant.ids import uuid7
 from agentic_quant.intelligence import (
     EvidenceBoundResearchAnalyst,
     IntelligenceStore,
@@ -73,11 +86,48 @@ from agentic_quant.providers.synthetic import SyntheticMarketDataProvider
 from agentic_quant.reference_data import ReferenceDataStore
 from agentic_quant.risk import RestrictionRegistry, RiskPolicy
 from agentic_quant.research_store import ResearchStore
+from agentic_quant.shadow import ShadowRuntime
+from agentic_quant.steward import SystemSteward
 from agentic_quant.workflow import WorkflowJobStore
 
 
 class OperatorCommand(BaseModel):
     reason: str = Field(min_length=3, max_length=500)
+
+
+class AdminLoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=80)
+    password: str = Field(min_length=1, max_length=1_024)
+
+
+class ThreadPostRequest(BaseModel):
+    body: str = Field(min_length=1, max_length=20_000)
+
+
+class AdminActionProposalRequest(BaseModel):
+    action_type: str = Field(min_length=1, max_length=80)
+    target_type: str = Field(min_length=1, max_length=60)
+    target_id: str = Field(min_length=1, max_length=160)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    reason: str = Field(min_length=3, max_length=2_000)
+
+
+class AdminActionConfirmRequest(BaseModel):
+    confirmation_phrase: str = Field(min_length=1, max_length=80)
+
+
+class StewardAskRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=20_000)
+    conversation_id: str | None = Field(default=None, max_length=36)
+    context_object_type: str | None = Field(default=None, max_length=60)
+    context_object_id: str | None = Field(default=None, max_length=160)
+    provider: LLMProviderName | None = None
+
+
+class CodeCandidateRequest(BaseModel):
+    diff_text: str = Field(min_length=1, max_length=2_000_000)
+    tests: list[dict[str, Any]] = Field(min_length=1, max_length=100)
+    proposed_commit_subject: str = Field(min_length=3, max_length=240)
 
 
 class BackfillRequest(BaseModel):
@@ -172,6 +222,11 @@ class MLPromotionRequest(BaseModel):
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     app_settings = settings or Settings()
+    if (
+        app_settings.app_env == AppEnvironment.PRODUCTION
+        and not app_settings.auth_required
+    ):
+        raise ValueError("Production API requires administrator authentication")
     ledger = EventLedger(app_settings.database_url)
     document_store = DocumentStore(ledger.engine)
     research_store = ResearchStore(ledger.engine)
@@ -202,11 +257,99 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         intelligence_store,
         code_git_sha=app_settings.source_git_sha or "UNAVAILABLE",
     )
+    objects = SystemObjectStore(ledger.engine, ledger)
+    auth = AdminAuthService(ledger.engine, app_settings)
+    code_changes = CodeChangeStore(
+        ledger.engine,
+        base_git_sha=app_settings.source_git_sha or "UNAVAILABLE",
+    )
+    shadow = ShadowRuntime(
+        ledger.engine,
+        research_store,
+        objects,
+        calendar_name=app_settings.market_calendar,
+    )
+    application: FastAPI
+
+    def set_runtime_paused(paused: bool) -> None:
+        application.state.new_exposure_paused = paused
+
+    def activate_routes(
+        raw_routes: dict[str, str],
+        reason: str,
+        created_by: str,
+    ) -> dict[str, Any]:
+        try:
+            routes = {
+                LLMWorkload(workload): LLMProviderName(provider)
+                for workload, provider in raw_routes.items()
+            }
+        except ValueError as exc:
+            raise ValueError("LLM routing contains an unknown workload or provider") from exc
+        revision = llm_gateway.activate_routes(
+            routes=routes,
+            reason=reason,
+            created_by=created_by,
+        )
+        return {
+            "revision": revision.model_dump(mode="json"),
+            "effective_routing": llm_gateway.status(),
+        }
+
+    def promote_model(
+        model_id: str,
+        reason: str,
+        approved_by: str,
+    ) -> dict[str, Any]:
+        event = ml_store.promote(
+            model_id=model_id,
+            approved_by=approved_by,
+            reason=reason,
+        )
+        return event.model_dump(mode="json")
+
+    actions = AdminActionService(
+        ledger.engine,
+        objects,
+        shadow,
+        code_changes,
+        runtime_callback=set_runtime_paused,
+        route_callback=activate_routes,
+        model_promote_callback=promote_model,
+        ledger=ledger,
+    )
+
+    def steward_system_status() -> dict[str, Any]:
+        return {
+            "environment": app_settings.app_env.value,
+            "trading_mode": app_settings.trading_mode.value,
+            "live_trading_enabled": False,
+            "new_exposure_paused": getattr(
+                application.state,
+                "new_exposure_paused",
+                app_settings.global_new_exposure_paused,
+            ),
+            "data_operating_scope": app_settings.data_operating_scope,
+            "llm_routing": llm_gateway.status(),
+            "llm_budget": llm_budget_manager.summary(),
+            "ml_policy": ml_policy.version,
+        }
+
+    steward = SystemSteward(
+        ledger.engine,
+        llm_gateway,
+        objects,
+        shadow,
+        actions,
+        steward_system_status,
+    )
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):  # type: ignore[no-untyped-def]
         if app_settings.auto_migrate:
             upgrade_database(app_settings.database_url)
+        if inspect(ledger.engine).has_table("system_lists"):
+            objects.ensure_defaults()
         archive = build_raw_archive(app_settings)
         publisher = (
             RedisStreamPublisher(app_settings.redis_url, app_settings.redis_stream_name)
@@ -223,16 +366,173 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         application.state.llm_gateway = llm_gateway
         application.state.intelligence_store = intelligence_store
         application.state.ml_store = ml_store
-        application.state.new_exposure_paused = app_settings.global_new_exposure_paused
-        yield
-        await llm_gateway.aclose()
-        ledger.engine.dispose()
+        application.state.new_exposure_paused = (
+            True
+            if app_settings.app_env == AppEnvironment.PRODUCTION
+            else actions.new_exposure_paused(
+                default=app_settings.global_new_exposure_paused
+            )
+        )
+        application.state.auth = auth
+        application.state.objects = objects
+        application.state.shadow = shadow
+        application.state.actions = actions
+        application.state.steward = steward
+        application.state.code_changes = code_changes
+        stop_shadow = asyncio.Event()
+
+        async def shadow_loop() -> None:
+            while not stop_shadow.is_set():
+                if (
+                    not application.state.new_exposure_paused
+                    and actions.pipeline_enabled("shadow")
+                ):
+                    try:
+                        await shadow.tick(trigger="scheduler")
+                    except Exception:
+                        pass
+                try:
+                    await asyncio.wait_for(
+                        stop_shadow.wait(),
+                        timeout=app_settings.shadow_poll_seconds,
+                    )
+                except TimeoutError:
+                    continue
+
+        shadow_task = (
+            asyncio.create_task(shadow_loop(), name="shadow-runtime")
+            if app_settings.shadow_runtime_enabled
+            else None
+        )
+        try:
+            yield
+        finally:
+            stop_shadow.set()
+            if shadow_task is not None:
+                await shadow_task
+            await llm_gateway.aclose()
+            ledger.engine.dispose()
 
     application = FastAPI(
         title="Agentic Quant Control API",
         version="0.1.0",
         lifespan=lifespan,
     )
+
+    @application.middleware("http")
+    async def admin_authentication(request: Request, call_next: Any) -> Any:
+        public_paths = {
+            "/",
+            "/health/live",
+            "/health/ready",
+            "/v1/auth/login",
+            "/v1/auth/session",
+        }
+        request.state.admin = None
+        if app_settings.auth_required and request.url.path not in public_paths:
+            admin = auth.authenticate(request.cookies.get(SESSION_COOKIE))
+            if admin is None:
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Administrator login required"},
+                )
+            request.state.admin = admin
+            if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+                csrf_cookie = request.cookies.get(CSRF_COOKIE) or ""
+                csrf_header = request.headers.get("X-CSRF-Token") or ""
+                if not csrf_cookie or not hmac.compare_digest(
+                    csrf_cookie,
+                    csrf_header,
+                ):
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "Valid CSRF token required"},
+                    )
+        elif not app_settings.auth_required:
+            request.state.admin = {"username": "development-test-admin"}
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; img-src 'self' data:; connect-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'"
+        )
+        return response
+
+    def admin_username(request: Request) -> str:
+        admin = request.state.admin
+        if not isinstance(admin, dict) or not admin.get("username"):
+            raise HTTPException(status_code=401, detail="Administrator login required")
+        return str(admin["username"])
+
+    @application.post("/v1/auth/login")
+    def login(payload: AdminLoginRequest, request: Request) -> JSONResponse:
+        try:
+            session = auth.login(
+                username=payload.username,
+                password=payload.password,
+                user_agent=request.headers.get("user-agent"),
+                client_ip=request.client.host if request.client else None,
+            )
+        except LoginRateLimitedError as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
+        except AuthenticationError as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+        response = JSONResponse(
+            {
+                "authenticated": True,
+                "username": session["username"],
+                "expires_at": session["expires_at"].isoformat(),
+            }
+        )
+        settings = cookie_settings(app_settings)
+        response.set_cookie(SESSION_COOKIE, session["token"], **settings)
+        response.set_cookie(
+            CSRF_COOKIE,
+            session["csrf_token"],
+            **{**settings, "httponly": False},
+        )
+        return response
+
+    @application.get("/v1/auth/session")
+    def auth_session(request: Request) -> dict[str, Any]:
+        if not app_settings.auth_required:
+            return {
+                "authenticated": True,
+                "username": "development-test-admin",
+                "auth_required": False,
+            }
+        session = auth.authenticate(request.cookies.get(SESSION_COOKIE))
+        if session is None:
+            return {"authenticated": False, "auth_required": True}
+        return {
+            "authenticated": True,
+            "username": session["username"],
+            "expires_at": session["expires_at"],
+            "auth_required": True,
+        }
+
+    @application.post("/v1/auth/logout")
+    def logout(request: Request) -> JSONResponse:
+        auth.logout(request.cookies.get(SESSION_COOKIE))
+        response = JSONResponse({"authenticated": False})
+        response.delete_cookie(SESSION_COOKIE, path="/")
+        response.delete_cookie(CSRF_COOKIE, path="/")
+        return response
+
+    @application.post("/v1/auth/revoke-all")
+    def revoke_all_sessions(request: Request) -> dict[str, Any]:
+        username = admin_username(request)
+        revoked = auth.revoke_all(username=username)
+        return {"revoked_sessions": revoked}
+
+    @application.get("/v1/auth/events")
+    def auth_events(
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> list[dict[str, Any]]:
+        return auth.recent_events(limit=limit)
 
     @application.get("/", include_in_schema=False)
     def index() -> FileResponse:
@@ -271,7 +571,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "live_trading_enabled": False,
             "new_exposure_paused": application.state.new_exposure_paused,
             "database": "healthy" if ledger.health() else "unhealthy",
-            "phase": "5-ml-registry-plus-4-evidence-bound-analyst",
+            "phase": "6-authenticated-system-steward-control-center",
             "data_operating_scope": app_settings.data_operating_scope,
             "development_max_backfill_days": (
                 app_settings.development_max_backfill_days
@@ -308,6 +608,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             **ml_store.health_summary(),
             **data_quality_service.health_summary(),
             **workflow_job_store.health_summary(),
+            **objects.health_summary(),
+            **shadow.health_summary(),
+            **auth.health_summary(),
             "raw_archive": "healthy" if application.state.archive.health() else "unhealthy",
             "event_bus": "healthy" if application.state.publisher.health() else "unhealthy",
             "alpaca_configured": bool(
@@ -318,6 +621,244 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "sec_configured": bool(app_settings.sec_user_agent),
             "social_aggregates_enabled": app_settings.enable_social_aggregates,
         }
+
+    @application.get("/v1/control/summary")
+    def control_summary() -> dict[str, Any]:
+        return {
+            "counts": objects.object_summary(),
+            "lists": objects.lists(),
+            "data_catalog": objects.data_catalog(),
+            "shadow": shadow.health_summary(),
+            "recent_activity": objects.activity(limit=25),
+            "pending_actions": [
+                item
+                for item in actions.recent(limit=50)
+                if item["status"] == "PENDING_CONFIRMATION"
+            ],
+            "pipeline_controls": actions.pipeline_controls(),
+            "constraints": {
+                "live_trading_enabled": False,
+                "broker_order_path_present": False,
+                "sensitive_actions_require_confirmation": True,
+            },
+        }
+
+    @application.get("/v1/runtime/controls")
+    def runtime_controls() -> dict[str, Any]:
+        return {
+            "new_exposure_paused": application.state.new_exposure_paused,
+            "pipelines": actions.pipeline_controls(),
+        }
+
+    @application.get("/v1/lists")
+    def system_lists() -> list[dict[str, Any]]:
+        return objects.lists()
+
+    @application.get("/v1/lists/{slug_or_id}")
+    def system_list(slug_or_id: str) -> dict[str, Any]:
+        value = objects.get_list(slug_or_id)
+        if value is None:
+            raise HTTPException(status_code=404, detail="System list not found")
+        value["discussion"] = objects.thread("list", str(value["list_id"]))
+        return value
+
+    @application.get("/v1/explorer/data")
+    def data_catalog() -> dict[str, Any]:
+        return objects.data_catalog()
+
+    @application.get("/v1/explorer/raw")
+    def raw_object_list(
+        limit: int = Query(default=100, ge=1, le=1_000),
+    ) -> list[dict[str, Any]]:
+        return objects.raw_object_list(limit=limit)
+
+    @application.get("/v1/explorer/raw/{raw_object_id}")
+    def raw_object(raw_object_id: str) -> dict[str, Any]:
+        value = objects.raw_object(raw_object_id)
+        if value is None:
+            raise HTTPException(status_code=404, detail="Raw object not found")
+        value["discussion"] = objects.thread("raw_object", raw_object_id)
+        return value
+
+    @application.get("/v1/explorer/raw/{raw_object_id}/content")
+    def raw_object_content(raw_object_id: str) -> dict[str, Any]:
+        value = objects.raw_object(raw_object_id)
+        if value is None:
+            raise HTTPException(status_code=404, detail="Raw object not found")
+        try:
+            content: dict[str, Any] = application.state.archive.read_json(
+                str(value["uri"])
+            )
+            return content
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @application.get("/v1/strategies")
+    def strategies(
+        limit: int = Query(default=200, ge=1, le=1_000),
+    ) -> list[dict[str, Any]]:
+        return objects.strategies(limit=limit)
+
+    @application.get("/v1/shadow/deployments")
+    def shadow_deployment_list(
+        limit: int = Query(default=200, ge=1, le=1_000),
+    ) -> list[dict[str, Any]]:
+        return shadow.deployments(limit=limit)
+
+    @application.get("/v1/shadow/deployments/{deployment_id}")
+    def shadow_deployment(deployment_id: str) -> dict[str, Any]:
+        try:
+            value = shadow.deployment(deployment_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        value["discussion"] = objects.thread("shadow", deployment_id)
+        return value
+
+    @application.get("/v1/shadow/events")
+    def shadow_event_list(
+        deployment_id: str | None = None,
+        limit: int = Query(default=500, ge=1, le=5_000),
+    ) -> list[dict[str, Any]]:
+        return shadow.events(deployment_id=deployment_id, limit=limit)
+
+    @application.get("/v1/shadow/runs")
+    def shadow_run_list(
+        limit: int = Query(default=100, ge=1, le=1_000),
+    ) -> list[dict[str, Any]]:
+        return shadow.runs(limit=limit)
+
+    @application.get("/v1/threads/{object_type}/{object_id}")
+    def object_thread(object_type: str, object_id: str) -> dict[str, Any]:
+        return objects.thread(object_type, object_id)
+
+    @application.post("/v1/threads/{object_type}/{object_id}")
+    def add_thread_post(
+        object_type: str,
+        object_id: str,
+        payload: ThreadPostRequest,
+        request: Request,
+    ) -> dict[str, Any]:
+        return objects.post(
+            object_type=object_type,
+            object_id=object_id,
+            title=f"{object_type}: {object_id}",
+            author_kind="admin",
+            author_name=admin_username(request),
+            body=payload.body,
+        )
+
+    @application.get("/v1/actions")
+    def admin_action_list(
+        limit: int = Query(default=100, ge=1, le=1_000),
+    ) -> list[dict[str, Any]]:
+        return actions.recent(limit=limit)
+
+    @application.post("/v1/actions")
+    def propose_admin_action(
+        payload: AdminActionProposalRequest,
+        request: Request,
+    ) -> dict[str, Any]:
+        try:
+            return actions.propose(
+                action_type=payload.action_type,
+                target_type=payload.target_type,
+                target_id=payload.target_id,
+                parameters=payload.parameters,
+                reason=payload.reason,
+                requested_by=admin_username(request),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @application.post("/v1/actions/{action_id}/confirm")
+    async def confirm_admin_action(
+        action_id: str,
+        payload: AdminActionConfirmRequest,
+        request: Request,
+    ) -> dict[str, Any]:
+        try:
+            return await actions.confirm(
+                action_id=action_id,
+                confirmation_phrase=payload.confirmation_phrase,
+                confirmed_by=admin_username(request),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @application.post("/v1/actions/{action_id}/cancel")
+    def cancel_admin_action(action_id: str, request: Request) -> dict[str, Any]:
+        try:
+            return actions.cancel(
+                action_id=action_id,
+                cancelled_by=admin_username(request),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @application.get("/v1/steward/conversations")
+    def steward_conversation_list(
+        limit: int = Query(default=100, ge=1, le=500),
+    ) -> list[dict[str, Any]]:
+        return steward.conversations(limit=limit)
+
+    @application.get("/v1/steward/conversations/{conversation_id}")
+    def steward_conversation(conversation_id: str) -> dict[str, Any]:
+        messages = steward.messages(conversation_id=conversation_id)
+        if not messages:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return {"conversation_id": conversation_id, "messages": messages}
+
+    @application.post("/v1/steward/ask")
+    async def ask_steward(
+        payload: StewardAskRequest,
+        request: Request,
+    ) -> dict[str, Any]:
+        require_pipeline("llm")
+        try:
+            return await steward.ask(
+                message=payload.message,
+                requested_by=admin_username(request),
+                conversation_id=payload.conversation_id,
+                context_object_type=payload.context_object_type,
+                context_object_id=payload.context_object_id,
+                provider=payload.provider,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except LLMConfigurationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except LLMBudgetExceededError as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
+        except LLMProviderError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @application.get("/v1/code-changes")
+    def code_change_list(
+        limit: int = Query(default=100, ge=1, le=500),
+    ) -> list[dict[str, Any]]:
+        return code_changes.recent(limit=limit)
+
+    @application.get("/v1/code-changes/{session_id}")
+    def code_change(session_id: str) -> dict[str, Any]:
+        value = code_changes.get(session_id)
+        if value is None:
+            raise HTTPException(status_code=404, detail="Code change session not found")
+        return value
+
+    @application.put("/v1/code-changes/{session_id}/candidate")
+    def record_code_candidate(
+        session_id: str,
+        payload: CodeCandidateRequest,
+    ) -> dict[str, Any]:
+        try:
+            return code_changes.record_candidate(
+                session_id=session_id,
+                diff_text=payload.diff_text,
+                tests=payload.tests,
+                proposed_commit_subject=payload.proposed_commit_subject,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @application.get("/v1/documents/search")
     def document_search(
@@ -388,16 +929,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return llm_budget_manager.summary()
 
     @application.put("/v1/llm/routes")
-    def update_llm_routes(request: LLMRouteUpdate) -> dict[str, Any]:
+    def update_llm_routes(
+        payload: LLMRouteUpdate,
+        request: Request,
+    ) -> dict[str, Any]:
         require_development()
-        revision = llm_gateway.activate_routes(
-            routes=request.routes,
-            reason=request.reason,
+        require_pipeline("llm")
+        return actions.propose(
+            action_type="llm.routes.update",
+            target_type="llm_routing",
+            target_id="active",
+            parameters={
+                "routes": {
+                    workload.value: provider.value
+                    for workload, provider in payload.routes.items()
+                }
+            },
+            reason=payload.reason,
+            requested_by=admin_username(request),
         )
-        return {
-            "revision": revision.model_dump(mode="json"),
-            "effective_routing": llm_gateway.status(),
-        }
 
     @application.get("/v1/llm/routes/history")
     def llm_route_history(
@@ -408,6 +958,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.post("/v1/llm/chat")
     async def llm_chat(request: LLMChatRequest) -> dict[str, Any]:
         require_development()
+        require_pipeline("llm")
         conversation = [turn.model_dump(mode="json") for turn in request.history]
         try:
             invocation = await llm_gateway.complete(
@@ -463,6 +1014,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.post("/v1/intelligence/analyze")
     async def research_analysis(request: ResearchAnalysisRequest) -> dict[str, Any]:
         require_development()
+        require_pipeline("research")
+        require_pipeline("llm")
         if request.as_of.tzinfo is None:
             raise HTTPException(status_code=422, detail="as_of must include a timezone")
         snapshot = research_store.feature_snapshot(request.feature_snapshot_id)
@@ -509,6 +1062,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.post("/v1/ml/train")
     def ml_train(request: MLTrainingRequest) -> dict[str, Any]:
         require_development()
+        require_pipeline("ml")
         if request.as_of_end.tzinfo is None:
             raise HTTPException(status_code=422, detail="as_of_end must include a timezone")
         snapshots = research_store.feature_snapshots_for_training(
@@ -556,6 +1110,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.post("/v1/ml/forecast")
     def ml_forecast(request: MLForecastRequest) -> dict[str, Any]:
         require_development()
+        require_pipeline("ml")
         model = ml_store.model(request.model_id)
         if model is None:
             raise HTTPException(status_code=404, detail="ML model not found")
@@ -581,21 +1136,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return ml_store.recent_registry_events(limit=limit)
 
     @application.post("/v1/ml/models/{model_id}/promote")
-    def ml_promote(model_id: str, request: MLPromotionRequest) -> dict[str, Any]:
+    def ml_promote(
+        model_id: str,
+        payload: MLPromotionRequest,
+        request: Request,
+    ) -> dict[str, Any]:
         require_development()
-        try:
-            event = ml_store.promote(
-                model_id=model_id,
-                approved_by=request.approved_by,
-                reason=request.reason,
+        require_pipeline("ml")
+        model = ml_store.model(model_id)
+        if model is None:
+            raise HTTPException(status_code=404, detail="ML model not found")
+        if (
+            model.status.value != "CHALLENGER"
+            or not bool(model.promotion_assessment.get("eligible_for_review"))
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Only a gate-eligible challenger can be proposed for promotion",
             )
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return event.model_dump(mode="json")
+        return actions.propose(
+            action_type="ml.model.promote",
+            target_type="ml_model",
+            target_id=model_id,
+            parameters={"declared_approver": payload.approved_by},
+            reason=payload.reason,
+            requested_by=admin_username(request),
+        )
 
     @application.post("/v1/llm/probe/{provider}")
     async def llm_probe(provider: LLMProviderName) -> dict[str, Any]:
         require_development()
+        require_pipeline("llm")
         workload = (
             LLMWorkload.CRITICAL_RESEARCH
             if provider == LLMProviderName.OPENAI
@@ -653,6 +1224,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.post("/v1/demo/market-data")
     async def demo_market_data() -> dict[str, Any]:
         require_development()
+        require_pipeline("market-data")
         now = datetime.now(UTC).replace(second=0, microsecond=0)
         service = MarketDataIngestionService(
             provider=SyntheticMarketDataProvider(),
@@ -678,6 +1250,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(
                 status_code=403,
                 detail="Unauthenticated write and paid-call controls are development-only",
+            )
+
+    def require_pipeline(pipeline: str) -> None:
+        if not actions.pipeline_enabled(pipeline):
+            raise HTTPException(
+                status_code=409,
+                detail=f"{pipeline} pipeline is paused by the administrator",
             )
 
     def alpaca_provider() -> AlpacaMarketDataProvider:
@@ -719,6 +1298,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.post("/v1/market-data/alpaca/probe")
     async def alpaca_probe() -> dict[str, Any]:
         require_development()
+        require_pipeline("market-data")
         try:
             async with alpaca_provider() as provider:
                 checks = await provider.probe_entitlements(
@@ -744,6 +1324,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.post("/v1/market-data/alpaca/backfill")
     async def alpaca_backfill(request: BackfillRequest) -> dict[str, Any]:
         require_development()
+        require_pipeline("market-data")
         if request.start.tzinfo is None or request.end.tzinfo is None:
             raise HTTPException(status_code=422, detail="start and end must include timezones")
         if request.start >= request.end:
@@ -783,6 +1364,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.post("/v1/market-data/alpaca/option-snapshot")
     async def alpaca_option_snapshot(request: OptionSnapshotRequest) -> dict[str, Any]:
         require_development()
+        require_pipeline("market-data")
         try:
             async with alpaca_provider() as provider:
                 service = OptionDataIngestionService(
@@ -807,6 +1389,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.post("/v1/documents/alpaca-news/backfill")
     async def alpaca_news_backfill(request: NewsBackfillRequest) -> dict[str, Any]:
         require_development()
+        require_pipeline("documents")
         if any(
             value is not None and value.tzinfo is None
             for value in (request.start, request.end)
@@ -850,6 +1433,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.post("/v1/documents/sec/filings")
     async def sec_filings(request: SecFilingsRequest) -> dict[str, Any]:
         require_development()
+        require_pipeline("documents")
         try:
             async with sec_provider() as provider:
                 summary = await DocumentIngestionService(
@@ -874,6 +1458,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.post("/v1/documents/sec/company-facts")
     async def sec_company_facts(request: SecFactsRequest) -> dict[str, Any]:
         require_development()
+        require_pipeline("documents")
         try:
             async with sec_provider() as provider:
                 page = await provider.fetch_company_facts(
@@ -894,38 +1479,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         return summary.model_dump(mode="json")
 
-    def record_command(command: str, reason: str) -> None:
-        now = datetime.now(UTC)
-        event = EventEnvelope(
-            event_id=uuid7(),
-            event_type="system.kill_switch.changed.v1",
-            event_time=now,
-            emitted_at=now,
-            producer="control-api",
-            correlation_id=uuid7(),
-            payload={"command": command, "reason": reason},
-        )
-        ledger.append(event)
-
     @application.post("/v1/commands/pause")
-    def pause(command: OperatorCommand) -> dict[str, Any]:
-        application.state.new_exposure_paused = True
-        record_command("pause_new_exposure", command.reason)
-        return {"new_exposure_paused": True}
+    def pause(command: OperatorCommand, request: Request) -> dict[str, Any]:
+        return actions.propose(
+            action_type="runtime.pause",
+            target_type="runtime",
+            target_id="new_exposure",
+            parameters={},
+            reason=command.reason,
+            requested_by=admin_username(request),
+        )
 
     @application.post("/v1/commands/resume")
-    def resume(command: OperatorCommand) -> dict[str, Any]:
-        if not (
-            app_settings.app_env == AppEnvironment.DEVELOPMENT
-            and app_settings.trading_mode == TradingMode.SHADOW
-        ):
+    def resume(command: OperatorCommand, request: Request) -> dict[str, Any]:
+        if app_settings.trading_mode != TradingMode.SHADOW:
             raise HTTPException(
                 status_code=403,
-                detail="Phase 0 resume is permitted only in development shadow mode",
+                detail="New exposure can resume only in shadow mode",
             )
-        application.state.new_exposure_paused = False
-        record_command("resume_new_exposure", command.reason)
-        return {"new_exposure_paused": False}
+        return actions.propose(
+            action_type="runtime.resume",
+            target_type="runtime",
+            target_id="new_exposure",
+            parameters={},
+            reason=command.reason,
+            requested_by=admin_username(request),
+        )
 
     return application
 

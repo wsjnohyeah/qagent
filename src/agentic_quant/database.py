@@ -30,7 +30,7 @@ ledger_events = Table(
     "ledger_events",
     metadata,
     Column("sequence", Integer, primary_key=True, autoincrement=True),
-    Column("event_id", String(36), nullable=False, unique=True),
+    Column("event_id", String(36), nullable=False),
     Column("event_type", String(120), nullable=False, index=True),
     Column("event_time", DateTime(timezone=True), nullable=False),
     Column("emitted_at", DateTime(timezone=True), nullable=False),
@@ -39,6 +39,7 @@ ledger_events = Table(
     Column("causation_id", String(36), nullable=True),
     Column("schema_version", Integer, nullable=False),
     Column("payload", JSON, nullable=False),
+    UniqueConstraint("event_id", name="uq_ledger_events_event_id"),
 )
 
 raw_objects = Table(
@@ -933,4 +934,307 @@ model_registry_events = Table(
     Column("approved_by", String(80), nullable=False),
     Column("reason", Text, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+)
+
+admin_sessions = Table(
+    "admin_sessions",
+    metadata,
+    Column("session_id", String(36), primary_key=True),
+    Column("token_sha256", String(64), nullable=False, unique=True),
+    Column("username", String(80), nullable=False, index=True),
+    Column("credential_fingerprint", String(64), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("last_seen_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("expires_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("revoked_at", DateTime(timezone=True), nullable=True),
+    Column("user_agent_sha256", String(64), nullable=True),
+    Column("client_ip_sha256", String(64), nullable=True),
+)
+
+admin_auth_events = Table(
+    "admin_auth_events",
+    metadata,
+    Column("auth_event_id", String(36), primary_key=True),
+    Column("event_type", String(40), nullable=False, index=True),
+    Column("username", String(80), nullable=False, index=True),
+    Column("success", Boolean, nullable=False, index=True),
+    Column("detail", String(160), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+)
+
+system_lists = Table(
+    "system_lists",
+    metadata,
+    Column("list_id", String(36), primary_key=True),
+    Column("slug", String(80), nullable=False, unique=True),
+    Column("list_type", String(40), nullable=False, index=True),
+    Column("name", String(120), nullable=False),
+    Column("description", Text, nullable=False),
+    Column("mode", String(24), nullable=False),
+    Column("status", String(24), nullable=False, index=True),
+    Column("current_revision", Integer, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False, index=True),
+)
+
+system_list_revisions = Table(
+    "system_list_revisions",
+    metadata,
+    Column("list_revision_id", String(36), primary_key=True),
+    Column(
+        "list_id",
+        String(36),
+        ForeignKey("system_lists.list_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("revision_number", Integer, nullable=False),
+    Column("members_json", JSON, nullable=False),
+    Column("reason", Text, nullable=False),
+    Column("created_by", String(80), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+    UniqueConstraint(
+        "list_id",
+        "revision_number",
+        name="uq_system_list_revisions_number",
+    ),
+)
+
+object_threads = Table(
+    "object_threads",
+    metadata,
+    Column("thread_id", String(36), primary_key=True),
+    Column("object_type", String(60), nullable=False, index=True),
+    Column("object_id", String(160), nullable=False, index=True),
+    Column("title", String(240), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False, index=True),
+    UniqueConstraint("object_type", "object_id", name="uq_object_threads_object"),
+)
+
+thread_posts = Table(
+    "thread_posts",
+    metadata,
+    Column("post_id", String(36), primary_key=True),
+    Column(
+        "thread_id",
+        String(36),
+        ForeignKey("object_threads.thread_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("author_kind", String(24), nullable=False),
+    Column("author_name", String(80), nullable=False),
+    Column("body", Text, nullable=False),
+    Column("metadata_json", JSON, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+)
+
+admin_action_requests = Table(
+    "admin_action_requests",
+    metadata,
+    Column("action_request_id", String(36), primary_key=True),
+    Column("action_type", String(80), nullable=False, index=True),
+    Column("target_type", String(60), nullable=False, index=True),
+    Column("target_id", String(160), nullable=False, index=True),
+    Column("parameters_json", JSON, nullable=False),
+    Column("reason", Text, nullable=False),
+    Column("preview_json", JSON, nullable=False),
+    Column("status", String(24), nullable=False, index=True),
+    Column("requested_by", String(80), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("confirmed_at", DateTime(timezone=True), nullable=True),
+    Column("executed_at", DateTime(timezone=True), nullable=True),
+    Column("result_json", JSON, nullable=False),
+    Column("error_code", String(120), nullable=True),
+)
+
+steward_conversations = Table(
+    "steward_conversations",
+    metadata,
+    Column("conversation_id", String(36), primary_key=True),
+    Column("title", String(160), nullable=False),
+    Column("created_by", String(80), nullable=False),
+    Column("context_object_type", String(60), nullable=True),
+    Column("context_object_id", String(160), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False, index=True),
+)
+
+steward_messages = Table(
+    "steward_messages",
+    metadata,
+    Column("message_id", String(36), primary_key=True),
+    Column(
+        "conversation_id",
+        String(36),
+        ForeignKey("steward_conversations.conversation_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("role", String(24), nullable=False),
+    Column("content", Text, nullable=False),
+    Column("citations_json", JSON, nullable=False),
+    Column(
+        "action_request_id",
+        String(36),
+        ForeignKey("admin_action_requests.action_request_id"),
+        nullable=True,
+        index=True,
+    ),
+    Column(
+        "llm_invocation_id",
+        String(36),
+        ForeignKey("llm_invocations.invocation_id"),
+        nullable=True,
+        index=True,
+    ),
+    Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+)
+
+strategy_adoptions = Table(
+    "strategy_adoptions",
+    metadata,
+    Column("adoption_id", String(36), primary_key=True),
+    Column(
+        "strategy_spec_id",
+        String(36),
+        ForeignKey("strategy_specs.strategy_spec_id"),
+        nullable=False,
+        index=True,
+    ),
+    Column("status", String(32), nullable=False, index=True),
+    Column(
+        "validation_report_id",
+        String(36),
+        ForeignKey("validation_reports.validation_report_id"),
+        nullable=True,
+        index=True,
+    ),
+    Column("reason", Text, nullable=False),
+    Column("approved_by", String(80), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False, index=True),
+    UniqueConstraint(
+        "strategy_spec_id",
+        name="uq_strategy_adoptions_strategy_spec_id",
+    ),
+)
+
+shadow_deployments = Table(
+    "shadow_deployments",
+    metadata,
+    Column("shadow_deployment_id", String(36), primary_key=True),
+    Column(
+        "strategy_spec_id",
+        String(36),
+        ForeignKey("strategy_specs.strategy_spec_id"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "adoption_id",
+        String(36),
+        ForeignKey("strategy_adoptions.adoption_id"),
+        nullable=True,
+        index=True,
+    ),
+    Column("symbol", String(24), nullable=False, index=True),
+    Column("status", String(24), nullable=False, index=True),
+    Column("initial_cash", Numeric(24, 8), nullable=False),
+    Column("cash_balance", Numeric(24, 8), nullable=False),
+    Column("position_quantity", Numeric(24, 10), nullable=False),
+    Column("average_entry_price", Numeric(20, 8), nullable=True),
+    Column("last_price", Numeric(20, 8), nullable=True),
+    Column("realized_pnl", Numeric(24, 8), nullable=False),
+    Column("unrealized_pnl", Numeric(24, 8), nullable=False),
+    Column("last_processed_bar_time", DateTime(timezone=True), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False, index=True),
+    UniqueConstraint(
+        "strategy_spec_id",
+        "symbol",
+        name="uq_shadow_deployments_strategy_symbol",
+    ),
+)
+
+shadow_runs = Table(
+    "shadow_runs",
+    metadata,
+    Column("shadow_run_id", String(36), primary_key=True),
+    Column("status", String(24), nullable=False, index=True),
+    Column("trigger", String(40), nullable=False),
+    Column("deployment_count", Integer, nullable=False),
+    Column("bars_processed", Integer, nullable=False),
+    Column("events_created", Integer, nullable=False),
+    Column("started_at", DateTime(timezone=True), nullable=False),
+    Column("finished_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("error_code", String(120), nullable=True),
+)
+
+shadow_events = Table(
+    "shadow_events",
+    metadata,
+    Column("shadow_event_id", String(36), primary_key=True),
+    Column(
+        "shadow_deployment_id",
+        String(36),
+        ForeignKey("shadow_deployments.shadow_deployment_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("shadow_run_id", String(36), nullable=True, index=True),
+    Column("sequence", Integer, nullable=False),
+    Column("event_type", String(40), nullable=False, index=True),
+    Column("event_time", DateTime(timezone=True), nullable=False, index=True),
+    Column("symbol", String(24), nullable=False, index=True),
+    Column("bar_id", String(36), nullable=True, index=True),
+    Column("cash_balance", Numeric(24, 8), nullable=False),
+    Column("position_quantity", Numeric(24, 10), nullable=False),
+    Column("price", Numeric(20, 8), nullable=True),
+    Column("realized_pnl_delta", Numeric(24, 8), nullable=False),
+    Column("payload_json", JSON, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint(
+        "shadow_deployment_id",
+        "sequence",
+        name="uq_shadow_events_deployment_sequence",
+    ),
+    UniqueConstraint(
+        "shadow_deployment_id",
+        "bar_id",
+        "event_type",
+        name="uq_shadow_events_bar_type",
+    ),
+)
+
+runtime_controls = Table(
+    "runtime_controls",
+    metadata,
+    Column("control_key", String(80), primary_key=True),
+    Column("state_json", JSON, nullable=False),
+    Column("updated_by", String(80), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+code_change_sessions = Table(
+    "code_change_sessions",
+    metadata,
+    Column("code_change_session_id", String(36), primary_key=True),
+    Column("status", String(32), nullable=False, index=True),
+    Column("request", Text, nullable=False),
+    Column("scope_json", JSON, nullable=False),
+    Column("base_git_sha", String(64), nullable=False),
+    Column("branch_name", String(160), nullable=False),
+    Column("worktree_path", Text, nullable=True),
+    Column("diff_sha256", String(64), nullable=True),
+    Column("diff_text", Text, nullable=True),
+    Column("tests_json", JSON, nullable=False),
+    Column("proposed_commit_subject", String(240), nullable=True),
+    Column("committed_git_sha", String(64), nullable=True),
+    Column("requested_by", String(80), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("approved_at", DateTime(timezone=True), nullable=True),
 )

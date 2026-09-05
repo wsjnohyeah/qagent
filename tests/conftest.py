@@ -15,6 +15,8 @@ def settings(tmp_path: Path) -> Settings:
         trading_mode=TradingMode.SHADOW,
         live_trading_enabled=False,
         global_new_exposure_paused=False,
+        auth_required=False,
+        shadow_runtime_enabled=False,
         database_url=f"sqlite+pysqlite:///{tmp_path / 'test.db'}",
         object_store_root=tmp_path / "objects",
         risk_policy_path=root / "configs/risk_policy.yaml",

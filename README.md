@@ -1,6 +1,6 @@
 # Agentic Quant Trading System
 
-A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton, the verified read-only **Phase 1** market-data foundation, the completed **Phase 2** event/document pipeline, a **Phase 3D** bias-aware research validation gate, the completed **Phase 4** evidence-bound LLM analyst, and the completed **Phase 5** ML/registry tooling. Phase 6 shadow runtime is not implemented.
+A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton, the verified read-only **Phase 1** market-data foundation, the completed **Phase 2** event/document pipeline, a **Phase 3D** bias-aware research validation gate, the completed **Phase 4** evidence-bound LLM analyst, the completed **Phase 5** ML/registry tooling, and the **Phase 6** authenticated System Steward, object explorer, and persistent shadow runtime.
 
 > Live-money execution is not implemented. `live` is not a valid mode, and setting `LIVE_TRADING_ENABLED=true` makes startup fail.
 
@@ -17,9 +17,15 @@ make doctor
 make run
 ```
 
-Open [http://127.0.0.1:8000](http://127.0.0.1:8000). The web page can run one synthetic decision and inspect the safe shadow result. API documentation is at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000). On a new checkout, the initial
+single-admin password is written to ignored `work/initial-admin-password.txt`; the username
+is `admin`. Delete that password file after saving the credential in an approved password
+manager. API documentation is also authentication-protected at
+[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
 
-`make bootstrap` installs `uv` inside `work/tools`, creates `.env` from safe defaults if needed, and resolves the locked Python environment. It does not modify the system Python.
+`make bootstrap` installs `uv` inside `work/tools`, creates `.env` with generated local admin
+credentials if needed, and resolves the locked Python environment. It does not modify the
+system Python.
 
 ## What exists now
 
@@ -81,8 +87,22 @@ reservations stop over-budget calls before they reach a provider.
 
 Phase 4B exposes that gateway in the local Control Center. The operator can create immutable
 workload-routing revisions and chat through `Auto`, OpenAI, or Meta while preserving model,
-route, token, latency, source, and configuration lineage. These paid/write controls remain
-development-only until the remote interface has authentication and budget enforcement.
+route, token, latency, source, and configuration lineage. Paid research calls remain
+development-scoped while the authenticated remote deployment path is being commissioned.
+
+Phase 6 replaces the development console with a single-admin Control Center. Login uses a
+long-lived, revocable server-side session and double-submit CSRF protection. The central
+object explorer exposes lists, dataset coverage/raw payloads, strategies, pipeline state,
+shadow deployments, activity, and discussion timelines. A persistent System Steward receives
+a bounded live system snapshot, must cite exact object IDs, and may only create an allowlisted
+pending action. List edits, pipeline controls, LLM routing, strategy adoption, shadow control,
+and code-change sessions require a second explicit confirmation.
+
+The Phase 6 shadow runtime processes newly available stored bars idempotently into a virtual
+signal/order/fill journal with modeled commission, spread, slippage, impact, volume limits,
+cash, and realized P&L. It contains no broker client or order-submission path. Bounded local
+data validates the workflow; production can run the same partitionable contracts over longer
+history.
 
 ## Commands
 
@@ -117,6 +137,13 @@ DEVELOPMENT_MAX_INTRADAY_BACKFILL_DAYS=7
 TRADING_MODE=shadow
 LIVE_TRADING_ENABLED=false
 GLOBAL_NEW_EXPOSURE_PAUSED=false
+AUTH_REQUIRED=true
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=generated-local-value
+SESSION_SECRET=generated-64-character-value
+SESSION_MAX_AGE_DAYS=90
+SHADOW_RUNTIME_ENABLED=true
+SHADOW_POLL_SECONDS=30
 LLM_OPENAI_API_KEY=
 LLM_META_API_KEY=
 LLM_ROUTING_PATH=./configs/model_routing.yaml
@@ -129,9 +156,10 @@ RESEARCH_PROMOTION_POLICY_PATH=./configs/research_promotion_policy.yaml
 deployment uses `APP_ENV=production` for durable services and governed long-horizon jobs;
 this distinction does not relax point-in-time, safety, or audit invariants.
 
-Production requires `GLOBAL_NEW_EXPOSURE_PAUSED=true` and `AUTO_MIGRATE=false` at settings
-validation, not only in Compose. The red pause operation is distinct from liquidation; this
-build has no liquidation or live broker endpoint.
+Production requires `AUTH_REQUIRED=true`, `ADMIN_PASSWORD_HASH` instead of plaintext,
+`GLOBAL_NEW_EXPOSURE_PAUSED=true`, and `AUTO_MIGRATE=false` at settings validation, not only
+in Compose. The red pause operation is distinct from liquidation; this build has no
+liquidation or live broker endpoint.
 
 Risk values are versioned in `configs/risk_policy.yaml`. Restricted securities are effective-dated in `configs/restricted_securities.yaml`. Changes require tests and review.
 
@@ -307,10 +335,11 @@ and input hashes, provider response ID, token usage, latency, status, and output
 and instructions are not copied into the audit table. Automatic cross-provider fallback is
 disabled so cost and model behavior cannot change silently. See `runbooks/llm_gateway.md`.
 
-The web page now shows provider readiness and lets a development operator assign either
-provider to each named workload. Saving creates an append-only database revision rather than
-rewriting the tracked YAML baseline. Research Copilot supports `Auto` routing or an explicit
-provider for a single conversation. Browser history is session-local and bounded; raw input is
+The authenticated web page shows provider readiness and lets the administrator assign either
+provider to each named workload. Saving first creates a confirmation request; confirmation
+then appends a database revision rather than rewriting the tracked YAML baseline. System
+Steward supports `Auto` routing or an explicit provider, persists its conversations, reads a
+bounded current-state snapshot, and returns validated object citations. Raw LLM input is
 hashed in the invocation audit while model output and usage are retained.
 
 ## Phase 5: calibrated ML ranking and registry
@@ -327,6 +356,28 @@ registry action. Champion means eligible for model serving, not strategy approva
 downstream strategy still passes the separate PBO/DSR research gate. Forecasts can be cited
 by the Phase 4 analyst, giving the Decision Inspector one ML + LLM lineage graph. See
 `runbooks/ml.md` and ADR 0015.
+
+## Phase 6: authenticated System Steward and shadow operations
+
+The web application is organized around system objects rather than a fixed dashboard:
+
+- **Overview** summarizes data, research, models, shadow state, and pending actions.
+- **Lists** manages the governed trading universe, focus watchlist, candidate list,
+  shadow-active symbols, benchmarks, and read-only restriction list with immutable revisions.
+- **Data explorer** exposes coverage and bounded raw-object previews with provenance.
+- **Strategies** links versioned specifications, experiments, validation evidence, adoption,
+  and discussion.
+- **Shadow** exposes deployments, virtual events, cash/P&L, runtime ticks, and pause/retire.
+- **Pipelines, Models, Activity, and Code changes** expose controls and their audit state.
+- **System Steward** stays available beside every object and receives that page as context.
+
+No natural-language response executes an operation. A proposed action returns its exact
+preview and confirmation phrase; only a separate authenticated request can claim and execute
+it, once, before expiry. “Delete strategy” is implemented as immutable retirement. Code
+requests create scoped sessions with no web shell; an external trusted coding worker must
+produce a diff and passing test record before a separate commit approval can be granted.
+
+See `runbooks/control_center.md`, `runbooks/shadow_runtime.md`, ADR 0017, and ADR 0018.
 
 ## Repository map
 
@@ -385,10 +436,20 @@ AGENTS.md                mandatory operating rules for coding/deployment agents
 - `POST /v1/documents/alpaca-news/backfill` — development only
 - `POST /v1/documents/sec/filings` — development only
 - `POST /v1/documents/sec/company-facts` — development only
-- `POST /v1/commands/pause`
-- `POST /v1/commands/resume` — development + shadow only
+- `POST /v1/commands/pause` and `/resume` — create confirmation-gated runtime actions;
+  resume is shadow-only
+- `POST /v1/auth/login`, `GET /v1/auth/session`, `POST /v1/auth/logout`
+- `GET /v1/control/summary`, `/v1/lists`, `/v1/explorer/*`, `/v1/strategies`
+- `GET /v1/threads/{object_type}/{object_id}` and authenticated discussion posts
+- `GET|POST /v1/actions` plus `POST /v1/actions/{id}/confirm`
+- `POST /v1/steward/ask` and persistent conversation history
+- `GET /v1/shadow/deployments`, `/v1/shadow/events`, `/v1/shadow/runs`
+- `GET /v1/runtime/controls` and confirmation-gated pipeline controls
+- `GET /v1/code-changes` and tested-candidate intake
 
-The production control plane still needs authentication and authorization before it may be exposed.
+All non-health interaction is locked behind the single administrator session when
+`AUTH_REQUIRED=true`. A remote deployment additionally requires TLS and the deployment gates
+in `docs/DEPLOYMENT.md`.
 
 ## Workflow for coding agents
 

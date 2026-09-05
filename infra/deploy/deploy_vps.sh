@@ -16,6 +16,27 @@ if ! grep -Eq '^LIVE_TRADING_ENABLED=false$' .env.production; then
   echo "Refusing deployment: LIVE_TRADING_ENABLED must be false."
   exit 1
 fi
+if ! grep -Eq '^AUTH_REQUIRED=true$' .env.production; then
+  echo "Refusing deployment: AUTH_REQUIRED must be true."
+  exit 1
+fi
+if ! grep -Eq '^ADMIN_USERNAME=.+$' .env.production; then
+  echo "Refusing deployment: ADMIN_USERNAME is missing."
+  exit 1
+fi
+if ! grep -Eq '^ADMIN_PASSWORD_HASH=.+$' .env.production; then
+  echo "Refusing deployment: ADMIN_PASSWORD_HASH is missing."
+  exit 1
+fi
+if grep -Eq '^ADMIN_PASSWORD=.+$' .env.production; then
+  echo "Refusing deployment: plaintext ADMIN_PASSWORD is prohibited."
+  exit 1
+fi
+if ! awk -F= '/^SESSION_SECRET=/{if (length($2) >= 32) ok=1} END{exit !ok}' \
+  .env.production; then
+  echo "Refusing deployment: SESSION_SECRET must contain at least 32 characters."
+  exit 1
+fi
 
 docker compose --env-file .env.production -f compose.production.yml pull
 docker compose --env-file .env.production -f compose.production.yml up -d postgres redis
