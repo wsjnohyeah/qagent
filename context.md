@@ -6,7 +6,7 @@ Context format: v1
 
 Current phase: Phases 0–6 implemented and locally verified; Phase 6 UI review remains iterative
 
-Current documented baseline: C022 — `Promote System Steward to full-page workspace`
+Current documented baseline: C023 — `Show LLM budget usage on overview`
 
 ## Purpose and authority
 
@@ -84,6 +84,9 @@ A Git commit cannot contain its own content-derived hash without changing that h
   governed lists, bounded raw-data inspection, strategies, shadow deployments/events,
   pipeline controls, model routing, activity, code-change sessions, and per-object discussion
   timelines remain available through the left navigation.
+- Overview displays the current UTC daily/monthly LLM token consumption and estimated cost
+  against configured project limits, with provider/workload breakdowns and in-flight
+  reservations sourced from the durable budget ledger.
 - One persistent System Steward receives a bounded current-state snapshot across data,
   quality, jobs, validations, analyses, models, strategies, lists, shadow state, and admin
   actions. It must cite supplied object IDs and may only propose allowlisted actions.
@@ -665,7 +668,7 @@ year or more of data.
 | LLM gateway | `src/agentic_quant/llm.py` | versioned workload routing and bounded OpenAI/Meta Responses calls |
 | LLM persistence | `src/agentic_quant/llm_store.py` | immutable route revisions, source/config lineage, output, usage, latency, and status |
 | LLM routing | `configs/model_routing.yaml` | premium/value model assignments and bounded provider settings |
-| LLM budgets | `src/agentic_quant/llm_budget.py`, `configs/llm_budget.yaml` | atomic reservation/settlement and versioned token/cost ceilings |
+| LLM budgets | `src/agentic_quant/llm_budget.py`, `configs/llm_budget.yaml` | atomic reservation/settlement, versioned token/cost ceilings, and Control Center usage summary |
 | Research intelligence | `src/agentic_quant/intelligence.py` | point-in-time retrieval, structured analyst, citation checks, abstention, Decision Inspector graph |
 | ML training/registry | `src/agentic_quant/ml.py`, `configs/ml_policy.yaml` | PIT labels, logistic/stump walk-forward, calibration, drift, JSON registry, forecasts |
 | Schema migrations | `migrations/` | Alembic schema history through completed Phase 6 (`20260905_0020`) |
@@ -1178,6 +1181,18 @@ The Compose stack is currently intended to remain running for local inspection. 
   links, inline code, and fenced code blocks. Model-produced raw HTML is escaped. The prompt
   now explicitly requests concise GitHub-flavored Markdown while its JSON envelope,
   citation validation, action allowlist, and human confirmation boundary remain unchanged.
+
+### D031 — Overview exposes the LLM budget ledger
+
+- Date: 2026-09-05 PDT.
+- The user requested visible LLM cost and token consumption on the main Overview page.
+- Decision: expose the versioned policy limits alongside existing persisted usage windows,
+  then render current UTC-day and UTC-month project consumption, in-flight reservations,
+  caps, and capacity percentages. Daily provider and workload rows make the source of usage
+  inspectable rather than presenting only one aggregate number.
+- Dollar amounts remain labeled estimates derived from configured planning rates, not
+  provider invoices. This reporting surface does not change reservation enforcement or
+  model authority.
 
 ## Iteration and commit ledger
 
@@ -1910,7 +1925,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C022 — `Promote System Steward to full-page workspace`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `7f786a0`.
 - Date: 2026-09-05 PDT.
 - User intent: make the Steward the primary, readable interaction surface instead of a
   narrow side chat, and format long answers as Markdown.
@@ -1940,6 +1955,34 @@ The Compose stack is currently intended to remain running for local inspection. 
     their existing navigation and confirmation-gated operations.
   - Shadow-only, no-broker, single-admin, citation-validation, and explicit-confirmation
     safety boundaries are unchanged.
+
+### C023 — `Show LLM budget usage on overview`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-05 PDT.
+- User intent: show how much estimated LLM money and how many tokens the system has consumed
+  directly on the main Overview screen.
+- Scope:
+  - Extended the authenticated budget summary with its versioned project, provider, and
+    workload limits so an unused environment can still show complete zero-state capacity.
+  - Added Overview cards for daily/monthly settled estimated spend and token consumption,
+    limit percentages, and progress indicators.
+  - Added a detailed provider/workload daily table that separates consumed values from
+    in-flight reservations and shows the binding token-or-cost capacity percentage.
+  - Added responsive styling, estimate/invoice disclosure, and API/UI regression assertions.
+- Architecture/decision impact:
+  - The existing persistent budget ledger remains authoritative. The browser only derives
+    display totals and percentages from authenticated API values; it cannot alter limits or
+    reservations.
+- Validation:
+  - JavaScript compilation and a deterministic budget-render/math probe passed.
+  - Targeted budget, intelligence, and Control Center tests passed (7 tests).
+  - `make check` passed: Flake8, strict mypy across 49 source files, and 78 tests.
+  - Authenticated local doctor, repository secret scan, and Git diff checks passed.
+- Expected global state after commit:
+  - Overview makes current LLM resource consumption and remaining headroom visible without
+    weakening the pre-call budget breaker or exposing credentials.
+  - Costs remain planning estimates; provider invoices remain externally authoritative.
 
 ## Open work
 

@@ -227,7 +227,12 @@ def test_retrieval_is_point_in_time_and_analysis_is_citation_bound(
     assert graph is not None
     assert graph["schema_version"] == "ai_infrastructure_graph@0.1.0"
     assert any(edge["relationship"] == "generated" for edge in graph["edges"])
-    assert budget.summary()["reservation_counts"] == {"SETTLED": 1}
+    budget_summary = budget.summary()
+    assert budget_summary["reservation_counts"] == {"SETTLED": 1}
+    assert budget_summary["limits"]["project_monthly"] == {
+        "max_tokens": 5_000_000,
+        "max_estimated_cost_usd": "200.00",
+    }
 
 
 def test_unknown_citation_rejects_llm_output(

@@ -363,7 +363,8 @@ by the Phase 4 analyst, giving the Decision Inspector one ML + LLM lineage graph
 
 The web application is organized around system objects rather than a fixed dashboard:
 
-- **Overview** summarizes data, research, models, shadow state, and pending actions.
+- **Overview** summarizes data, research, models, shadow state, pending actions, and current
+  LLM token/estimated-cost usage against daily and monthly budget limits.
 - **Lists** manages the governed trading universe, focus watchlist, candidate list,
   shadow-active symbols, benchmarks, and read-only restriction list with immutable revisions.
 - **Data explorer** exposes coverage and bounded raw-object previews with provenance.

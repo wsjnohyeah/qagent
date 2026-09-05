@@ -132,6 +132,11 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert client.get("/v1/llm/invocations").json() == []
         budget = client.get("/v1/llm/budget").json()
         assert budget["policy_version"] == "llm_budget@0.1.0"
+        assert budget["limits"]["project_daily"] == {
+            "max_tokens": 500_000,
+            "max_estimated_cost_usd": "20.00",
+        }
+        assert set(budget["limits"]["provider_daily"]) == {"openai", "meta"}
         assert budget["windows"] == []
         assert client.get("/v1/intelligence/analyses").json() == []
         assert client.get("/v1/decision-inspector/missing").status_code == 404
@@ -155,6 +160,8 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert 'data-page="steward"' in page.text
         assert 'class="steward-page"' in page.text
         assert "function renderMarkdown" in page.text
+        assert "LLM budget &amp; usage" in page.text
+        assert "renderLLMBudget" in page.text
         assert '<aside id="steward"' not in page.text
         oversized_backfill = client.post(
             "/v1/market-data/alpaca/backfill",

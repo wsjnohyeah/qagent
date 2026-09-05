@@ -62,6 +62,8 @@
   CSRF protection. Its default view is a dedicated full-page System Steward workspace with
   persistent conversations and safely rendered Markdown; the remaining navigation exposes
   overview, lists, data, strategy, shadow, pipeline, model, activity, and code-change objects.
+- Overview reads the persistent LLM budget ledger and shows current daily/monthly token and
+  estimated-cost consumption, reservations, limits, and provider/workload utilization.
 - One System Steward reads a bounded current-state snapshot, returns validated object
   citations, persists conversations, and can propose allowlisted admin actions. It cannot
   execute them; a separate exact confirmation is required.

@@ -310,6 +310,7 @@ class LLMBudgetManager:
         return {
             "policy_version": self.policy.version,
             "pricing_is_estimate": True,
+            "limits": self.policy.limits.model_dump(mode="json"),
             "windows": windows,
             "reservation_counts": reservation_counts,
         }

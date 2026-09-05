@@ -55,6 +55,11 @@ The initial lists are:
 - `benchmarks`: context-only instruments;
 - `restricted`: read-only policy identifiers.
 
+Overview includes the current UTC-day and UTC-month LLM budget position. It separates
+settled consumption from in-flight reservations, shows project limits, and breaks daily
+capacity down by provider and workload. Dollar values are estimates calculated from
+`configs/llm_budget.yaml`; they are planning controls and may differ from provider invoices.
+
 ## Confirmation protocol
 
 The System Steward and UI may create only allowlisted `PENDING_CONFIRMATION` actions. A
