@@ -93,10 +93,12 @@ development-scoped while the authenticated remote deployment path is being commi
 Phase 6 replaces the development console with a single-admin Control Center. Login uses a
 long-lived, revocable server-side session and double-submit CSRF protection. The central
 object explorer exposes lists, dataset coverage/raw payloads, strategies, pipeline state,
-shadow deployments, activity, and discussion timelines. A persistent System Steward receives
-a bounded live system snapshot, must cite exact object IDs, and may only create an allowlisted
-pending action. List edits, pipeline controls, LLM routing, strategy adoption, shadow control,
-and code-change sessions require a second explicit confirmation.
+shadow deployments, activity, and discussion timelines. The System Steward is the default,
+full-page workspace rather than a sidebar. Its persistent conversation history renders safe
+Markdown, including tables and code blocks. The steward receives a bounded live system
+snapshot, must cite exact object IDs, and may only create an allowlisted pending action. List
+edits, pipeline controls, LLM routing, strategy adoption, shadow control, and code-change
+sessions require a second explicit confirmation.
 
 The Phase 6 shadow runtime processes newly available stored bars idempotently into a virtual
 signal/order/fill journal with modeled commission, spread, slippage, impact, volume limits,
@@ -369,7 +371,8 @@ The web application is organized around system objects rather than a fixed dashb
   and discussion.
 - **Shadow** exposes deployments, virtual events, cash/P&L, runtime ticks, and pause/retire.
 - **Pipelines, Models, Activity, and Code changes** expose controls and their audit state.
-- **System Steward** stays available beside every object and receives that page as context.
+- **System Steward** is the default full-page conversation workspace. It renders safe
+  Markdown, retains conversation history, and can carry the last inspected object as context.
 
 No natural-language response executes an operation. A proposed action returns its exact
 preview and confirmation phrase; only a separate authenticated request can claim and execute

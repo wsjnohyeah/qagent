@@ -152,6 +152,10 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert page.status_code == 200
         assert "Model routing" in page.text
         assert "System Steward" in page.text
+        assert 'data-page="steward"' in page.text
+        assert 'class="steward-page"' in page.text
+        assert "function renderMarkdown" in page.text
+        assert '<aside id="steward"' not in page.text
         oversized_backfill = client.post(
             "/v1/market-data/alpaca/backfill",
             json={

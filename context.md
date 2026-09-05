@@ -6,7 +6,7 @@ Context format: v1
 
 Current phase: Phases 0–6 implemented and locally verified; Phase 6 UI review remains iterative
 
-Current documented baseline: C021 — `Build authenticated Phase 6 control center`
+Current documented baseline: C022 — `Promote System Steward to full-page workspace`
 
 ## Purpose and authority
 
@@ -79,9 +79,11 @@ A Git commit cannot contain its own content-derived hash without changing that h
 - Phase 6 authenticates one administrator with a revocable server-side cookie session and
   CSRF protection. All non-health system interaction is locked when authentication is enabled;
   production requires an Argon2 password hash.
-- The Phase 6 Control Center is object-centric: overview, governed lists, bounded raw-data
-  inspection, strategies, shadow deployments/events, pipeline controls, model routing,
-  activity, code-change sessions, and per-object discussion timelines share one interface.
+- The Phase 6 Control Center is object-centric. Its default view is now a dedicated full-page
+  System Steward with persistent conversation history and safely rendered Markdown; overview,
+  governed lists, bounded raw-data inspection, strategies, shadow deployments/events,
+  pipeline controls, model routing, activity, code-change sessions, and per-object discussion
+  timelines remain available through the left navigation.
 - One persistent System Steward receives a bounded current-state snapshot across data,
   quality, jobs, validations, analyses, models, strategies, lists, shadow state, and admin
   actions. It must cite supplied object IDs and may only propose allowlisted actions.
@@ -510,9 +512,10 @@ can mark it champion, and that serving status does not bypass the separate strat
 Phase 6 puts all system interaction behind one administrator session when authentication is
 enabled. Opaque session tokens are stored only as hashes, a changed credential invalidates
 old sessions, login attempts are rate-limited, and state-changing requests require a
-double-submit CSRF token. Production rejects plaintext administrator passwords. The UI is a
-three-column object workspace: navigation, system-object detail/discussion, and one persistent
-System Steward carrying page context.
+double-submit CSRF token. Production rejects plaintext administrator passwords. The UI uses
+a left navigator and one full central workspace. The System Steward is the default dedicated
+page, carries object context into conversation, and safely renders persistent answers as
+Markdown instead of compressing them into a permanent side panel.
 
 The steward is one user-facing administrator persona, not three separately managed agents.
 Internally it queries a bounded database snapshot and the existing LLM gateway. It can explain
@@ -629,7 +632,7 @@ year or more of data.
 | Event ledger | `src/agentic_quant/ledger.py` | append-only SQL event storage and lineage queries |
 | Vertical slice | `src/agentic_quant/pipeline.py` | synthetic catalyst through shadow-order record |
 | Control API | `src/agentic_quant/api.py` | authenticated object APIs, stewardship, confirmation actions, health, research, models, and shadow operations |
-| Control page | `src/agentic_quant/static/index.html` | object explorer, forum timelines, System Steward, pipeline/model/shadow administration |
+| Control page | `src/agentic_quant/static/index.html` | default full-page Markdown System Steward, object explorer, forum timelines, pipeline/model/shadow administration |
 | Administrator auth | `src/agentic_quant/auth.py` | single-admin login rate limit, hashed sessions, CSRF cookies, revoke/audit |
 | System objects | `src/agentic_quant/control_plane.py` | versioned lists, data catalog/raw explorer, strategy summaries, discussion threads |
 | Admin actions | `src/agentic_quant/admin_actions.py` | allowlist, immutable preview, expiry, exact confirmation, execution audit |
@@ -1160,6 +1163,21 @@ The Compose stack is currently intended to remain running for local inspection. 
   shadow runtime. Virtual events model costs and liquidity, retain cash/P&L, and never become
   broker orders.
 - Formal record: `docs/adr/0018-persistent-broker-free-shadow-runtime.md`.
+
+### D030 — The System Steward is the primary full-page interface
+
+- Date: 2026-09-05 PDT.
+- The user found the persistent narrow side panel inconsistent with the Steward's role as
+  the primary way to understand and operate the system, and found long plain-text answers
+  difficult to scan.
+- Decision: make System Steward the default top-level page and give it the entire central
+  workspace, including persistent conversation navigation, a wide reading column, and a
+  dedicated composer. Object pages remain separate and can pass their current context into
+  the Steward.
+- Assistant output uses safe locally parsed Markdown with headings, lists, tables, quotes,
+  links, inline code, and fenced code blocks. Model-produced raw HTML is escaped. The prompt
+  now explicitly requests concise GitHub-flavored Markdown while its JSON envelope,
+  citation validation, action allowlist, and human confirmation boundary remain unchanged.
 
 ## Iteration and commit ledger
 
@@ -1844,7 +1862,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C021 — `Build authenticated Phase 6 control center`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `2345412`.
 - Date: 2026-09-05 PDT.
 - User intent: autonomously implement the Phase 6 core after confirming one System Steward,
   single-admin authentication, forum-style object exploration, governed lists, confirmed
@@ -1889,6 +1907,39 @@ The Compose stack is currently intended to remain running for local inspection. 
     exists.
   - Interactive visual refinement and cloud infrastructure choices remain future work; they
     do not block bounded Phase 6 workflow verification.
+
+### C022 — `Promote System Steward to full-page workspace`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-05 PDT.
+- User intent: make the Steward the primary, readable interaction surface instead of a
+  narrow side chat, and format long answers as Markdown.
+- Scope:
+  - Replaced the three-column layout and persistent 372px Steward sidebar with a two-column
+    application shell and a dedicated full-page Steward route.
+  - Made Steward the default landing page and added persistent conversation navigation,
+    new-conversation handling, prompt starters, a wide message column, and a fixed composer.
+  - Added a dependency-free safe Markdown renderer for headings, lists, tables, quotes,
+    links, inline code, fenced code blocks, emphasis, and dividers; raw HTML is escaped.
+  - Updated the Steward prompt to request concise GitHub-flavored Markdown and incremented
+    its prompt version to `system_steward@0.2.0`.
+  - Updated UI/API contract assertions and Phase 6 operator/architecture documentation.
+- Architecture/decision impact:
+  - The System Steward is now visually and navigationally the primary interface while object
+    explorers remain dedicated pages. Citation and confirmation security contracts are
+    unchanged, and no external frontend or Markdown dependency was introduced.
+- Validation:
+  - JavaScript compilation and a direct safe-Markdown render probe passed, including table
+    rendering and raw-script escaping.
+  - Phase 6/API targeted tests passed (10 tests).
+  - `make check` passed: Flake8, strict mypy across 49 source files, and 78 tests.
+  - `make doctor`, repository secret scan, and Git diff checks passed.
+- Expected global state after commit:
+  - The local Control Center opens directly into a wide, persistent, Markdown-capable System
+    Steward workspace; previous conversations remain readable and system objects retain
+    their existing navigation and confirmation-gated operations.
+  - Shadow-only, no-broker, single-admin, citation-validation, and explicit-confirmation
+    safety boundaries are unchanged.
 
 ## Open work
 

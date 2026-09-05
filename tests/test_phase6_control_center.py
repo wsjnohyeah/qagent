@@ -370,6 +370,8 @@ def test_system_steward_cites_snapshot_and_only_proposes_actions(
     ) -> LLMProviderResult:
         assert "system_snapshot" in request.input_text
         assert "direct_user_request" in request.input_text
+        assert "GitHub-flavored Markdown" in request.instructions
+        assert "Never put raw HTML" in request.instructions
         return LLMProviderResult(
             response_id="steward-test",
             output_text=(

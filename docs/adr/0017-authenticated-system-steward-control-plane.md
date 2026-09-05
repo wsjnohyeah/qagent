@@ -19,8 +19,9 @@ authorization signals.
 - One administrator is configured outside Git. Sessions are server-side, revocable, long-
   lived, cookie-based, and protected by a separate CSRF token. Production refuses plaintext
   administrator passwords.
-- The no-build UI has one left-side object navigator, a central forum-style explorer, and one
-  persistent System Steward carrying current object context.
+- The no-build UI has one left-side object navigator and a central object workspace. The
+  System Steward is a default, full-page conversation surface with persistent history,
+  safely rendered Markdown, and carried object context rather than a narrow global sidebar.
 - The steward receives a bounded current-state snapshot and may cite only IDs supplied in
   that snapshot. Prompt or document text cannot grant new capability.
 - The steward may propose the same allowlisted actions as the UI, but cannot execute them.

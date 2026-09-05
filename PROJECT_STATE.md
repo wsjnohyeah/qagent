@@ -59,8 +59,9 @@
 - Both Responses API adapters pass mocked contract tests and bounded live probes using
   project-specific credentials in ignored `.env`.
 - The local web Control Center is locked behind one persistent administrator session and
-  CSRF protection. It exposes overview, lists, data, strategy, shadow, pipeline, model,
-  activity, and code-change objects with discussion timelines.
+  CSRF protection. Its default view is a dedicated full-page System Steward workspace with
+  persistent conversations and safely rendered Markdown; the remaining navigation exposes
+  overview, lists, data, strategy, shadow, pipeline, model, activity, and code-change objects.
 - One System Steward reads a bounded current-state snapshot, returns validated object
   citations, persists conversations, and can propose allowlisted admin actions. It cannot
   execute them; a separate exact confirmation is required.
@@ -86,8 +87,8 @@
 
 ## Next
 
-1. Review the Phase 6 UI interactively with the user and refine visual/interaction details
-   without changing the security and runtime contracts.
+1. Continue interactive Phase 6 UI review with the user after the full-page steward redesign,
+   refining visual and interaction details without changing security/runtime contracts.
 2. Size remote long-horizon backfill concurrency and storage; continue using bounded samples for local
    correctness verification.
 3. Extend fill realism with multi-bar partial fills, order cancellation, quote-derived
