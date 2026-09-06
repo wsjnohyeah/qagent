@@ -14,7 +14,7 @@ from agentic_quant.live_ingestion import LiveMarketDataService
 from agentic_quant.market_ingestion import MarketDataIngestionService
 from agentic_quant.market_calendar import MarketGapDetector
 from agentic_quant.market_store import MarketDataStore
-from agentic_quant.migrations import upgrade_database
+from agentic_quant.migrations import prepare_database
 from agentic_quant.option_ingestion import OptionDataIngestionService
 from agentic_quant.providers.alpaca import AlpacaConfigurationError, AlpacaMarketDataProvider
 from agentic_quant.providers.alpaca_stream import AlpacaStockStream
@@ -89,7 +89,7 @@ async def _backfill(settings: Settings, args: argparse.Namespace) -> None:
         end=args.end,
         timeframe=args.timeframe,
     )
-    upgrade_database(settings.database_url)
+    prepare_database(settings)
     ledger = EventLedger(settings.database_url)
     publisher = (
         RedisStreamPublisher(settings.redis_url, settings.redis_stream_name)
@@ -124,7 +124,7 @@ async def _resumable_backfill(settings: Settings, args: argparse.Namespace) -> N
         end=args.end,
         timeframe=args.timeframe,
     )
-    upgrade_database(settings.database_url)
+    prepare_database(settings)
     ledger = EventLedger(settings.database_url)
     publisher = (
         RedisStreamPublisher(settings.redis_url, settings.redis_stream_name)
@@ -161,7 +161,7 @@ async def _resumable_backfill(settings: Settings, args: argparse.Namespace) -> N
 
 
 def _jobs(settings: Settings, args: argparse.Namespace) -> None:
-    upgrade_database(settings.database_url)
+    prepare_database(settings)
     ledger = EventLedger(settings.database_url)
     print(
         json.dumps(
@@ -173,7 +173,7 @@ def _jobs(settings: Settings, args: argparse.Namespace) -> None:
 
 
 async def _option_snapshot(settings: Settings, args: argparse.Namespace) -> None:
-    upgrade_database(settings.database_url)
+    prepare_database(settings)
     ledger = EventLedger(settings.database_url)
     publisher = (
         RedisStreamPublisher(settings.redis_url, settings.redis_stream_name)
@@ -202,7 +202,7 @@ async def _option_snapshot(settings: Settings, args: argparse.Namespace) -> None
 async def _stream(settings: Settings, args: argparse.Namespace) -> None:
     if settings.alpaca_api_key is None or settings.alpaca_api_secret is None:
         raise AlpacaConfigurationError("Alpaca credentials are not configured")
-    upgrade_database(settings.database_url)
+    prepare_database(settings)
     ledger = EventLedger(settings.database_url)
     publisher = (
         RedisStreamPublisher(settings.redis_url, settings.redis_stream_name)

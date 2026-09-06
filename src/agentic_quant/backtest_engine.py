@@ -88,6 +88,7 @@ class EventDrivenPortfolio:
         raw_price: Decimal,
         available_volume: int,
         feature_snapshot_id: str,
+        quantity_limit: int | None = None,
     ) -> bool:
         if self.quantity != _ZERO or self._position is not None:
             raise ValueError("Cannot enter while a position is already open")
@@ -103,6 +104,10 @@ class EventDrivenPortfolio:
             Decimal(int(self.cash // fill_price)),
             Decimal(int(volume_capacity)),
         )
+        if quantity_limit is not None:
+            if quantity_limit < 0:
+                raise ValueError("quantity_limit cannot be negative")
+            quantity = min(quantity, Decimal(quantity_limit))
         while quantity > 0:
             commission = self.commission(quantity, self.cost_model)
             if fill_price * quantity + commission <= self.cash:

@@ -18,6 +18,7 @@ from agentic_quant.domain import (
     EventEnvelope,
     FrozenModel,
     MarketRegime,
+    StrategySpec,
     StockBar,
     WalkForwardFold,
     WalkForwardValidationReport,
@@ -25,6 +26,8 @@ from agentic_quant.domain import (
 from agentic_quant.ids import uuid7
 from agentic_quant.ledger import EventLedger
 from agentic_quant.research import (
+    BACKTEST_ENGINE_VERSION,
+    FEATURE_SET_VERSION,
     SUPPORTED_STRATEGIES,
     ResearchBacktester,
     default_strategy_spec,
@@ -105,7 +108,20 @@ def combinatorial_purged_diagnostics(
     candidate_scores: dict[str, tuple[Decimal, ...]],
 ) -> dict[str, Any]:
     if len(candidate_scores) < 2:
-        raise ValueError("PBO requires at least two strategy candidates")
+        only = next(iter(candidate_scores.values()), ())
+        return {
+            "method": "not_applicable_to_single_static_strategy",
+            "candidate_count": len(candidate_scores),
+            "group_count": len(only),
+            "test_group_count": 0,
+            "combination_count_total": 0,
+            "combination_count_evaluated": 0,
+            "deterministically_sampled": False,
+            "probability_of_backtest_overfitting": Decimal("0"),
+            "median_oos_logit": Decimal("0"),
+            "selected_strategy_frequency": {},
+            "not_applicable": True,
+        }
     lengths = {len(values) for values in candidate_scores.values()}
     if len(lengths) != 1:
         raise ValueError("Every PBO candidate must have the same number of OOS groups")
@@ -345,7 +361,12 @@ class WalkForwardValidator:
         embargo_bars: int = 1,
         initial_equity: Decimal = Decimal("100000"),
         cost_model: BacktestCostModel | None = None,
+        strategy_spec: StrategySpec | None = None,
     ) -> WalkForwardValidationReport:
+        if strategy_spec is not None:
+            if strategy_spec.timeframe != timeframe:
+                raise ValueError("Static strategy timeframe does not match validation")
+            strategy_types = (str(strategy_spec.strategy_type),)
         self._validate_request(
             strategy_types=strategy_types,
             selection_metric=selection_metric,
@@ -376,6 +397,7 @@ class WalkForwardValidator:
         costs = cost_model or BacktestCostModel()
         strategy_code_hash = research_code_sha256()
         folds: list[WalkForwardFold] = []
+        validated_strategy_spec_ids: dict[str, str] = {}
         candidate_oos_scores: dict[str, list[Decimal]] = {
             strategy_type: [] for strategy_type in strategy_types
         }
@@ -394,7 +416,14 @@ class WalkForwardValidator:
                 code_git_sha=code_git_sha,
                 initial_equity=initial_equity,
                 cost_model=costs,
+                strategy_spec=strategy_spec,
             )
+            for name, result in train_results.items():
+                prior = validated_strategy_spec_ids.setdefault(
+                    name, result.strategy_spec.strategy_spec_id
+                )
+                if prior != result.strategy_spec.strategy_spec_id:
+                    raise ValueError("Validation candidate identity changed between folds")
             selected_strategy = max(
                 sorted(strategy_types),
                 key=lambda name: _selection_value(
@@ -412,7 +441,11 @@ class WalkForwardValidator:
                 code_git_sha=code_git_sha,
                 initial_equity=initial_equity,
                 cost_model=costs,
+                strategy_spec=strategy_spec,
             )
+            for name, result in test_results.items():
+                if validated_strategy_spec_ids[name] != result.strategy_spec.strategy_spec_id:
+                    raise ValueError("Train/test strategy specification identity mismatch")
             for name, result in test_results.items():
                 candidate_oos_scores[name].append(
                     _selection_value(result, selection_metric)
@@ -470,6 +503,12 @@ class WalkForwardValidator:
             candidate_oos_scores={
                 name: tuple(values) for name, values in candidate_oos_scores.items()
             },
+            validated_strategy_spec_ids=validated_strategy_spec_ids,
+            cost_model=costs,
+            trial_count=self.store.strategy_trial_count(
+                symbol=symbol,
+                timeframe=timeframe,
+            ),
             code_git_sha=code_git_sha,
         )
         self.store.record_validation_report(report)
@@ -488,14 +527,19 @@ class WalkForwardValidator:
         code_git_sha: str,
         initial_equity: Decimal,
         cost_model: BacktestCostModel,
+        strategy_spec: StrategySpec | None = None,
     ) -> dict[str, BacktestResult]:
         start, end = self._window_bounds(bars, indices)
         return {
             strategy_type: self.backtester.run(
-                spec=default_strategy_spec(
-                    strategy_type,
-                    timeframe=timeframe,
-                    code_sha256=strategy_code_hash,
+                spec=(
+                    strategy_spec
+                    if strategy_spec is not None
+                    else default_strategy_spec(
+                        strategy_type,
+                        timeframe=timeframe,
+                        code_sha256=strategy_code_hash,
+                    )
                 ),
                 symbol=symbol,
                 as_of_start=start,
@@ -565,6 +609,9 @@ class WalkForwardValidator:
         embargo_bars: int,
         folds: tuple[WalkForwardFold, ...],
         candidate_oos_scores: dict[str, tuple[Decimal, ...]],
+        validated_strategy_spec_ids: dict[str, str],
+        cost_model: BacktestCostModel,
+        trial_count: int,
         code_git_sha: str,
     ) -> WalkForwardValidationReport:
         test_returns = [fold.selected_test_metrics.total_return for fold in folds]
@@ -575,8 +622,15 @@ class WalkForwardValidator:
             for fold in folds
         ]
         compounded = _ONE
+        cumulative_peak = _ONE
+        cumulative_drawdown = _ZERO
         for value in test_returns:
             compounded *= _ONE + value
+            cumulative_peak = max(cumulative_peak, compounded)
+            cumulative_drawdown = min(
+                cumulative_drawdown,
+                compounded / cumulative_peak - _ONE,
+            )
         below_median = sum(
             1
             for fold in folds
@@ -592,7 +646,8 @@ class WalkForwardValidator:
             "compounded_selected_oos_return": compounded - _ONE,
             "mean_selected_oos_return": _mean(test_returns),
             "mean_selected_oos_sharpe": _mean(test_sharpes),
-            "worst_selected_oos_drawdown": min(
+            "worst_selected_oos_drawdown": cumulative_drawdown,
+            "worst_individual_fold_drawdown": min(
                 fold.selected_test_metrics.max_drawdown for fold in folds
             ),
             "positive_oos_fold_rate": Decimal(
@@ -608,8 +663,19 @@ class WalkForwardValidator:
         pbo_metrics = combinatorial_purged_diagnostics(candidate_oos_scores)
         dsr_metrics = deflated_sharpe_diagnostics(
             tuple(test_returns),
-            number_of_trials=len(strategy_types),
+            number_of_trials=max(trial_count, len(strategy_types)),
         )
+        validation_subject = (
+            "static_strategy" if len(strategy_types) == 1 else "adaptive_selector"
+        )
+        execution_contract = {
+            "subject": validation_subject,
+            "strategy_spec_ids": validated_strategy_spec_ids,
+            "feature_set_version": FEATURE_SET_VERSION,
+            "backtest_engine_version": BACKTEST_ENGINE_VERSION,
+            "cost_model": cost_model.model_dump(mode="json"),
+        }
+        execution_contract_sha256 = _canonical_hash(execution_contract)
         robustness_metrics = {
             "combinatorial_purged_validation": pbo_metrics,
             "deflated_sharpe": dsr_metrics,
@@ -617,7 +683,7 @@ class WalkForwardValidator:
         gate_assessment = assess_research_gate(
             policy=self.promotion_policy,
             fold_count=len(folds),
-            candidate_count=len(strategy_types),
+            candidate_count=max(trial_count, len(strategy_types)),
             regime_count=len(regime_metrics),
             positive_fold_rate=Decimal(
                 str(aggregate["positive_oos_fold_rate"])
@@ -636,6 +702,10 @@ class WalkForwardValidator:
             "symbol": symbol.upper(),
             "timeframe": timeframe,
             "strategy_types": strategy_types,
+            "validation_subject": validation_subject,
+            "validated_strategy_spec_ids": validated_strategy_spec_ids,
+            "execution_contract": execution_contract,
+            "execution_contract_sha256": execution_contract_sha256,
             "selection_metric": selection_metric,
             "train_bars": train_bars,
             "test_bars": test_bars,
@@ -678,6 +748,10 @@ class WalkForwardValidator:
             symbol=symbol.upper(),
             timeframe=timeframe,
             strategy_types=strategy_types,
+            validation_subject=validation_subject,
+            validated_strategy_spec_ids=validated_strategy_spec_ids,
+            execution_contract=execution_contract,
+            execution_contract_sha256=execution_contract_sha256,
             selection_metric=selection_metric,
             train_bars=train_bars,
             test_bars=test_bars,

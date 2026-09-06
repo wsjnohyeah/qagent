@@ -1,6 +1,6 @@
 # Agentic Quant Trading System
 
-A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains implemented and locally verified foundations through **Phase 6**: safety controls, read-only market data, event/document ingestion, point-in-time research, evidence-bound LLM analysis, ML/registry tooling, an authenticated System Steward, an object explorer, and a persistent broker-free shadow baseline. Implementation completeness is not the same as passing statistical or production-operational exit criteria; see `docs/REVIEW_ALIGNMENT_2026-09-05.md`.
+A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains implemented and locally verified foundations through **Phase 6.1**: safety controls, read-only market data, event/document ingestion, point-in-time research, evidence-bound LLM analysis, ML/registry and constrained strategy-generation tooling, an authenticated System Steward, drill-down object explorers, and a persistent broker-free shadow runtime. Implementation completeness is not the same as passing statistical or production-operational exit criteria; see `docs/REVIEW_REMEDIATION_2026-09-05.md`.
 
 > Live-money execution is not implemented. `live` is not a valid mode, and setting `LIVE_TRADING_ENABLED=true` makes startup fail.
 
@@ -81,9 +81,10 @@ Phase 4 adds an audited Responses API gateway for OpenAI GPT-5.6 Sol and Meta Mu
 provider access to broker credentials, risk authority, or order submission.
 
 The evidence-bound analyst retrieves only document versions known at the requested cutoff,
-requires structured research-only output and exact citations, abstains on inadequate
-evidence, and records a Decision Inspector lineage graph. Atomic token/estimated-cost budget
-reservations stop over-budget calls before they reach a provider.
+requires structured research-only output and exact supporting quotations, abstains on
+inadequate evidence, and records a Decision Inspector lineage graph. Atomic estimated-USD
+reservations stop over-budget calls before they reach a provider. Token counts remain
+diagnostic telemetry, not operator-configured limits.
 
 Phase 4B exposes that gateway in the local Control Center. The operator can create immutable
 workload-routing revisions and chat through `Auto`, OpenAI, or Meta while preserving model,
@@ -100,11 +101,13 @@ snapshot, must cite exact object IDs, and may only create an allowlisted pending
 edits, pipeline controls, LLM routing, strategy adoption, shadow control, and code-change
 sessions require a second explicit confirmation.
 
-The Phase 6 shadow runtime processes newly available stored bars idempotently into a virtual
-signal/order/fill journal with modeled commission, spread, slippage, impact, volume limits,
-cash, and realized P&L. It contains no broker client or order-submission path. Bounded local
-data validates the workflow; production can run the same partitionable contracts over longer
-history.
+The Phase 6 shadow runtime admits only an exact immutable strategy specification covered by
+an exact execution-contract validation certificate. Each attempted exposure persists its
+signal candidate, deterministic risk decision, approved plan, and virtual order/fill lineage,
+including the account and evidence used by the gate. It models commission, spread, slippage,
+impact, known-liquidity limits, cash, and realized P&L. It contains no broker client or order-
+submission path. Bounded local data validates the workflow; production can run the same
+partitionable contracts over longer history.
 
 ## Commands
 
@@ -121,6 +124,7 @@ history.
 | `make llm-probe` | Make one bounded development connectivity call to each configured LLM |
 | `make docker-up` | Start PostgreSQL, Redis, MinIO, and API when Docker is installed |
 | `make docker-doctor` | Verify every container and the PostgreSQL-backed shadow slice |
+| `make release-check` | Run the complete local release gate, including Docker and schema drift |
 | `make docker-alpaca-probe` | Verify SIP/OPRA REST access and SIP WebSocket authentication |
 | `make docker-alpaca-stream` | Persist a bounded SIP trade/quote/bar stream during market hours |
 | `make docker-event-health` | Report Phase 2 document/entity/catalyst/fact counts |
@@ -341,9 +345,11 @@ work/tools/uv run quant-llm probe --provider meta
 ```
 
 Every attempted call is stored with source Git SHA, route/prompt version, request, routing,
-and input hashes, provider response ID, token usage, latency, status, and output. Input text
-and instructions are not copied into the audit table. Automatic cross-provider fallback is
-disabled so cost and model behavior cannot change silently. See `runbooks/llm_gateway.md`.
+and input hashes, provider response ID, token usage, estimated cost, latency, status, and
+output. A sanitized request envelope is retained for the administrator's invocation
+inspector; authentication headers and provider credentials are never included. Automatic
+cross-provider fallback is disabled so cost and model behavior cannot change silently. See
+`runbooks/llm_gateway.md`.
 
 The authenticated web page shows provider readiness and lets the administrator assign either
 provider to each named workload. Saving first creates a confirmation request; confirmation
@@ -367,19 +373,28 @@ downstream strategy still passes the separate PBO/DSR research gate. Forecasts c
 by the Phase 4 analyst, giving the Decision Inspector one ML + LLM lineage graph. See
 `runbooks/ml.md` and ADR 0015.
 
+The constrained strategy generator can combine one point-in-time feature snapshot, a linked
+ML forecast, and a completed evidence-bound LLM analysis. A separate adversarial critique is
+mandatory. Accepted output is compiled into an immutable, research-only momentum or mean-
+reversion specification; the model cannot emit executable code, position sizing, adoption,
+or an order. The exact candidate must still be backtested, validated, and human-adopted.
+
 ## Phase 6: authenticated System Steward and shadow operations
 
 The web application is organized around system objects rather than a fixed dashboard:
 
 - **Overview** summarizes data, research, models, shadow state, pending actions, and current
-  LLM token/estimated-cost usage against daily and monthly budget limits.
+  LLM estimated-USD spend against daily and monthly budget limits.
 - **Lists** manages the governed trading universe, focus watchlist, candidate list,
   shadow-active symbols, benchmarks, and read-only restriction list with immutable revisions.
-- **Data explorer** exposes coverage and bounded raw-object previews with provenance.
-- **Strategies** links versioned specifications, experiments, validation evidence, adoption,
-  and discussion.
-- **Shadow** exposes deployments, virtual events, cash/P&L, runtime ticks, and pause/retire.
-- **Pipelines, Models, Activity, and Code changes** expose controls and their audit state.
+- **Data explorer** exposes clickable dataset types, date groups, pagination, normalized rows,
+  documents/facts, and collapsed bounded raw payloads with provenance.
+- **Strategies** explains each immutable specification's origin and links experiments,
+  replay trades, validation evidence, shadow deployments, and discussion.
+- **Shadow** explains the broker-free boundary and exposes candidate → risk → plan → fill
+  lineage, virtual cash/P&L, alerts, reports, diagnostic ticks, and pause/retire controls.
+- **Pipelines, Models, Audit, and Steward code work** expose worker liveness, jobs, quality
+  evidence, invocation prompts/costs, and scoped code-change review state.
 - **System Steward** is the default full-page conversation workspace. It renders safe
   Markdown, retains conversation history, and can carry the last inspected object as context.
 
@@ -417,13 +432,16 @@ AGENTS.md                mandatory operating rules for coding/deployment agents
 - `POST /v1/demo/market-data`
 - `GET /v1/data-health`
 - `GET /v1/data-quality`
+- `GET /v1/data-quality/{report_id}`
 - `GET /v1/workflow-jobs`
+- `GET /v1/workflow-jobs/{job_id}`
 - `GET /v1/documents/search`
 - `GET /v1/catalysts`
 - `GET /v1/research/experiments`
 - `GET /v1/research/experiments/{experiment_run_id}/events`
 - `GET /v1/research/validations`
 - `GET /v1/research/validations/{validation_report_id}`
+- `POST /v1/research/strategy-candidates` — constrained ML + LLM research generation
 - `GET /v1/llm/routes`
 - `GET /v1/llm/budget`
 - `PUT /v1/llm/budget` — creates a confirmation-gated immutable workload-limit revision
@@ -454,10 +472,13 @@ AGENTS.md                mandatory operating rules for coding/deployment agents
   resume is shadow-only
 - `POST /v1/auth/login`, `GET /v1/auth/session`, `POST /v1/auth/logout`
 - `GET /v1/control/summary`, `/v1/lists`, `/v1/explorer/*`, `/v1/strategies`
+- `GET /v1/explorer/datasets/{provider}/{data_type}` and `/v1/explorer/market-bars`
+- `GET /v1/strategies/{strategy_spec_id}`
 - `GET /v1/threads/{object_type}/{object_id}` and authenticated discussion posts
 - `GET|POST /v1/actions` plus `POST /v1/actions/{id}/confirm`
 - `POST /v1/steward/ask` and persistent conversation history
 - `GET /v1/shadow/deployments`, `/v1/shadow/events`, `/v1/shadow/runs`
+- `GET /v1/shadow/decisions`, `/v1/shadow/reports`, `/v1/shadow/alerts`
 - `GET /v1/runtime/controls` and confirmation-gated pipeline controls
 - `GET /v1/code-changes` and tested-candidate intake
 

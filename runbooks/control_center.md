@@ -56,14 +56,16 @@ The initial lists are:
 - `restricted`: read-only policy identifiers.
 
 Overview includes the current UTC-day and UTC-month LLM budget position. It separates
-settled consumption from in-flight reservations, shows project limits, and breaks daily
-capacity down by provider and workload. Dollar values are estimates calculated from
-`configs/llm_budget.yaml`; they are planning controls and may differ from provider invoices.
+settled estimated spend from in-flight estimated reservations, shows project limits, and
+breaks daily dollar capacity down by provider and workload. Dollar values are calculated
+from `configs/llm_budget.yaml`; they are planning controls and may differ from provider
+invoices.
 
-Use **Adjust workload limits** to edit the daily token and estimated-cost ceilings for all
-five workloads. Saving only creates a pending action; review its exact before/after preview
-and confirm it separately. The confirmed revision is immutable and applies to subsequent
-reservations without clearing consumption already recorded in the current UTC window. The
+Use **Adjust USD limits** to edit the maximum estimated daily spend for all five workloads.
+There is no configurable token ceiling. Saving only creates a pending action; review its
+exact before/after preview and confirm it separately. The confirmed revision is immutable
+and applies to subsequent reservations without clearing consumption already recorded in the
+current UTC window. The percentage is immediately recalculated against the new limit. The
 tracked YAML project limit remains a non-editable hard cap in this interface.
 
 ## Confirmation protocol
@@ -95,6 +97,13 @@ dropped. Stored/user text is explicitly untrusted.
 The LLM cannot directly execute a tool. If it returns an allowlisted proposed action, the API
 validates and persists that proposal, and the browser presents the same confirmation flow as
 a manually initiated action.
+
+Use one conversation while pursuing one question or operating thread so the recent context
+remains useful. Start a new conversation when the objective changes substantially. Only the
+six most recent prior messages are sent, each truncated to 3,000 characters; the current
+message is sent exactly once. Each assistant message can open its invocation inspector to
+show the sanitized provider request, included snapshot sections, estimated USD cost, latency,
+and optional token diagnostics.
 
 ## Code changes
 

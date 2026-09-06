@@ -10,8 +10,9 @@ portfolio events.
 ## Admission path
 
 1. A strategy specification and validation report exist.
-2. The deterministic report gate has `eligible_for_human_review=true` and covers the same
-   strategy type/timeframe.
+2. The deterministic report gate has `eligible_for_human_review=true`, has subject
+   `static_strategy`, and binds the exact strategy ID, timeframe, feature version, backtest
+   engine version, and cost model used by the runtime.
 3. The administrator confirms `strategy.adopt`.
 4. The administrator confirms `shadow.start` for one symbol and virtual cash amount.
 5. The shadow pipeline and global new-exposure control are enabled.
@@ -30,10 +31,16 @@ No override can convert an insufficient/rejected validation report into an adopt
 - The runtime needs at least 21 decision bars and one following execution bar.
 - Each decision uses evidence available by the decision bar's `available_from` timestamp.
 - Momentum and mean-reversion use their immutable `StrategySpec` parameters. The baseline
-  buy-and-hold spec is represented as repeated one-bar long exposure in the current shadow
-  baseline; multi-session position lifecycle remains a later realism extension.
+  buy-and-hold benchmark is explicitly research-only because its multi-session holding
+  contract has no matching one-bar shadow executor.
+- A long signal becomes a persistent `SignalCandidate`, passes the deterministic baseline
+  shadow risk profile, and becomes a `TradePlan` only on approval. Account floor, daily loss,
+  concurrent risk, restriction, data health, liquidity, duplicate intent, expiry, reward/risk,
+  and position sizing are evaluated before any virtual order is recorded.
 - Virtual fills model commission, half-spread, slippage, fixed impact, and maximum bar-volume
-  participation through the deterministic event-driven portfolio engine.
+  participation through the deterministic event-driven portfolio engine. Entry sizing uses
+  only the completed decision bar's volume; the future execution bar's final volume is never
+  used to size the opening order.
 - Deployment/bar/event uniqueness and `last_processed_bar_time` make reruns idempotent.
 - Cash and realized P&L are virtual. There is no broker SDK, account endpoint, or order submit.
 
@@ -46,6 +53,9 @@ GET /v1/shadow/deployments
 GET /v1/shadow/deployments/{id}
 GET /v1/shadow/events?deployment_id={id}
 GET /v1/shadow/runs
+GET /v1/shadow/decisions?deployment_id={id}
+GET /v1/shadow/reports?period=daily|weekly
+GET /v1/shadow/alerts
 GET /v1/runtime/controls
 ```
 
@@ -59,7 +69,8 @@ multi-bar partial fills, cancellation, queue position, quote-derived dynamic spr
 delistings, or symbol-change replay. These limitations affect realism, not the persistence,
 point-in-time, confirmation, or no-broker invariants.
 
-It also does not yet persist the complete tactical `SignalCandidate` → `RiskDecision` →
-`TradePlan` chain for every shadow action. The standalone deterministic risk engine now has
-an explicit fail-closed context contract, but wiring that contract into this baseline is the
-next runtime milestone and is required before claiming the original Phase 6 exit criteria.
+The completed-bar simulator is a forward-workflow validation harness, not an exchange clock:
+the next bar is already complete when its open/close are replayed. True order-time market
+interaction, reconciliation, and partial execution belong to Phase 7 paper trading. Phase 6's
+continuous-operation observation period still requires elapsed runtime after deployment; it
+cannot be replaced by a bounded local test.

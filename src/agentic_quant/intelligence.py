@@ -33,7 +33,7 @@ from agentic_quant.llm import LLMGateway, LLMRequest
 from agentic_quant.domain import LLMWorkload
 
 
-ANALYSIS_SCHEMA_VERSION = "research_analysis@0.1.0"
+ANALYSIS_SCHEMA_VERSION = "research_analysis@0.2.0"
 ANALYSIS_PROMPT_VERSION = "evidence_bound_analyst@0.1.0"
 AI_GRAPH_VERSION = "ai_infrastructure_graph@0.1.0"
 
@@ -576,7 +576,8 @@ class EvidenceBoundResearchAnalyst:
             raise ValueError("LLM analysis symbol does not match evidence")
         if analysis.as_of != bundle.as_of:
             raise ValueError("LLM analysis as_of does not match evidence")
-        available = {item.citation_id for item in bundle.items}
+        evidence_by_id = {item.citation_id: item for item in bundle.items}
+        available = set(evidence_by_id)
         referenced = {
             citation
             for claim in analysis.claims
@@ -585,6 +586,25 @@ class EvidenceBoundResearchAnalyst:
         invalid = sorted(referenced - available)
         if invalid:
             raise ValueError(f"Unknown citation IDs: {', '.join(invalid)}")
+        for claim in analysis.claims:
+            normalized_claim = " ".join(claim.claim.casefold().split())
+            for evidence_quote in claim.evidence_quotes:
+                evidence = evidence_by_id.get(evidence_quote.citation_id)
+                if evidence is None:
+                    raise ValueError(
+                        f"Unknown evidence quote citation: {evidence_quote.citation_id}"
+                    )
+                normalized_quote = " ".join(evidence_quote.quote.casefold().split())
+                normalized_evidence = " ".join(evidence.text.casefold().split())
+                if normalized_quote not in normalized_evidence:
+                    raise ValueError(
+                        "Evidence quote is not an exact substring of its cited source"
+                    )
+                if normalized_claim != normalized_quote:
+                    raise ValueError(
+                        "Factual claim must exactly match an evidence quote; place "
+                        "interpretation in the thesis"
+                    )
         if bundle.forecast_id is not None:
             forecast_citation = f"FORECAST:{bundle.forecast_id}"
             if not analysis.ml_assessment:
@@ -610,8 +630,10 @@ class EvidenceBoundResearchAnalyst:
             "fields: schema_version, symbol, as_of, horizon, recommendation, confidence, "
             "thesis, claims, risk_factors, ml_assessment, abstain_reason. schema_version must "
             f"be {ANALYSIS_SCHEMA_VERSION}. recommendation must be RESEARCH_LONG, "
-            "RESEARCH_SHORT, HOLD, or ABSTAIN. Each claims item must contain claim and a "
-            "nonempty citations array using exact citation_id values. If an ML forecast is "
+            "RESEARCH_SHORT, HOLD, or ABSTAIN. Each claims item must contain claim, a "
+            "nonempty citations array using exact citation_id values, and evidence_quotes "
+            "objects with citation_id and a verbatim quote. The factual claim must equal "
+            "one of those quotes; put interpretations in thesis. If an ML forecast is "
             "present, discuss it in ml_assessment and cite it in a claim unless abstaining. "
             "ABSTAIN when evidence is insufficient or conflicting. This is research only: "
             "do not size positions, approve risk, place orders, or claim strategy promotion."

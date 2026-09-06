@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import update
 
 from agentic_quant.backtest_engine import EventDrivenPortfolio
 from agentic_quant.data_quality import (
@@ -12,9 +13,11 @@ from agentic_quant.data_quality import (
     MarketDataQualityService,
     inspect_market_bars,
 )
+from agentic_quant.database import event_outbox
 from agentic_quant.domain import (
     BacktestCostModel,
     DataQualityStatus,
+    EventEnvelope,
     PointInTimeFeatureSnapshot,
     SignalAction,
     StockBar,
@@ -28,6 +31,7 @@ from agentic_quant.reference_data import (
     ReferenceDataStore,
 )
 from agentic_quant.workflow import ResumableMarketBackfill, WorkflowJobStore
+from agentic_quant.ids import uuid7
 
 
 def _minute_bar(minute: int, *, high: str = "101", low: str = "99") -> StockBar:
@@ -247,6 +251,65 @@ def test_fresh_running_partition_is_not_stolen_by_another_invoker(
     assert jobs.claim(planned[0].workflow_job_id) is True
     assert jobs.requeue_stale(job_group_id=job_group_id) == 0
     assert jobs.claim(planned[0].workflow_job_id) is False
+    assert jobs.heartbeat(
+        planned[0].workflow_job_id,
+        worker_id="different-worker",
+    ) is False
+    assert jobs.heartbeat(planned[0].workflow_job_id) is True
+    with pytest.raises(ValueError, match="active lease owner"):
+        jobs.complete(
+            planned[0].workflow_job_id,
+            result={"ok": True},
+            worker_id="different-worker",
+        )
+    jobs.complete(planned[0].workflow_job_id, result={"ok": True})
+    completed = jobs.jobs(job_group_id=job_group_id)[0]
+    assert completed.status.value == "COMPLETED"
+    assert completed.lease_owner is None
+
+
+def test_event_outbox_retries_with_stable_event_identity(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    event = EventEnvelope(
+        event_id=uuid7(),
+        event_type="fixture.created.v1",
+        event_time=datetime.now(UTC),
+        emitted_at=datetime.now(UTC),
+        producer="test",
+        correlation_id=uuid7(),
+        payload={"value": 1},
+    )
+    assert ledger.append(event) is True
+
+    class FlakyPublisher:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def publish(self, *, event_type: str, event_id: str, envelope_json: str) -> str:
+            self.calls.append(event_id)
+            if len(self.calls) == 1:
+                raise RuntimeError("temporary event bus failure")
+            assert event_type == event.event_type
+            assert event.event_id in envelope_json
+            return "stream-id"
+
+    publisher = FlakyPublisher()
+    first = ledger.publish_pending(publisher, worker_id="worker-a")
+    assert first == {"published": 0, "failed": 1}
+    assert ledger.outbox_health()["event_outbox_failed"] == 1
+    with ledger.engine.begin() as connection:
+        connection.execute(
+            update(event_outbox)
+            .where(event_outbox.c.event_id == event.event_id)
+            .values(next_attempt_at=datetime.now(UTC))
+        )
+    second = ledger.publish_pending(publisher, worker_id="worker-b")
+    assert second == {"published": 1, "failed": 0}
+    assert publisher.calls == [event.event_id, event.event_id]
+    assert ledger.outbox_health()["event_outbox_published"] == 1
 
 
 def test_governed_reference_import_is_idempotent(settings) -> None:  # type: ignore[no-untyped-def]

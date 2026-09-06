@@ -9,6 +9,7 @@ from agentic_quant.api import create_app
 from agentic_quant.config import AppEnvironment, Settings
 from agentic_quant.domain import Verdict
 from agentic_quant.ledger import EventLedger
+from agentic_quant.migrations import upgrade_database
 from agentic_quant.pipeline import run_synthetic_vertical_slice
 
 
@@ -43,6 +44,7 @@ def test_vertical_slice_records_complete_lineage(settings: Settings) -> None:
         "nearest_major_macro_event_at": None,
         "macro_event_strategy_approved": False,
         "duplicate_order_detected": False,
+        "evaluation_profile": "tactical_intraday",
     }
 
 
@@ -54,7 +56,7 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert ready.json()["live_trading_enabled"] is False
         system_status = client.get("/v1/system/status").json()
         assert system_status["phase"] == (
-            "6-authenticated-system-steward-control-center"
+            "6.1-observable-system-steward-control-center"
         )
         assert system_status["data_operating_scope"] == "bounded_correctness_samples"
         assert system_status["development_max_backfill_days"] == 120
@@ -73,6 +75,23 @@ def test_api_health_and_demo(settings: Settings) -> None:
         market_demo = client.post("/v1/demo/market-data")
         assert market_demo.status_code == 200
         assert market_demo.json()["records_inserted"] == 1
+        catalog = client.get("/v1/explorer/data").json()
+        dataset = next(
+            item
+            for item in catalog["raw_datasets"]
+            if item["provider"] == "synthetic"
+        )
+        dataset_page = client.get(
+            f"/v1/explorer/datasets/{dataset['provider']}/{dataset['data_type']}?limit=1"
+        ).json()
+        assert dataset_page["total"] == 1
+        assert len(dataset_page["raw_objects"]) == 1
+        bar_page = client.get(
+            "/v1/explorer/market-bars/DEMO/1Min?limit=1"
+        ).json()
+        assert bar_page["total"] == 1
+        assert len(bar_page["items"]) == 1
+        assert bar_page["date_groups"][0]["count"] == 1
         data_health = client.get("/v1/data-health").json()
         assert data_health["market_bars"] == 1
         assert data_health["source_documents"] == 0
@@ -146,7 +165,6 @@ def test_api_health_and_demo(settings: Settings) -> None:
         budget = client.get("/v1/llm/budget").json()
         assert budget["policy_version"] == "llm_budget@0.1.0"
         assert budget["limits"]["project_daily"] == {
-            "max_tokens": 500_000,
             "max_estimated_cost_usd": "20.00",
         }
         assert set(budget["limits"]["provider_daily"]) == {"openai", "meta"}
@@ -173,10 +191,13 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert 'data-page="steward"' in page.text
         assert 'class="steward-page"' in page.text
         assert "function renderMarkdown" in page.text
-        assert "LLM budget &amp; usage" in page.text
+        assert "LLM spending budget" in page.text
         assert "renderLLMBudget" in page.text
-        assert "Adjust workload limits" in page.text
+        assert "Adjust USD limits" in page.text
         assert "openBudgetEditor" in page.text
+        assert "Inspect prompt · usage · cost" in page.text
+        assert "Generate and critique" in page.text
+        assert "Group by market date" in page.text
         assert '<aside id="steward"' not in page.text
         oversized_backfill = client.post(
             "/v1/market-data/alpaca/backfill",
@@ -192,9 +213,23 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert missing_credentials.status_code == 503
 
 
+def test_readiness_fails_when_a_required_dependency_is_unhealthy(
+    settings: Settings,
+    monkeypatch,
+) -> None:  # type: ignore[no-untyped-def]
+    application = create_app(settings)
+    with TestClient(application) as client:
+        monkeypatch.setattr(application.state.archive, "health", lambda: False)
+        response = client.get("/health/ready")
+    assert response.status_code == 503
+    assert response.json()["status"] == "not_ready"
+    assert response.json()["object_store"] is False
+
+
 def test_unauthenticated_llm_controls_fail_closed_in_production(
     settings: Settings,
 ) -> None:
+    upgrade_database(settings.database_url)
     production = settings.model_copy(
         update={
             "app_env": AppEnvironment.PRODUCTION,

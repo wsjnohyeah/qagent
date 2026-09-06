@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import Engine, func, insert, select
 
-from agentic_quant.database import llm_invocations, llm_routing_revisions
+from agentic_quant.database import (
+    llm_budget_reservations,
+    llm_invocations,
+    llm_routing_revisions,
+)
 from agentic_quant.domain import LLMInvocation, LLMRoutingRevision
 
 
@@ -32,6 +37,7 @@ class LLMStore:
                     prompt_version=invocation.prompt_version,
                     request_sha256=invocation.request_sha256,
                     input_sha256=invocation.input_sha256,
+                    request_envelope_json=invocation.request_envelope,
                     response_id=invocation.response_id,
                     output_text=invocation.output_text,
                     output_sha256=invocation.output_sha256,
@@ -46,7 +52,16 @@ class LLMStore:
 
     def recent(self, *, limit: int = 50) -> list[dict[str, Any]]:
         statement = (
-            select(llm_invocations)
+            select(
+                llm_invocations,
+                llm_budget_reservations.c.actual_cost_microusd,
+                llm_budget_reservations.c.reserved_cost_microusd,
+            )
+            .outerjoin(
+                llm_budget_reservations,
+                llm_budget_reservations.c.invocation_id
+                == llm_invocations.c.invocation_id,
+            )
             .order_by(llm_invocations.c.created_at.desc())
             .limit(limit)
         )
@@ -60,8 +75,18 @@ class LLMStore:
             return results
 
     def get(self, invocation_id: str) -> dict[str, Any] | None:
-        statement = select(llm_invocations).where(
-            llm_invocations.c.invocation_id == invocation_id
+        statement = (
+            select(
+                llm_invocations,
+                llm_budget_reservations.c.actual_cost_microusd,
+                llm_budget_reservations.c.reserved_cost_microusd,
+            )
+            .outerjoin(
+                llm_budget_reservations,
+                llm_budget_reservations.c.invocation_id
+                == llm_invocations.c.invocation_id,
+            )
+            .where(llm_invocations.c.invocation_id == invocation_id)
         )
         with self.engine.connect() as connection:
             row = connection.execute(statement).one_or_none()
@@ -149,4 +174,13 @@ class LLMStore:
         item["created_at"] = _utc(item["created_at"])
         item["completed_at"] = _utc(item["completed_at"])
         item["usage"] = item.pop("usage_json")
+        item["request_envelope"] = item.pop("request_envelope_json", None)
+        actual_cost = item.pop("actual_cost_microusd", None)
+        reserved_cost = item.pop("reserved_cost_microusd", None)
+        microusd = actual_cost if actual_cost is not None else reserved_cost
+        item["estimated_cost_usd"] = (
+            str(Decimal(int(microusd)) / Decimal("1000000"))
+            if microusd is not None
+            else None
+        )
         return item

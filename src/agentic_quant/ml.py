@@ -158,6 +158,13 @@ class MLDatasetBuilder:
         )
         if len(snapshots) <= horizon_bars:
             raise ValueError("Not enough feature snapshots to construct ML labels")
+        bars = self.store.load_bars(
+            symbol=symbol,
+            timeframe=timeframe,
+            as_of_end=as_of_end,
+        )
+        if len(bars) <= horizon_bars:
+            raise ValueError("Not enough market bars to construct executable ML labels")
         feature_versions = {item.feature_set_version for item in snapshots}
         if len(feature_versions) != 1:
             raise ValueError("ML training requires one feature-set version per run")
@@ -166,17 +173,33 @@ class MLDatasetBuilder:
             start=snapshots[0].as_of,
             end=snapshots[-1].as_of,
         )
+        # A label follows the executable one-bar contract: decide after a completed
+        # bar, enter at the next bar open, and exit at the requested future bar close.
+        # Snapshot position is never used as a proxy for elapsed market bars because
+        # snapshots may be sparse.
+        decision_index_by_as_of = {
+            bar.available_from: index for index, bar in enumerate(bars)
+        }
         examples = []
-        for index, snapshot in enumerate(snapshots[:-horizon_bars]):
-            future = snapshots[index + horizon_bars]
-            if future.as_of > as_of_end:
+        for snapshot in snapshots:
+            decision_index = decision_index_by_as_of.get(snapshot.as_of)
+            if decision_index is None:
+                raise ValueError(
+                    "Feature snapshot does not map to an exact completed market bar"
+                )
+            entry_index = decision_index + 1
+            exit_index = decision_index + horizon_bars
+            if entry_index >= len(bars) or exit_index >= len(bars):
                 continue
-            current_close = self._numeric(snapshot.values.get("close"))
-            future_close = self._numeric(future.values.get("close"))
-            adjusted_future = future_close
+            entry = bars[entry_index]
+            future = bars[exit_index]
+            if future.available_from > as_of_end:
+                continue
+            entry_open = float(entry.open)
+            adjusted_future = float(future.close)
             cash_distributions = 0.0
             for action in actions:
-                if not snapshot.as_of < action.effective_at <= future.as_of:
+                if not snapshot.as_of < action.effective_at <= future.available_from:
                     continue
                 if (
                     action.action_type == CorporateActionType.SPLIT
@@ -188,7 +211,9 @@ class MLDatasetBuilder:
                     and action.cash_amount is not None
                 ):
                     cash_distributions += float(action.cash_amount)
-            forward_return = (adjusted_future + cash_distributions) / current_close - 1.0
+            forward_return = (
+                (adjusted_future + cash_distributions) / entry_open - 1.0
+            )
             values = tuple(
                 self._numeric(snapshot.values.get(name)) for name in policy.features
             )
@@ -196,7 +221,7 @@ class MLDatasetBuilder:
                 MLTrainingExample(
                     feature_snapshot_id=snapshot.feature_snapshot_id,
                     as_of=snapshot.as_of,
-                    label_available_from=future.as_of,
+                    label_available_from=future.available_from,
                     values=values,
                     forward_return=forward_return,
                     label=int(
@@ -859,6 +884,7 @@ class WalkForwardMLTrainer:
         for kind in (MLModelKind.LOGISTIC_REGRESSION, MLModelKind.BOOSTED_STUMPS):
             raw_probabilities: list[float] = []
             labels: list[int] = []
+            oos_examples: list[MLTrainingExample] = []
             fold_metrics = []
             for fold_number, (train_end, test_start, test_end) in enumerate(folds, 1):
                 training = examples[:train_end]
@@ -869,6 +895,7 @@ class WalkForwardMLTrainer:
                 ]
                 raw_probabilities.extend(fold_probabilities)
                 labels.extend(item.label for item in testing)
+                oos_examples.extend(testing)
                 fold_metrics.append(
                     {
                         "fold_number": fold_number,
@@ -885,21 +912,31 @@ class WalkForwardMLTrainer:
                         ),
                     }
                 )
-            calibration_end = max(1, len(raw_probabilities) // 2)
+            calibration_end, selection_start, selection_end, evaluation_start = (
+                self._purged_oos_partitions(tuple(oos_examples))
+            )
             calibrator = _fit_platt(
                 raw_probabilities[:calibration_end],
                 labels[:calibration_end],
             )
+            calibrated_selection = [
+                _apply_calibration(value, calibrator)
+                for value in raw_probabilities[selection_start:selection_end]
+            ]
             calibrated_evaluation = [
                 _apply_calibration(value, calibrator)
-                for value in raw_probabilities[calibration_end:]
+                for value in raw_probabilities[evaluation_start:]
             ]
             metrics: dict[str, Any] = {
                 "walk_forward_folds": fold_metrics,
                 "raw_oos": _probability_metrics(raw_probabilities, labels),
-                "calibrated_holdout": _probability_metrics(
+                "calibrated_model_selection": _probability_metrics(
+                    calibrated_selection,
+                    labels[selection_start:selection_end],
+                ),
+                "calibrated_final_holdout": _probability_metrics(
                     calibrated_evaluation,
-                    labels[calibration_end:],
+                    labels[evaluation_start:],
                 ),
             }
             final_artifact = self._fit(kind, examples)
@@ -912,9 +949,9 @@ class WalkForwardMLTrainer:
             )
             assessment = self._promotion_assessment(
                 sample_count=len(examples),
-                oos_sample_count=len(labels) - calibration_end,
+                oos_sample_count=len(labels) - evaluation_start,
                 fold_count=len(folds),
-                metrics=metrics["calibrated_holdout"],
+                metrics=metrics["calibrated_final_holdout"],
                 drift=drift,
             )
             drafts.append(
@@ -924,13 +961,31 @@ class WalkForwardMLTrainer:
                     "metrics": metrics,
                     "calibration": {
                         "method": (
-                            "Platt scaling fitted on the first chronological half of "
-                            "walk-forward OOS predictions and evaluated on the second half"
+                            "Platt scaling fitted on an early purged OOS partition; model "
+                            "selection and final evaluation use separate later partitions"
                         ),
                         "fit_sample_count": calibration_end,
-                        "evaluation_sample_count": len(labels) - calibration_end,
+                        "selection_sample_count": selection_end - selection_start,
+                        "evaluation_sample_count": len(labels) - evaluation_start,
+                        "calibration_end_as_of": oos_examples[
+                            calibration_end - 1
+                        ].as_of.isoformat(),
+                        "calibration_label_cutoff": oos_examples[
+                            calibration_end - 1
+                        ].label_available_from.isoformat(),
+                        "selection_start_as_of": oos_examples[
+                            selection_start
+                        ].as_of.isoformat(),
+                        "selection_label_cutoff": oos_examples[
+                            selection_end - 1
+                        ].label_available_from.isoformat(),
+                        "evaluation_start_as_of": oos_examples[
+                            evaluation_start
+                        ].as_of.isoformat(),
                         **calibrator,
-                        "expected_calibration_error": metrics["calibrated_holdout"][
+                        "expected_calibration_error": metrics[
+                            "calibrated_final_holdout"
+                        ][
                             "expected_calibration_error"
                         ],
                     },
@@ -940,8 +995,8 @@ class WalkForwardMLTrainer:
         selected = min(
             drafts,
             key=lambda item: (
-                item["metrics"]["calibrated_holdout"]["brier_score"],
-                -item["metrics"]["calibrated_holdout"]["roc_auc"],
+                item["metrics"]["calibrated_model_selection"]["brier_score"],
+                -item["metrics"]["calibrated_model_selection"]["roc_auc"],
                 item["kind"].value,
             ),
         )
@@ -1011,7 +1066,10 @@ class WalkForwardMLTrainer:
             embargo_bars=effective_embargo,
             model_ids=model_ids,
             selected_model_id=model_ids[selected_index],
-            selection_metric="minimum_calibrated_holdout_brier_then_maximum_roc_auc",
+            selection_metric=(
+                "minimum_purged_selection_brier_then_maximum_roc_auc; "
+                "promotion_evaluated_on_untouched_final_holdout"
+            ),
             status="COMPLETED",
             code_git_sha=self.code_git_sha,
             started_at=started_at,
@@ -1060,6 +1118,43 @@ class WalkForwardMLTrainer:
             test_end = test_start + test_size
             folds.append((train_end, test_start, test_end))
         return tuple(folds)
+
+    @staticmethod
+    def _purged_oos_partitions(
+        examples: tuple[MLTrainingExample, ...],
+    ) -> tuple[int, int, int, int]:
+        """Return non-overlapping calibration, selection, and final-test slices.
+
+        Purging is based on label availability timestamps rather than a nominal row
+        count, so multi-bar horizons cannot leak across either boundary.
+        """
+        if len(examples) < 9:
+            raise ValueError("ML OOS evaluation requires at least nine predictions")
+        first_boundary = max(1, len(examples) // 3)
+        second_boundary = max(first_boundary + 1, (2 * len(examples)) // 3)
+        selection_start = first_boundary
+        calibration_end = first_boundary
+        while (
+            calibration_end > 0
+            and examples[calibration_end - 1].label_available_from
+            > examples[selection_start].as_of
+        ):
+            calibration_end -= 1
+        evaluation_start = second_boundary
+        selection_end = second_boundary
+        while (
+            selection_end > selection_start
+            and examples[selection_end - 1].label_available_from
+            > examples[evaluation_start].as_of
+        ):
+            selection_end -= 1
+        if calibration_end < 2 or selection_end - selection_start < 2:
+            raise ValueError(
+                "ML OOS partitions are too small after label-availability purging"
+            )
+        if len(examples) - evaluation_start < 2:
+            raise ValueError("ML final holdout is too small")
+        return calibration_end, selection_start, selection_end, evaluation_start
 
     def _promotion_assessment(
         self,

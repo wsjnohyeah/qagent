@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Engine, func, select, update
+from sqlalchemy import Engine, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -81,19 +81,59 @@ class WorkflowJobStore:
                 .where(
                     (workflow_jobs.c.job_group_id == job_group_id)
                     & (workflow_jobs.c.status == WorkflowJobStatus.RUNNING.value)
-                    & (workflow_jobs.c.updated_at < now - stale_after)
+                    & or_(
+                        workflow_jobs.c.lease_expires_at <= now,
+                        (
+                            workflow_jobs.c.lease_expires_at.is_(None)
+                            & (workflow_jobs.c.updated_at < now - stale_after)
+                        ),
+                    )
                 )
                 .values(
                     status=WorkflowJobStatus.PENDING.value,
                     error_code="worker_restarted",
+                    lease_owner=None,
+                    lease_expires_at=None,
                     updated_at=now,
                 )
             )
             return int(result.rowcount or 0)
 
-    def claim(self, workflow_job_id: str) -> bool:
+    def claim(
+        self,
+        workflow_job_id: str,
+        *,
+        worker_id: str = "inline-worker",
+        lease_for: timedelta = timedelta(hours=1),
+    ) -> bool:
+        if not worker_id.strip():
+            raise ValueError("worker_id is required")
+        if lease_for <= timedelta(0):
+            raise ValueError("lease_for must be positive")
         now = datetime.now(UTC)
         with self.engine.begin() as connection:
+            row = connection.execute(
+                select(workflow_jobs).where(
+                    workflow_jobs.c.workflow_job_id == workflow_job_id
+                )
+            ).one_or_none()
+            if row is None:
+                return False
+            dependency_ids = tuple(row.dependency_job_ids_json or ())
+            if dependency_ids:
+                completed_dependencies = int(
+                    connection.execute(
+                        select(func.count())
+                        .select_from(workflow_jobs)
+                        .where(
+                            workflow_jobs.c.workflow_job_id.in_(dependency_ids),
+                            workflow_jobs.c.status
+                            == WorkflowJobStatus.COMPLETED.value,
+                        )
+                    ).scalar_one()
+                )
+                if completed_dependencies != len(set(dependency_ids)):
+                    return False
             result = connection.execute(
                 update(workflow_jobs)
                 .where(
@@ -109,6 +149,8 @@ class WorkflowJobStore:
                 .values(
                     status=WorkflowJobStatus.RUNNING.value,
                     attempt_count=workflow_jobs.c.attempt_count + 1,
+                    lease_owner=worker_id.strip(),
+                    lease_expires_at=now + lease_for,
                     started_at=now,
                     updated_at=now,
                     completed_at=None,
@@ -120,38 +162,95 @@ class WorkflowJobStore:
             self._emit(workflow_job_id, "workflow.job.started.v1")
         return claimed
 
-    def complete(self, workflow_job_id: str, *, result: dict[str, Any]) -> None:
+    def heartbeat(
+        self,
+        workflow_job_id: str,
+        *,
+        worker_id: str = "inline-worker",
+        lease_for: timedelta = timedelta(hours=1),
+        cursor: dict[str, Any] | None = None,
+    ) -> bool:
+        if lease_for <= timedelta(0):
+            raise ValueError("lease_for must be positive")
+        now = datetime.now(UTC)
+        values: dict[str, Any] = {
+            "lease_expires_at": now + lease_for,
+            "updated_at": now,
+        }
+        if cursor is not None:
+            values["cursor_json"] = cursor
+        with self.engine.begin() as connection:
+            result = connection.execute(
+                update(workflow_jobs)
+                .where(
+                    (workflow_jobs.c.workflow_job_id == workflow_job_id)
+                    & (workflow_jobs.c.status == WorkflowJobStatus.RUNNING.value)
+                    & (workflow_jobs.c.lease_owner == worker_id)
+                )
+                .values(**values)
+            )
+        return int(result.rowcount or 0) == 1
+
+    def complete(
+        self,
+        workflow_job_id: str,
+        *,
+        result: dict[str, Any],
+        worker_id: str = "inline-worker",
+    ) -> None:
         now = datetime.now(UTC)
         with self.engine.begin() as connection:
-            connection.execute(
+            updated = connection.execute(
                 update(workflow_jobs)
-                .where(workflow_jobs.c.workflow_job_id == workflow_job_id)
+                .where(
+                    (workflow_jobs.c.workflow_job_id == workflow_job_id)
+                    & (workflow_jobs.c.status == WorkflowJobStatus.RUNNING.value)
+                    & (workflow_jobs.c.lease_owner == worker_id)
+                )
                 .values(
                     status=WorkflowJobStatus.COMPLETED.value,
                     result_json=result,
                     cursor_json={"completed": True},
                     error_code=None,
+                    lease_owner=None,
+                    lease_expires_at=None,
                     updated_at=now,
                     completed_at=now,
                 )
             )
+        if int(updated.rowcount or 0) != 1:
+            raise ValueError("Workflow completion requires the active lease owner")
         self._emit(
             workflow_job_id,
             "workflow.job.completed.v1",
             payload={"result_sha256": _canonical_hash(result)},
         )
 
-    def fail(self, workflow_job_id: str, *, error_code: str) -> None:
+    def fail(
+        self,
+        workflow_job_id: str,
+        *,
+        error_code: str,
+        worker_id: str = "inline-worker",
+    ) -> None:
         with self.engine.begin() as connection:
-            connection.execute(
+            updated = connection.execute(
                 update(workflow_jobs)
-                .where(workflow_jobs.c.workflow_job_id == workflow_job_id)
+                .where(
+                    (workflow_jobs.c.workflow_job_id == workflow_job_id)
+                    & (workflow_jobs.c.status == WorkflowJobStatus.RUNNING.value)
+                    & (workflow_jobs.c.lease_owner == worker_id)
+                )
                 .values(
                     status=WorkflowJobStatus.FAILED.value,
                     error_code=error_code[:120],
+                    lease_owner=None,
+                    lease_expires_at=None,
                     updated_at=datetime.now(UTC),
                 )
             )
+        if int(updated.rowcount or 0) != 1:
+            raise ValueError("Workflow failure requires the active lease owner")
         self._emit(
             workflow_job_id,
             "workflow.job.failed.v1",
@@ -222,7 +321,16 @@ class WorkflowJobStore:
     @staticmethod
     def _values(job: WorkflowJob) -> dict[str, Any]:
         return {
-            **job.model_dump(exclude={"payload", "cursor", "result", "status"}),
+            **job.model_dump(
+                exclude={
+                    "payload",
+                    "cursor",
+                    "result",
+                    "status",
+                    "dependency_job_ids",
+                }
+            ),
+            "dependency_job_ids_json": list(job.dependency_job_ids),
             "payload_json": job.payload,
             "cursor_json": job.cursor,
             "result_json": job.result,
@@ -232,12 +340,14 @@ class WorkflowJobStore:
     @staticmethod
     def _from_row(row: dict[str, Any]) -> WorkflowJob:
         row["payload"] = row.pop("payload_json")
+        row["dependency_job_ids"] = row.pop("dependency_job_ids_json")
         row["cursor"] = row.pop("cursor_json")
         row["result"] = row.pop("result_json")
         row["created_at"] = _utc(row["created_at"])
         row["started_at"] = _utc(row["started_at"])
         row["updated_at"] = _utc(row["updated_at"])
         row["completed_at"] = _utc(row["completed_at"])
+        row["lease_expires_at"] = _utc(row["lease_expires_at"])
         return WorkflowJob.model_validate(row)
 
 
@@ -320,13 +430,14 @@ class ResumableMarketBackfill:
             max_attempts=max_attempts,
         )
         self.jobs.requeue_stale(job_group_id=job_group_id)
+        worker_id = f"backfill-{uuid7()}"
         processed = 0
         for job in self.jobs.jobs(job_group_id=job_group_id):
             if job.status == WorkflowJobStatus.COMPLETED:
                 continue
             if max_partitions is not None and processed >= max_partitions:
                 break
-            if not self.jobs.claim(job.workflow_job_id):
+            if not self.jobs.claim(job.workflow_job_id, worker_id=worker_id):
                 continue
             try:
                 summary = await self.service.ingest_stock_bars(
@@ -336,11 +447,13 @@ class ResumableMarketBackfill:
                 self.jobs.fail(
                     job.workflow_job_id,
                     error_code=type(exc).__name__,
+                    worker_id=worker_id,
                 )
                 raise
             self.jobs.complete(
                 job.workflow_job_id,
                 result=summary.model_dump(mode="json"),
+                worker_id=worker_id,
             )
             processed += 1
         jobs = self.jobs.jobs(job_group_id=job_group_id)

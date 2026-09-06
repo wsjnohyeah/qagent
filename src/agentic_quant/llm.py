@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from time import monotonic
@@ -124,6 +125,19 @@ def _canonical_sha256(value: Any) -> str:
         default=str,
     ).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _redact_audit_text(value: str) -> str:
+    """Retain inspectable prompts without persisting recognizable API credentials."""
+    patterns = (
+        r"sk-(?:proj-)?[A-Za-z0-9_\-]{16,}",
+        r"LLM_[A-Za-z0-9_\-]{16,}",
+        r"(?i)(api[_ -]?key|api[_ -]?secret|authorization)\s*[:=]\s*\S+",
+    )
+    redacted = value
+    for pattern in patterns:
+        redacted = re.sub(pattern, "[REDACTED_CREDENTIAL]", redacted)
+    return redacted
 
 
 class ResponsesAPIProvider:
@@ -470,6 +484,20 @@ class LLMGateway:
                 "top_p": config.top_p,
             }
         )
+        request_envelope = {
+            "model": config.model,
+            "instructions": _redact_audit_text(request.instructions),
+            "input": _redact_audit_text(request.input_text),
+            "max_output_tokens": min(
+                request.max_output_tokens or config.max_output_tokens,
+                config.max_output_tokens,
+            ),
+            "reasoning": {"effort": reasoning_effort},
+            "store": False if config.send_store_false else None,
+            "temperature": config.temperature,
+            "top_p": config.top_p,
+            "audit_note": "Application payload after credential redaction; HTTP headers omitted",
+        }
         started = monotonic()
         provider = self.providers.get(provider_name)
         if provider is None:
@@ -481,6 +509,7 @@ class LLMGateway:
                 reasoning_effort=reasoning_effort,
                 request_sha256=request_sha256,
                 input_sha256=input_sha256,
+                request_envelope=request_envelope,
                 created_at=created_at,
                 started=started,
                 error_code="provider_not_configured",
@@ -515,6 +544,7 @@ class LLMGateway:
                     reasoning_effort=reasoning_effort,
                     request_sha256=request_sha256,
                     input_sha256=input_sha256,
+                    request_envelope=request_envelope,
                     created_at=created_at,
                     started=started,
                     error_code=f"budget_exceeded:{exc.scope}"[:120],
@@ -536,6 +566,7 @@ class LLMGateway:
                 reasoning_effort=reasoning_effort,
                 request_sha256=request_sha256,
                 input_sha256=input_sha256,
+                request_envelope=request_envelope,
                 created_at=created_at,
                 started=started,
                 error_code=(
@@ -565,6 +596,7 @@ class LLMGateway:
             prompt_version=request.prompt_version,
             request_sha256=request_sha256,
             input_sha256=input_sha256,
+            request_envelope=request_envelope,
             response_id=result.response_id,
             output_text=result.output_text,
             output_sha256=hashlib.sha256(result.output_text.encode()).hexdigest(),
@@ -593,6 +625,7 @@ class LLMGateway:
         reasoning_effort: str,
         request_sha256: str,
         input_sha256: str,
+        request_envelope: dict[str, Any],
         created_at: datetime,
         started: float,
         error_code: str,
@@ -611,6 +644,7 @@ class LLMGateway:
             prompt_version=request.prompt_version,
             request_sha256=request_sha256,
             input_sha256=input_sha256,
+            request_envelope=request_envelope,
             latency_ms=max(0, int((monotonic() - started) * 1_000)),
             status=LLMInvocationStatus.FAILED,
             error_code=error_code,

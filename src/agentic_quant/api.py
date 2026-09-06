@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 import hmac
 import json
 from pathlib import Path
@@ -55,7 +55,7 @@ from agentic_quant.llm_budget import (
 from agentic_quant.llm_store import LLMStore
 from agentic_quant.market_ingestion import MarketDataIngestionService
 from agentic_quant.market_store import MarketDataStore
-from agentic_quant.migrations import upgrade_database
+from agentic_quant.migrations import require_current_database, upgrade_database
 from agentic_quant.ml import (
     MLDatasetBuilder,
     MLPredictor,
@@ -89,6 +89,7 @@ from agentic_quant.risk import RestrictionRegistry, RiskPolicy
 from agentic_quant.research_store import ResearchStore
 from agentic_quant.shadow import ShadowRuntime
 from agentic_quant.steward import SystemSteward
+from agentic_quant.strategy_generation import HybridStrategyGenerator
 from agentic_quant.workflow import WorkflowJobStore
 
 
@@ -217,6 +218,13 @@ class ResearchAnalysisRequest(BaseModel):
     horizon: str = Field(default="5 trading days", min_length=1, max_length=40)
 
 
+class StrategyGenerationRequest(BaseModel):
+    feature_snapshot_id: str = Field(min_length=1, max_length=36)
+    analysis_id: str = Field(min_length=1, max_length=36)
+    forecast_id: str = Field(min_length=1, max_length=36)
+    provider: LLMProviderName | None = None
+
+
 class MLTrainingRequest(BaseModel):
     symbol: str = Field(min_length=1, max_length=24, pattern=r"^[A-Za-z.\-]+$")
     timeframe: Literal["1Min", "1Day"] = "1Day"
@@ -255,6 +263,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         calendar_name=app_settings.market_calendar,
     )
     workflow_job_store = WorkflowJobStore(ledger.engine)
+    risk_policy = RiskPolicy.from_yaml(app_settings.risk_policy_path)
+    restrictions = RestrictionRegistry.from_yaml(
+        app_settings.restricted_securities_path
+    )
     llm_budget_manager = LLMBudgetManager(
         ledger.engine,
         load_llm_budget_policy(app_settings.llm_budget_path),
@@ -272,6 +284,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         intelligence_store,
         code_git_sha=app_settings.source_git_sha or "UNAVAILABLE",
     )
+    strategy_generator = HybridStrategyGenerator(
+        llm_gateway,
+        research_store,
+        intelligence_store,
+        ml_store,
+        ledger,
+        code_git_sha=app_settings.source_git_sha or "UNAVAILABLE",
+    )
     objects = SystemObjectStore(ledger.engine, ledger)
     auth = AdminAuthService(ledger.engine, app_settings)
     code_changes = CodeChangeStore(
@@ -282,6 +302,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ledger.engine,
         research_store,
         objects,
+        risk_policy=risk_policy,
+        restrictions=restrictions,
         calendar_name=app_settings.market_calendar,
     )
     application: FastAPI
@@ -290,11 +312,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         application.state.new_exposure_paused = paused
 
     def runtime_is_paused() -> bool:
-        return bool(
-            getattr(
-                application.state,
-                "new_exposure_paused",
-                app_settings.global_new_exposure_paused,
+        # The SQL control is authoritative across API/worker processes. The
+        # application-state value is only a backwards-compatible local cache.
+        return actions.new_exposure_paused(
+            default=(
+                True
+                if app_settings.app_env == AppEnvironment.PRODUCTION
+                else app_settings.global_new_exposure_paused
             )
         )
 
@@ -369,11 +393,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "environment": app_settings.app_env.value,
             "trading_mode": app_settings.trading_mode.value,
             "live_trading_enabled": False,
-            "new_exposure_paused": getattr(
-                application.state,
-                "new_exposure_paused",
-                app_settings.global_new_exposure_paused,
-            ),
+            "new_exposure_paused": runtime_is_paused(),
             "data_operating_scope": app_settings.data_operating_scope,
             "llm_routing": llm_gateway.status(),
             "llm_budget": llm_budget_manager.summary(),
@@ -393,6 +413,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(application: FastAPI):  # type: ignore[no-untyped-def]
         if app_settings.auto_migrate:
             upgrade_database(app_settings.database_url)
+        else:
+            require_current_database(app_settings.database_url)
         if inspect(ledger.engine).has_table("system_lists"):
             objects.ensure_defaults()
         archive = build_raw_archive(app_settings)
@@ -428,17 +450,46 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         async def shadow_loop() -> None:
             while not stop_shadow.is_set():
-                if (
-                    not application.state.new_exposure_paused
-                    and actions.pipeline_enabled("shadow")
-                ):
+                delivery = ledger.publish_pending(
+                    application.state.publisher,
+                    worker_id="shadow-runtime",
+                )
+                if runtime_is_paused():
+                    actions.record_pipeline_heartbeat(
+                        pipeline="shadow",
+                        status="WAITING",
+                        detail=(
+                            "Global new-exposure pause is active; "
+                            f"outbox published={delivery['published']} "
+                            f"failed={delivery['failed']}"
+                        ),
+                    )
+                elif not actions.pipeline_enabled("shadow"):
+                    actions.record_pipeline_heartbeat(
+                        pipeline="shadow",
+                        status="PAUSED",
+                        detail="Shadow pipeline control is disabled",
+                    )
+                else:
                     try:
-                        await shadow.tick(
+                        result = await shadow.tick(
                             trigger="scheduler",
-                            new_exposure_paused=application.state.new_exposure_paused,
+                            new_exposure_paused=runtime_is_paused(),
                         )
-                    except Exception:
-                        pass
+                        actions.record_pipeline_heartbeat(
+                            pipeline="shadow",
+                            status="IDLE",
+                            detail=(
+                                f"Last tick processed {result['bars_processed']} bars "
+                                f"and created {result['events_created']} events"
+                            ),
+                        )
+                    except Exception as exc:
+                        actions.record_pipeline_heartbeat(
+                            pipeline="shadow",
+                            status="FAILED",
+                            detail=f"{type(exc).__name__}: {exc}",
+                        )
                 try:
                     await asyncio.wait_for(
                         stop_shadow.wait(),
@@ -591,24 +642,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok"}
 
     @application.get("/health/ready")
-    def readiness() -> dict[str, Any]:
+    def readiness() -> JSONResponse:
         try:
-            policy = RiskPolicy.from_yaml(app_settings.risk_policy_path)
-            restrictions = RestrictionRegistry.from_yaml(app_settings.restricted_securities_path)
             database_ok = ledger.health()
             object_store_ok = bool(application.state.archive.health())
             event_bus_ok = bool(application.state.publisher.health())
         except Exception as exc:
             raise HTTPException(status_code=503, detail=f"readiness check failed: {exc}") from exc
-        return {
-            "status": "ready",
+        body = {
+            "status": (
+                "ready"
+                if database_ok and object_store_ok and event_bus_ok
+                else "not_ready"
+            ),
             "database": database_ok,
             "object_store": object_store_ok,
             "event_bus": event_bus_ok,
-            "risk_policy": policy.version,
+            "risk_policy": risk_policy.version,
             "restricted_list": restrictions.version,
             "live_trading_enabled": False,
         }
+        return JSONResponse(
+            status_code=(
+                200 if database_ok and object_store_ok and event_bus_ok else 503
+            ),
+            content=body,
+        )
 
     @application.get("/v1/system/status")
     def system_status() -> dict[str, Any]:
@@ -617,9 +676,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "environment": app_settings.app_env,
             "trading_mode": app_settings.trading_mode,
             "live_trading_enabled": False,
-            "new_exposure_paused": application.state.new_exposure_paused,
+            "new_exposure_paused": runtime_is_paused(),
             "database": "healthy" if ledger.health() else "unhealthy",
-            "phase": "6-authenticated-system-steward-control-center",
+            "phase": "6.1-observable-system-steward-control-center",
             "data_operating_scope": app_settings.data_operating_scope,
             "development_max_backfill_days": (
                 app_settings.development_max_backfill_days
@@ -659,6 +718,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             **objects.health_summary(),
             **shadow.health_summary(),
             **auth.health_summary(),
+            **ledger.outbox_health(),
             "raw_archive": "healthy" if application.state.archive.health() else "unhealthy",
             "event_bus": "healthy" if application.state.publisher.health() else "unhealthy",
             "alpaca_configured": bool(
@@ -694,7 +754,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.get("/v1/runtime/controls")
     def runtime_controls() -> dict[str, Any]:
         return {
-            "new_exposure_paused": application.state.new_exposure_paused,
+            "new_exposure_paused": runtime_is_paused(),
             "pipelines": actions.pipeline_controls(),
         }
 
@@ -719,6 +779,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         limit: int = Query(default=100, ge=1, le=1_000),
     ) -> list[dict[str, Any]]:
         return objects.raw_object_list(limit=limit)
+
+    @application.get("/v1/explorer/datasets/{provider}/{data_type}")
+    def dataset_page(
+        provider: str,
+        data_type: str,
+        limit: int = Query(default=25, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+        day: date | None = None,
+    ) -> dict[str, Any]:
+        return objects.dataset_page(
+            provider=provider,
+            data_type=data_type,
+            limit=limit,
+            offset=offset,
+            day=day,
+        )
+
+    @application.get("/v1/explorer/market-bars/{symbol}/{timeframe}")
+    def market_bar_page(
+        symbol: str,
+        timeframe: str,
+        limit: int = Query(default=50, ge=1, le=500),
+        offset: int = Query(default=0, ge=0),
+        day: date | None = None,
+    ) -> dict[str, Any]:
+        return objects.market_bar_page(
+            symbol=symbol,
+            timeframe=timeframe,
+            limit=limit,
+            offset=offset,
+            day=day,
+        )
 
     @application.get("/v1/explorer/raw/{raw_object_id}")
     def raw_object(raw_object_id: str) -> dict[str, Any]:
@@ -747,6 +839,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> list[dict[str, Any]]:
         return objects.strategies(limit=limit)
 
+    @application.get("/v1/strategies/{strategy_spec_id}")
+    def strategy_detail(strategy_spec_id: str) -> dict[str, Any]:
+        value = objects.strategy(strategy_spec_id)
+        if value is None:
+            raise HTTPException(status_code=404, detail="strategy not found")
+        value["discussion"] = objects.thread("strategy", strategy_spec_id)
+        return value
+
     @application.get("/v1/shadow/deployments")
     def shadow_deployment_list(
         limit: int = Query(default=200, ge=1, le=1_000),
@@ -774,6 +874,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         limit: int = Query(default=100, ge=1, le=1_000),
     ) -> list[dict[str, Any]]:
         return shadow.runs(limit=limit)
+
+    @application.get("/v1/shadow/reports")
+    def shadow_reports(
+        period: Literal["daily", "weekly"] = "daily",
+        limit: int = Query(default=30, ge=1, le=365),
+    ) -> list[dict[str, Any]]:
+        return shadow.performance_reports(period=period, limit=limit)
+
+    @application.get("/v1/shadow/alerts")
+    def shadow_alerts(
+        limit: int = Query(default=100, ge=1, le=1_000),
+    ) -> list[dict[str, Any]]:
+        return shadow.alerts(limit=limit)
+
+    @application.get("/v1/shadow/decisions")
+    def shadow_decisions(
+        deployment_id: str | None = Query(default=None, max_length=36),
+        limit: int = Query(default=200, ge=1, le=2_000),
+    ) -> list[dict[str, Any]]:
+        return shadow.decision_lineage(
+            deployment_id=deployment_id,
+            limit=limit,
+        )
 
     @application.get("/v1/threads/{object_type}/{object_id}")
     def object_thread(object_type: str, object_id: str) -> dict[str, Any]:
@@ -926,11 +1049,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> list[dict[str, Any]]:
         return data_quality_service.recent(limit=limit)
 
+    @application.get("/v1/data-quality/{report_id}")
+    def data_quality_report(report_id: str) -> dict[str, Any]:
+        value = next(
+            (
+                item
+                for item in data_quality_service.recent(limit=5_000)
+                if item["data_quality_report_id"] == report_id
+            ),
+            None,
+        )
+        if value is None:
+            raise HTTPException(status_code=404, detail="quality report not found")
+        return value
+
     @application.get("/v1/workflow-jobs")
     def workflow_jobs(
         limit: int = Query(default=100, ge=1, le=1_000),
     ) -> list[dict[str, Any]]:
         return workflow_job_store.recent(limit=limit)
+
+    @application.get("/v1/workflow-jobs/{job_id}")
+    def workflow_job(job_id: str) -> dict[str, Any]:
+        value = next(
+            (
+                item
+                for item in workflow_job_store.recent(limit=10_000)
+                if item["workflow_job_id"] == job_id
+            ),
+            None,
+        )
+        if value is None:
+            raise HTTPException(status_code=404, detail="workflow job not found")
+        return value
 
     @application.get("/v1/catalysts")
     def catalysts(limit: int = Query(default=50, ge=1, le=500)) -> list[dict[str, Any]]:
@@ -1128,6 +1279,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> list[dict[str, Any]]:
         return intelligence_store.recent(limit=limit)
 
+    @application.post("/v1/research/strategy-candidates")
+    async def generate_strategy_candidate(
+        request: StrategyGenerationRequest,
+    ) -> dict[str, Any]:
+        require_pipeline("research")
+        require_pipeline("ml")
+        require_pipeline("llm")
+        try:
+            return await strategy_generator.generate(
+                feature_snapshot_id=request.feature_snapshot_id,
+                analysis_id=request.analysis_id,
+                forecast_id=request.forecast_id,
+                provider_override=request.provider,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except LLMConfigurationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except LLMBudgetExceededError as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
+        except LLMProviderError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
     @application.get("/v1/decision-inspector/{analysis_id}")
     def decision_inspector(analysis_id: str) -> dict[str, Any]:
         graph = intelligence_store.decision_graph(analysis_id)
@@ -1293,7 +1467,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         bundle = run_synthetic_vertical_slice(
             settings=app_settings,
             ledger=ledger,
-            new_exposure_paused=application.state.new_exposure_paused,
+            new_exposure_paused=runtime_is_paused(),
         )
         return bundle.model_dump(mode="json")
 

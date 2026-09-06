@@ -546,15 +546,60 @@ class AdminActionService:
             }
             for row in rows
         }
+        with self.engine.connect() as connection:
+            worker_rows = connection.execute(
+                select(runtime_controls).where(
+                    runtime_controls.c.control_key.like("worker:%")
+                )
+            ).all()
+        workers = {
+            str(row.control_key).split(":", 1)[1]: {
+                **dict(row.state_json),
+                "heartbeat_at": row.updated_at,
+            }
+            for row in worker_rows
+        }
         return [
             {
                 "pipeline": name,
                 "enabled": bool(overrides.get(name, {}).get("enabled", enabled)),
                 "updated_by": overrides.get(name, {}).get("updated_by"),
                 "updated_at": overrides.get(name, {}).get("updated_at"),
+                "worker": workers.get(name),
             }
             for name, enabled in defaults.items()
         ]
+
+    def record_pipeline_heartbeat(
+        self,
+        *,
+        pipeline: str,
+        status: str,
+        detail: str,
+    ) -> None:
+        if pipeline not in {item["pipeline"] for item in self.pipeline_controls()}:
+            raise ValueError("Unknown pipeline")
+        key = f"worker:{pipeline}"
+        values = {
+            "control_key": key,
+            "state_json": {"status": status, "detail": detail[:500]},
+            "updated_by": "runtime-worker",
+            "updated_at": datetime.now(UTC),
+        }
+        with self.engine.begin() as connection:
+            current = connection.execute(
+                select(runtime_controls.c.control_key).where(
+                    runtime_controls.c.control_key == key
+                )
+            ).scalar_one_or_none()
+            if current is None:
+                connection.execute(insert(runtime_controls).values(**values))
+            else:
+                connection.execute(
+                    update(runtime_controls)
+                    .where(runtime_controls.c.control_key == key)
+                    .values(**values)
+                )
 
     def new_exposure_paused(self, *, default: bool) -> bool:
         with self.engine.connect() as connection:

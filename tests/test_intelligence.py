@@ -113,17 +113,21 @@ class StructuredProvider:
         routing: LLMRoutingConfig,
         *,
         invalid_citation: bool = False,
+        contradictory_claim: bool = False,
     ) -> None:
         self.name = LLMProviderName.OPENAI
         self.config = routing.providers[self.name]
         self.invalid_citation = invalid_citation
+        self.contradictory_claim = contradictory_claim
         self.calls = 0
 
     async def complete(self, request: LLMRequest) -> LLMProviderResult:
         self.calls += 1
         payload = json.loads(request.input_text)
         citations = [item["citation_id"] for item in payload["evidence"]]
-        claim_citations = ["DOC:invented"] if self.invalid_citation else citations
+        claim_citations = ["DOC:invented"] if self.invalid_citation else citations[:1]
+        quote_id = claim_citations[0]
+        quote_text = payload["evidence"][0]["text"]
         return LLMProviderResult(
             response_id="response-structured",
             output_text=json.dumps(
@@ -137,8 +141,15 @@ class StructuredProvider:
                     "thesis": "The evidence supports caution.",
                     "claims": [
                         {
-                            "claim": "The issuer published a recent operating update.",
+                            "claim": (
+                                "Revenue increased 50%."
+                                if self.contradictory_claim
+                                else quote_text
+                            ),
                             "citations": claim_citations,
+                            "evidence_quotes": [
+                                {"citation_id": quote_id, "quote": quote_text}
+                            ],
                         }
                     ],
                     "risk_factors": ["The sample is bounded."],
@@ -153,13 +164,22 @@ class StructuredProvider:
         return None
 
 
-def _services(settings, *, invalid_citation: bool = False):  # type: ignore[no-untyped-def]
+def _services(
+    settings,
+    *,
+    invalid_citation: bool = False,
+    contradictory_claim: bool = False,
+):  # type: ignore[no-untyped-def]
     upgrade_database(settings.database_url)
     ledger = EventLedger(settings.database_url)
     research_store = ResearchStore(ledger.engine)
     document_store = DocumentStore(ledger.engine)
     routing = load_llm_routing_config(ROOT / "configs/model_routing.yaml")
-    provider = StructuredProvider(routing, invalid_citation=invalid_citation)
+    provider = StructuredProvider(
+        routing,
+        invalid_citation=invalid_citation,
+        contradictory_claim=contradictory_claim,
+    )
     budget = LLMBudgetManager(
         ledger.engine,
         load_llm_budget_policy(ROOT / "configs/llm_budget.yaml"),
@@ -231,7 +251,6 @@ def test_retrieval_is_point_in_time_and_analysis_is_citation_bound(
     budget_summary = budget.summary()
     assert budget_summary["reservation_counts"] == {"SETTLED": 1}
     assert budget_summary["limits"]["project_monthly"] == {
-        "max_tokens": 5_000_000,
         "max_estimated_cost_usd": "200.00",
     }
 
@@ -258,6 +277,33 @@ def test_unknown_citation_rejects_llm_output(
     )
     assert record.status == ResearchAnalysisStatus.REJECTED
     assert record.analysis is None
+    assert record.rejection_reason == "structured_output_validation_failed"
+
+
+def test_citation_id_does_not_authorize_a_contradictory_claim(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    _, research_store, document_store, _, _, gateway, intelligence = _services(
+        settings,
+        contradictory_claim=True,
+    )
+    feature = _feature(research_store)
+    document_store.upsert_document(
+        _document(
+            body="Revenue decreased 10%.",
+            ingested_at=AS_OF - timedelta(hours=1),
+        ),
+        "RAW_OLD",
+    )
+    bundle = ResearchEvidenceRetriever(document_store).retrieve(
+        feature_snapshot=feature,
+        as_of=AS_OF,
+    )
+
+    record = asyncio.run(
+        EvidenceBoundResearchAnalyst(gateway, intelligence).analyze(bundle)
+    )
+    assert record.status == ResearchAnalysisStatus.REJECTED
     assert record.rejection_reason == "structured_output_validation_failed"
 
 
@@ -288,8 +334,7 @@ def test_budget_breaker_blocks_before_provider_call(
     provider = StructuredProvider(routing)
     base_policy = load_llm_budget_policy(ROOT / "configs/llm_budget.yaml")
     tiny_limit = LLMBudgetLimit(
-        max_tokens=1,
-        max_estimated_cost_usd=Decimal("100"),
+        max_estimated_cost_usd=Decimal("0.000001"),
     )
     policy = base_policy.model_copy(
         update={
@@ -345,13 +390,16 @@ def test_workload_budget_revision_is_immutable_and_does_not_reset_usage(
     )
     revised = dict(policy.limits.workload_daily)
     revised[LLMWorkload.INTERACTIVE_EXPLANATION] = LLMBudgetLimit(
-        max_tokens=10,
-        max_estimated_cost_usd=Decimal("5"),
+        max_estimated_cost_usd=Decimal("0.000007"),
     )
 
     preview = budget.preview_workload_limits(revised)
-    assert preview["before"]["interactive_explanation"]["max_tokens"] == 150_000
-    assert preview["after"]["interactive_explanation"]["max_tokens"] == 10
+    assert preview["before"]["interactive_explanation"][
+        "max_estimated_cost_usd"
+    ] == "5.00"
+    assert preview["after"]["interactive_explanation"][
+        "max_estimated_cost_usd"
+    ] == "0.000007"
     revision = budget.activate_workload_limits(
         raw_limits=revised,
         reason="Lower interactive test budget",
@@ -363,26 +411,44 @@ def test_workload_budget_revision_is_immutable_and_does_not_reset_usage(
     assert summary["policy_source"] == "control_center"
     assert summary["active_revision_id"] == revision["budget_revision_id"]
     assert summary["limits"]["workload_daily"]["interactive_explanation"][
-        "max_tokens"
-    ] == 10
+        "max_estimated_cost_usd"
+    ] == "0.000007"
     workload_window = next(
         item
         for item in summary["windows"]
         if item["scope"] == "workload:interactive_explanation"
     )
     assert workload_window["consumed_tokens"] == 5
-    assert workload_window["token_limit"] == 10
+    assert workload_window["consumed_estimated_cost_usd"] == "0.000006"
+    assert workload_window["estimated_cost_limit_usd"] == "0.000007"
+    assert "token_limit" not in workload_window
     assert len(budget.recent_revisions()) == 1
     assert ledger.by_correlation_id(revision["budget_revision_id"])[-1][
         "event_type"
     ] == "llm.budget.activated.v1"
+
+    same_version_new_hash = policy.model_copy(
+        update={
+            "reservation": policy.reservation.model_copy(
+                update={"input_bytes_per_token": 2}
+            )
+        }
+    )
+    compatible_summary = LLMBudgetManager(
+        ledger.engine,
+        same_version_new_hash,
+    ).summary()
+    assert compatible_summary["policy_source"] == "control_center"
+    assert compatible_summary["limits"]["workload_daily"][
+        "interactive_explanation"
+    ]["max_estimated_cost_usd"] == "0.000007"
 
     changed_policy = policy.model_copy(update={"version": "llm_budget@0.1.1"})
     changed_summary = LLMBudgetManager(ledger.engine, changed_policy).summary()
     assert changed_summary["policy_source"] == "yaml_base"
     assert changed_summary["limits"]["workload_daily"][
         "interactive_explanation"
-    ]["max_tokens"] == 150_000
+    ]["max_estimated_cost_usd"] == "5.00"
 
     with pytest.raises(LLMBudgetExceededError, match="interactive_explanation"):
         budget.reserve(

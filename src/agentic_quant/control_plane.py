@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import Engine, and_, func, insert, select, update
@@ -27,6 +27,9 @@ from agentic_quant.database import (
     research_analyses,
     shadow_deployments,
     shadow_events,
+    source_document_versions,
+    source_documents,
+    corporate_facts,
     strategy_adoptions,
     strategy_specs,
     steward_conversations,
@@ -34,6 +37,7 @@ from agentic_quant.database import (
     system_list_revisions,
     system_lists,
     thread_posts,
+    validation_reports,
     workflow_jobs,
 )
 from agentic_quant.domain import EventEnvelope
@@ -450,6 +454,189 @@ class SystemObjectStore:
             ).one_or_none()
         return dict(row._mapping) if row is not None else None
 
+    def dataset_page(
+        self,
+        *,
+        provider: str,
+        data_type: str,
+        limit: int,
+        offset: int,
+        day: date | None = None,
+    ) -> dict[str, Any]:
+        filters = [
+            raw_objects.c.provider == provider,
+            raw_objects.c.data_type == data_type,
+        ]
+        if day is not None:
+            start = datetime.combine(day, datetime.min.time(), tzinfo=UTC)
+            filters.extend(
+                (
+                    raw_objects.c.ingested_at >= start,
+                    raw_objects.c.ingested_at < start + timedelta(days=1),
+                )
+            )
+        with self.engine.connect() as connection:
+            total = int(
+                connection.execute(
+                    select(func.count()).select_from(raw_objects).where(*filters)
+                ).scalar_one()
+            )
+            items = [
+                dict(row._mapping)
+                for row in connection.execute(
+                    select(raw_objects)
+                    .where(*filters)
+                    .order_by(raw_objects.c.ingested_at.desc())
+                    .offset(offset)
+                    .limit(limit)
+                )
+            ]
+            page_raw_object_ids = [str(item["raw_object_id"]) for item in items]
+            date_groups = [
+                {
+                    "date": str(row._mapping["day"]),
+                    "count": int(row._mapping["count"]),
+                }
+                for row in connection.execute(
+                    select(
+                        func.date(raw_objects.c.ingested_at).label("day"),
+                        func.count().label("count"),
+                    )
+                    .where(
+                        raw_objects.c.provider == provider,
+                        raw_objects.c.data_type == data_type,
+                    )
+                    .group_by(func.date(raw_objects.c.ingested_at))
+                    .order_by(func.date(raw_objects.c.ingested_at).desc())
+                    .limit(90)
+                )
+            ]
+            documents = [
+                dict(row._mapping)
+                for row in connection.execute(
+                    select(
+                        source_documents.c.document_id,
+                        source_documents.c.source_kind,
+                        source_documents.c.publisher,
+                        source_documents.c.published_at,
+                        source_documents.c.canonical_url,
+                        source_document_versions.c.version_id,
+                        source_document_versions.c.title,
+                        source_document_versions.c.summary,
+                        source_document_versions.c.ingested_at,
+                    )
+                    .join(
+                        source_document_versions,
+                        source_document_versions.c.document_id
+                        == source_documents.c.document_id,
+                    )
+                    .where(
+                        source_documents.c.provider == provider,
+                        source_document_versions.c.raw_object_id.in_(
+                            page_raw_object_ids
+                        ),
+                    )
+                    .order_by(source_documents.c.published_at.desc())
+                    .limit(500)
+                )
+            ] if page_raw_object_ids else []
+            facts = [
+                dict(row._mapping)
+                for row in connection.execute(
+                    select(
+                        corporate_facts.c.fact_id,
+                        corporate_facts.c.symbol,
+                        corporate_facts.c.tag,
+                        corporate_facts.c.form,
+                        corporate_facts.c.period_end,
+                        corporate_facts.c.filed_at,
+                        corporate_facts.c.available_from,
+                        corporate_facts.c.value_text,
+                    )
+                    .where(
+                        corporate_facts.c.raw_object_id.in_(page_raw_object_ids)
+                    )
+                    .order_by(corporate_facts.c.available_from.desc())
+                    .limit(500)
+                )
+            ] if page_raw_object_ids else []
+        return {
+            "provider": provider,
+            "data_type": data_type,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "selected_date": day,
+            "date_groups": date_groups,
+            "raw_objects": items,
+            "documents": documents,
+            "corporate_facts": facts,
+        }
+
+    def market_bar_page(
+        self,
+        *,
+        symbol: str,
+        timeframe: str,
+        limit: int,
+        offset: int,
+        day: date | None = None,
+    ) -> dict[str, Any]:
+        filters = [
+            market_bars.c.symbol == symbol.upper(),
+            market_bars.c.timeframe == timeframe,
+        ]
+        if day is not None:
+            start = datetime.combine(day, datetime.min.time(), tzinfo=UTC)
+            filters.extend(
+                (
+                    market_bars.c.event_time >= start,
+                    market_bars.c.event_time < start + timedelta(days=1),
+                )
+            )
+        with self.engine.connect() as connection:
+            total = int(
+                connection.execute(
+                    select(func.count()).select_from(market_bars).where(*filters)
+                ).scalar_one()
+            )
+            items = [
+                dict(row._mapping)
+                for row in connection.execute(
+                    select(market_bars)
+                    .where(*filters)
+                    .order_by(market_bars.c.event_time.desc())
+                    .offset(offset)
+                    .limit(limit)
+                )
+            ]
+            date_groups = [
+                {
+                    "date": str(row._mapping["day"]),
+                    "count": int(row._mapping["count"]),
+                }
+                for row in connection.execute(
+                    select(
+                        func.date(market_bars.c.event_time).label("day"),
+                        func.count().label("count"),
+                    )
+                    .where(*filters[:2])
+                    .group_by(func.date(market_bars.c.event_time))
+                    .order_by(func.date(market_bars.c.event_time).desc())
+                    .limit(90)
+                )
+            ]
+        return {
+            "symbol": symbol.upper(),
+            "timeframe": timeframe,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "selected_date": day,
+            "date_groups": date_groups,
+            "items": items,
+        }
+
     def strategies(self, *, limit: int = 200) -> list[dict[str, Any]]:
         statement = (
             select(strategy_specs, strategy_adoptions.c.status.label("adoption_status"))
@@ -474,6 +661,33 @@ class SystemObjectStore:
                         )
                     ).scalar_one()
                 )
+                item["trade_count"] = int(
+                    connection.execute(
+                        select(func.count())
+                        .select_from(backtest_trades)
+                        .join(
+                            experiment_runs,
+                            experiment_runs.c.experiment_run_id
+                            == backtest_trades.c.experiment_run_id,
+                        )
+                        .where(
+                            experiment_runs.c.strategy_spec_id
+                            == item["strategy_spec_id"]
+                        )
+                    ).scalar_one()
+                )
+                item["symbols"] = [
+                    str(value)
+                    for value in connection.execute(
+                        select(experiment_runs.c.symbol)
+                        .where(
+                            experiment_runs.c.strategy_spec_id
+                            == item["strategy_spec_id"]
+                        )
+                        .distinct()
+                        .order_by(experiment_runs.c.symbol)
+                    ).scalars()
+                ]
                 latest = connection.execute(
                     select(experiment_runs.c.metrics_json)
                     .where(
@@ -486,6 +700,74 @@ class SystemObjectStore:
                 item["latest_metrics"] = latest
                 values.append(item)
             return values
+
+    def strategy(self, strategy_spec_id: str) -> dict[str, Any] | None:
+        item = next(
+            (
+                value
+                for value in self.strategies(limit=10_000)
+                if value["strategy_spec_id"] == strategy_spec_id
+            ),
+            None,
+        )
+        if item is None:
+            return None
+        with self.engine.connect() as connection:
+            experiments = [
+                self._normalize_times(
+                    dict(row._mapping),
+                    ("as_of_start", "as_of_end", "started_at", "finished_at"),
+                )
+                for row in connection.execute(
+                    select(experiment_runs)
+                    .where(experiment_runs.c.strategy_spec_id == strategy_spec_id)
+                    .order_by(experiment_runs.c.finished_at.desc())
+                    .limit(100)
+                )
+            ]
+            trades = [
+                self._normalize_times(
+                    dict(row._mapping),
+                    ("signal_as_of", "entry_time", "exit_time"),
+                )
+                for row in connection.execute(
+                    select(backtest_trades)
+                    .join(
+                        experiment_runs,
+                        experiment_runs.c.experiment_run_id
+                        == backtest_trades.c.experiment_run_id,
+                    )
+                    .where(experiment_runs.c.strategy_spec_id == strategy_spec_id)
+                    .order_by(backtest_trades.c.exit_time.desc())
+                    .limit(250)
+                )
+            ]
+            reports = [
+                self._normalize_times(dict(row._mapping), ("created_at",))
+                for row in connection.execute(
+                    select(validation_reports)
+                    .order_by(validation_reports.c.created_at.desc())
+                    .limit(250)
+                )
+                if strategy_spec_id
+                in set(dict(row.validated_strategy_spec_ids or {}).values())
+            ]
+            deployments = [
+                self._normalize_times(
+                    dict(row._mapping),
+                    ("last_processed_bar_time", "created_at", "updated_at"),
+                )
+                for row in connection.execute(
+                    select(shadow_deployments)
+                    .where(shadow_deployments.c.strategy_spec_id == strategy_spec_id)
+                    .order_by(shadow_deployments.c.updated_at.desc())
+                )
+            ]
+        item["experiments"] = experiments
+        item["trades"] = trades
+        item["validations"] = reports
+        item["shadow_deployments"] = deployments
+        return item
 
     def object_summary(self) -> dict[str, Any]:
         counts = {
@@ -563,6 +845,17 @@ class SystemObjectStore:
                     ).scalar_one()
                 ),
             }
+
+    @staticmethod
+    def _normalize_times(
+        item: dict[str, Any],
+        fields: tuple[str, ...],
+    ) -> dict[str, Any]:
+        for field in fields:
+            value = item.get(field)
+            if isinstance(value, datetime) and value.tzinfo is None:
+                item[field] = value.replace(tzinfo=UTC)
+        return item
 
     def _emit(self, event_type: str, correlation_id: str, payload: dict[str, Any]) -> None:
         if self.ledger is None:

@@ -1,4 +1,4 @@
-version: data_manifest@0.10.0
+version: data_manifest@0.11.0
 providers:
   synthetic:
     enabled: true
@@ -14,7 +14,7 @@ providers:
     execution_enabled: false
 market_calendar: XNYS
 research:
-  feature_set: price_event_pit@0.2.0
+  feature_set: price_event_pit@0.3.0
   point_in_time_required: true
   next_bar_execution_required: true
   offline_online_parity_required: true
@@ -24,7 +24,7 @@ research:
     backtest_cash_share_simulation: event_driven
     symbol_change_replay: pending_fail_closed
   backtest_engine:
-    version: event_driven_portfolio@0.1.0
+    version: event_driven_portfolio@0.2.0
     order_timing: next_bar_open
     exit_timing: declared_session_close
     max_volume_participation_default: 0.05
@@ -55,10 +55,10 @@ research:
     governed_import_manifest_required: true
   synthetic_smoke_is_alpha_evidence: false
 intelligence:
-  analysis_schema: research_analysis@0.1.0
+  analysis_schema: research_analysis@0.2.0
   graph_schema: ai_infrastructure_graph@0.1.0
   point_in_time_document_versions: true
-  citations_required_for_claims: true
+  exact_source_quotes_required_for_claims: true
   unknown_citations_fail_closed: true
   insufficient_evidence_abstains_before_llm_call: true
   budget_policy: llm_budget@0.1.0
@@ -66,8 +66,8 @@ intelligence:
 machine_learning:
   policy: ml_policy@0.1.0
   candidates: [logistic_regression, boosted_stumps]
-  validation: chronological_walk_forward_with_embargo
-  calibration: platt_fit_oos_evaluated_on_later_oos_holdout
+  validation: chronological_walk_forward_with_embargo_and_actual_bar_labels
+  calibration: purged_oos_calibration_selection_and_final_holdout
   drift_metric: population_stability_index
   registry_states: [CANDIDATE, CHALLENGER, CHAMPION, RETIRED, REJECTED]
   automatic_promotion: false

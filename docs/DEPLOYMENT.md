@@ -92,6 +92,10 @@ docker push ghcr.io/OWNER/REPO:COMMIT_SHA
 
 Never publish a mutable `latest` tag as the only rollback reference.
 
+Before building the image, `make release-check` provides the combined local gate: lint,
+strict types, full tests, local-lite doctor, secret scan, Compose rebuild/doctor, and
+PostgreSQL Alembic drift detection.
+
 ## First VPS deployment
 
 Place the checked-out repository at `/opt/agentic-quant`, install `.env.production`, set `APP_IMAGE` in the shell or environment file, and run:
@@ -105,7 +109,11 @@ curl -fsS http://127.0.0.1:8000/health/ready
 The API is loopback-only. Add a TLS reverse proxy only after verifying login, session-cookie,
 CSRF, and logout behavior through that proxy. Do not expose ports 5432 or 6379.
 
-The guarded deploy script starts PostgreSQL, waits for readiness, applies Alembic migrations as a one-shot task, and only then replaces the API. `AUTO_MIGRATE` remains false in the long-running production service.
+The guarded deploy script starts PostgreSQL, waits for readiness, applies Alembic migrations
+as a one-shot task, and only then replaces the API and dedicated shadow worker. The API does
+not own the production scheduler. Deployment fails if either API readiness or the worker's
+persistent heartbeat is unhealthy. `AUTO_MIGRATE` remains false in both long-running
+services.
 
 ## Post-deploy verification
 

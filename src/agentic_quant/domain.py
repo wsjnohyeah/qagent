@@ -62,6 +62,10 @@ class RiskEvaluationContext(FrozenModel):
     nearest_major_macro_event_at: datetime | None = None
     macro_event_strategy_approved: bool = False
     duplicate_order_detected: bool = False
+    evaluation_profile: str = Field(
+        default="tactical_intraday",
+        pattern=r"^(tactical_intraday|baseline_shadow)$",
+    )
 
     @model_validator(mode="after")
     def timestamps_are_aware(self) -> Self:
@@ -195,6 +199,7 @@ class LLMInvocation(FrozenModel):
     prompt_version: str
     request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     input_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    request_envelope: dict[str, Any] | None = None
     response_id: str | None = None
     output_text: str | None = None
     output_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
@@ -239,9 +244,23 @@ class ResearchEvidenceBundle(FrozenModel):
         return self
 
 
+class EvidenceQuote(FrozenModel):
+    citation_id: str = Field(min_length=1, max_length=180)
+    quote: str = Field(min_length=1, max_length=1_000)
+
+
 class AnalystClaim(FrozenModel):
     claim: str = Field(min_length=1, max_length=1_000)
     citations: tuple[str, ...] = Field(min_length=1, max_length=12)
+    evidence_quotes: tuple[EvidenceQuote, ...] = Field(min_length=1, max_length=12)
+
+    @model_validator(mode="after")
+    def citations_have_exact_quotes(self) -> Self:
+        if set(self.citations) != {
+            quote.citation_id for quote in self.evidence_quotes
+        }:
+            raise ValueError("Every claim citation must have one exact evidence quote")
+        return self
 
 
 class StructuredResearchAnalysis(FrozenModel):
@@ -635,6 +654,10 @@ class WalkForwardValidationReport(FrozenModel):
     symbol: str
     timeframe: str
     strategy_types: tuple[str, ...]
+    validation_subject: str
+    validated_strategy_spec_ids: dict[str, str]
+    execution_contract: dict[str, Any]
+    execution_contract_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     selection_metric: str
     train_bars: int = Field(ge=22)
     test_bars: int = Field(ge=1)
@@ -696,6 +719,9 @@ class WorkflowJob(FrozenModel):
     status: WorkflowJobStatus
     attempt_count: int = Field(ge=0)
     max_attempts: int = Field(ge=1)
+    dependency_job_ids: tuple[str, ...] = ()
+    lease_owner: str | None = None
+    lease_expires_at: datetime | None = None
     cursor: dict[str, Any]
     result: dict[str, Any]
     error_code: str | None = None

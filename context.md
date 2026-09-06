@@ -4,10 +4,10 @@ Last updated: 2026-09-05 PDT
 
 Context format: v1
 
-Current phase: implementation foundations through Phase 6 are locally verified; Phase 5
-statistical promotion and Phase 6 production/runtime exit criteria remain open
+Current phase: implementation foundations through Phase 6.1 are locally verified; Phase 5
+statistical promotion and Phase 6 elapsed continuous-operation evidence remain open
 
-Current documented baseline: C027 — `Pin current Node 24 CI actions`
+Current documented baseline: C028 — `Complete Phase 6.1 review remediation`
 
 ## Purpose and authority
 
@@ -70,44 +70,55 @@ A Git commit cannot contain its own content-derived hash without changing that h
   credentials fail closed and no model has any monetary authority. Development operators can
   save immutable route revisions and chat through Auto or either explicit provider.
 - Phase 4 retrieves only evidence versions available by `as_of`, reserves LLM budget before
-  each provider call, requires typed research-only output and exact citations, abstains when
+  each provider call, requires typed research-only output and exact source quotations,
+  abstains when
   independent evidence is missing, and exposes the full lineage as Decision Inspector graph
   `ai_infrastructure_graph@0.1.0`.
-- Phase 5 trains logistic and boosted-stump candidates on point-in-time labels, evaluates
-  them with embargoed chronological folds and a later calibrated OOS holdout, measures PSI
-  drift, persists safe JSON artifacts/forecasts, and requires deterministic eligibility plus
-  an explicit human action for model champion status. Local candidates remain unpromoted.
+- Phase 5 trains logistic and boosted-stump candidates on executable next-open-to-future-close
+  labels indexed by actual bars. It uses embargoed chronological folds and separate purged
+  calibration, model-selection, and untouched final holdout partitions, measures PSI drift,
+  persists safe JSON artifacts/forecasts, and requires deterministic eligibility plus an
+  explicit human action for model champion status. Local candidates remain unpromoted.
+- A constrained generation loop combines an exact point-in-time feature snapshot, linked ML
+  forecast, and evidence-bound analysis with an adversarial LLM critique. It can compile only
+  allowlisted momentum/mean-reversion parameters into an immutable research-only spec and
+  has no code, sizing, adoption, risk, or order authority.
 - Phase 6 authenticates one administrator with a revocable server-side cookie session and
   CSRF protection. All non-health system interaction is locked when authentication is enabled;
   production requires an Argon2 password hash.
-- The Phase 6 Control Center is object-centric. Its default view is now a dedicated full-page
+- The Phase 6.1 Control Center is object-centric. Its default view is a dedicated full-page
   System Steward with persistent conversation history and safely rendered Markdown; overview,
-  governed lists, bounded raw-data inspection, strategies, shadow deployments/events,
-  pipeline controls, model routing, activity, code-change sessions, and per-object discussion
-  timelines remain available through the left navigation.
-- Overview displays the current UTC daily/monthly LLM token consumption and estimated cost
-  against configured project limits, with provider/workload breakdowns and in-flight
-  reservations sourced from the durable budget ledger.
-- Each LLM workload's daily token and estimated-cost ceiling can be revised from Overview.
-  A complete immutable revision and an exact second confirmation are required; current-day
-  consumption is preserved, and tracked project/provider caps remain hard outer limits.
+  governed lists, paginated dataset/date drill-downs, normalized evidence, strategies with
+  experiment/trade/validation provenance, complete shadow decision lineage, worker/job/
+  quality details, activity, Steward code work, and per-object discussion timelines remain
+  available through the left navigation.
+- Overview displays current UTC daily/monthly estimated-USD spend against configured project
+  limits, with provider/workload breakdowns and in-flight reservations from the durable
+  budget ledger. Token totals are only optional per-invocation diagnostics.
+- Each LLM workload's daily estimated-USD ceiling can be revised from Overview. There is no
+  operator token cap. A complete immutable revision and exact second confirmation are
+  required; current-day spend is preserved and percentages immediately recalculate against
+  the new cap.
 - One persistent System Steward receives a bounded current-state snapshot across data,
   quality, jobs, validations, analyses, models, strategies, lists, shadow state, and admin
   actions. It must cite supplied object IDs and may only propose allowlisted actions.
 - Sensitive operations are two-step: a proposal records parameters and preview, then expires
   after 15 minutes unless the administrator submits its exact single-use confirmation phrase.
-- The broker-free shadow runtime admits only a strategy whose deterministic validation gate
-  marked it eligible for human review and whose adoption/deployment were separately confirmed.
-  It reuses point-in-time features and modeled portfolio costs, maintains virtual cash/P&L,
-  and processes each stored bar idempotently. No broker order path exists.
+- The broker-free shadow runtime admits only the exact static strategy and execution contract
+  covered by a gate-eligible report and separate human confirmations. Every attempted
+  exposure persists candidate → deterministic risk decision → approved plan → virtual order/
+  fill lineage, including account context and known decision-bar liquidity. It maintains
+  virtual cash/P&L and processes each stored bar idempotently. The literal multi-session buy-
+  and-hold benchmark is research-only. No broker order path exists.
 - Code modification is represented by scoped change sessions. The web process exposes no
   shell; a trusted external coding worker must produce a diff and passing test record before
   a separate local-commit approval. Push and deployment remain external actions.
-- GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; `main` was first pushed and
-  verified at `a3447ec` on 2026-09-05. No cloud host is configured yet.
-- A 2026-09-05 rereview of the original design handoff corrected milestone language: code
-  foundations through Phase 6 exist, but Phase 5 has not passed its statistical exit gate and
-  Phase 6 has not passed continuous-operation or full runtime-lineage exit criteria.
+- GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; this iteration starts from
+  synchronized commit `06b6853`. No cloud host is configured yet.
+- The independent `06b6853` fix verification is mapped item-by-item in
+  `docs/REVIEW_REMEDIATION_2026-09-05.md`. The deterministic F01–F11 counterexamples are
+  repaired; production-only observation, TLS, backup/restore, and monitoring evidence are
+  still reported as gates rather than simulated locally.
 - Tactical risk calls now require a typed external context covering catalyst applicability,
   known restriction status, liquidity, market-data health, macro-calendar knowledge, nearest
   major macro event, event-strategy approval, and duplicate intent. Unknown or unsafe facts
@@ -115,6 +126,11 @@ A Git commit cannot contain its own content-derived hash without changing that h
   mismatches and signal/feature timestamps later than evaluation time also reject.
 - The global new-exposure pause is enforced at the shadow runtime entry point, preventing a
   manually confirmed tick from bypassing the scheduler kill switch.
+- Production Compose separates the authenticated API from the persistent shadow scheduler.
+  SQL runtime controls and worker heartbeats are shared across processes; workflow jobs use
+  dependency-aware leases and owner-only completion, and ledger delivery uses a transactional
+  SQL outbox with stable IDs, retry leases, and a visible dead-letter state.
+- `/health/ready` now fails with HTTP 503 when any required dependency reports false.
 
 ### Repository state
 
@@ -169,8 +185,8 @@ Development service ports bind only to loopback. The local Compose credentials a
 
 - `make check`: passed.
 - Flake8: passed.
-- Strict mypy: passed for 49 source files.
-- Pytest: 89 passed after the design-handoff safety review.
+- Strict mypy: passed for 51 source files.
+- Pytest: 96 passed after the independent review remediation.
 - `make doctor`: passed against the local-lite SQLite profile.
 - `make docker-doctor`: passed against the PostgreSQL-backed Compose profile.
 - PostgreSQL query: passed; the first container replay stored six lineage events.
@@ -178,8 +194,8 @@ Development service ports bind only to loopback. The local Compose credentials a
 - MinIO live health endpoint: passed.
 - API `/health/ready`: ready, database healthy, risk/restriction versions loaded, live trading false.
 - Container vertical slice: risk verdict `APPROVE`; order state `RECORDED_NOT_SUBMITTED`.
-- Phase 6 validation: 89 tests pass; JavaScript parses; authenticated SQLite and PostgreSQL
-  doctors pass; PostgreSQL Alembic reports no schema drift at `20260905_0021`.
+- Phase 6.1 validation: 96 tests pass; JavaScript parses; authenticated SQLite and PostgreSQL
+  doctors pass; PostgreSQL Alembic reports no schema drift at `20260905_0025`.
 - A live Meta `muse-spark-1.3` System Steward request read the bounded system snapshot,
   returned only the valid `SYSTEM:summary` citation, proposed no action, persisted both
   messages, and logged out successfully.
@@ -198,8 +214,8 @@ Development service ports bind only to loopback. The local Compose credentials a
 - Phase 2 fixtures verify primary/secondary source distinction, correction-version retention, SEC filing and XBRL normalization, IR feed parsing, and cross-document catalyst deduplication.
 - Alpaca REST results are now normalized to the internal half-open `[start, end)` contract;
   `market_data_quality@0.2.0` rejects out-of-window rows and live gap seeds use only 1Min bars.
-- Alembic migrations through `20260905_0021` own the Phase 3D/4/5/6 schema; the Phase 6
-  revision and a fresh SQLite base-to-head downgrade/re-upgrade roundtrip passed.
+- Alembic migrations through `20260905_0025` own the Phase 3D/4/5/6.1 schema, including exact
+  validation contracts, shadow decision lineage, workflow leases, and the event outbox.
 - `make research-smoke`: passed with 100 deterministic daily bars, three immutable baseline
   experiments, nonzero cost modeling, matching offline/online feature hashes, and ordered
   event-driven portfolio ledgers. Stored counts accumulate safely in the persistent ignored
@@ -440,7 +456,7 @@ flowchart LR
     REPORT --> DB
     REPORT --> LEDGER
     MODELROUTES["Reviewed YAML routing base"] --> LLMGW["Provider-neutral LLM gateway"]
-    BUDGET["Atomic token + estimated-cost budgets"] --> LLMGW
+    BUDGET["Atomic estimated-USD budgets"] --> LLMGW
     UI --> LLMCONTROL["Confirmed model routing + System Steward"]
     LLMCONTROL --> ROUTEREVS["Immutable routing revisions"]
     ROUTEREVS --> LLMGW
@@ -459,13 +475,20 @@ flowchart LR
     MLTRAIN --> MLREGISTRY["Human-gated model registry"]
     MLREGISTRY --> FORECAST["Point-in-time ML forecast"]
     FORECAST --> ANALYST
+    FORECAST --> GENERATE["Constrained strategy generation + critique"]
+    ANALYST --> GENERATE
+    GENERATE --> PITSPEC
     MLTRAIN --> DB
     FORECAST --> DB
     REPORT --> ADOPT["Human-confirmed adoption"]
     ADOPT --> SHRUNTIME["Persistent broker-free shadow runtime"]
     PITFEATURES --> SHRUNTIME
-    SHRUNTIME --> SHEVENTS["Virtual event journal + P&L"]
+    SHRUNTIME --> SHLINEAGE["Candidate → risk → plan"]
+    SHLINEAGE --> SHEVENTS["Virtual event journal + P&L"]
     SHEVENTS --> DB
+    WORKER["Dedicated worker + SQL heartbeat"] --> SHRUNTIME
+    LEDGER --> OUTBOX["Transactional event outbox"]
+    OUTBOX --> REDIS
     UI --> OBJECTS["Lists + object threads + raw explorer"]
     OBJECTS --> DB
     ACTIONS --> CODESESS["Scoped code-change sessions"]
@@ -496,9 +519,10 @@ promote a candidate.
 The front-loaded Phase 4A gateway gives OpenAI and Meta one internal Responses-style
 contract. `configs/model_routing.yaml` sends critical research/generation/critique to the
 premium OpenAI route and interactive explanation/routine pipelines to the value Meta route.
-Every attempt is bounded and audited; raw inputs are hashed rather than copied into the audit
-row. No generative strategy loop is connected yet, and neither model can reach runtime risk,
-portfolio, execution, or broker components.
+Every attempt is bounded and audited; hashes plus a sanitized request envelope support the
+administrator's prompt inspector without retaining credentials. A constrained generation and
+adversarial-critique loop can emit only an immutable research DSL specification; neither
+model can reach runtime risk, portfolio, execution, or broker components.
 
 Phase 4B introduced the no-build model control surface. Phase 6 now places route saves behind
 administrator confirmation and replaces session-local Research Copilot history with persistent
@@ -509,13 +533,13 @@ Paid research operations remain development-scoped while the remote environment 
 Phase 4 adds a point-in-time evidence retriever and an evidence-bound analyst. It selects
 the latest source-document version actually ingested by the requested cutoff, combines it
 with the exact feature snapshot and later ML forecast, and treats retrieved text as untrusted
-data. `research_analysis@0.1.0` accepts only research recommendations; non-abstaining claims
-must cite exact bundle IDs, malformed or invented citations are retained as rejected output,
-and missing independent evidence causes a zero-cost abstention. `llm_budget@0.1.0` atomically
-reserves conservative token and estimated-cost ceilings across project/provider/workload
-windows. Confirmed Control Center revisions can replace the complete workload-limit map
-without resetting current-period consumption or exceeding the YAML project cap. The Decision
-Inspector renders the stored evidence-to-call-to-analysis graph.
+data. `research_analysis@0.2.0` accepts only research recommendations; each factual claim
+must reproduce an exact quote from each cited bundle item. Malformed, invented, or
+contradictory support is retained as rejected output, and missing independent evidence causes
+a zero-cost abstention. `llm_budget@0.1.0` atomically reserves conservative estimated-USD
+capacity across project/provider/workload windows. Token counts are diagnostics, never an
+operator limit. Confirmed Control Center revisions can replace the complete workload dollar-
+limit map without resetting current-period spend or exceeding the YAML project cap.
 
 The Phase 5A reliability layer validates every historical ingestion and backtest dataset
 against `market_data_quality@0.2.0`, including identity, chronology, OHLC, availability,
@@ -524,13 +548,14 @@ corporate-action/universe batches carry source, source-version, availability, an
 hashes. Long backfills are deterministic date partitions whose durable job state skips
 completed work and retries interrupted work with bounded attempts.
 
-Phase 5 uses the same point-in-time feature snapshots to construct future-return labels whose
-availability is bounded by the training cutoff. It compares a regularized logistic baseline
-with a deterministic boosted-stump model in expanding train/embargo/test folds. Calibration
-fits only the earlier half of OOS predictions and is evaluated on the later half; ROC AUC,
-Brier, log loss, accuracy, ECE, and per-feature PSI remain durable. Models are portable JSON
-artifacts. Deterministic thresholds may create a challenger, but only an explicit human action
-can mark it champion, and that serving status does not bypass the separate strategy gate.
+Phase 5 uses the same point-in-time feature snapshots to construct executable next-open-to-
+future-close labels indexed by actual bars, so missing snapshots cannot stretch a horizon.
+It compares a regularized logistic baseline with a deterministic boosted-stump model in
+expanding train/embargo/test folds. Calibration, model selection, and final evaluation use
+three chronological partitions purged by label-availability time; ROC AUC, Brier, log loss,
+accuracy, ECE, and per-feature PSI remain durable. Models are portable JSON artifacts.
+Deterministic thresholds may create a challenger, but only an explicit human action can mark
+it champion, and that serving status does not bypass the exact static strategy gate.
 
 Phase 6 puts all system interaction behind one administrator session when authentication is
 enabled. Opaque session tokens are stored only as hashes, a changed credential invalidates
@@ -547,12 +572,20 @@ text never executes a tool. Lists, global/pipeline controls, route changes, stra
 adoption/retirement, shadow operations, and code sessions all require an expiring, exact,
 single-use administrator confirmation. The web process has no shell.
 
-The Phase 6 shadow runtime reads already-ingested normalized bars, builds the same
-point-in-time feature snapshots, applies immutable strategy parameters, and records virtual
-signal/order/fill state with modeled costs and participation limits. Admission requires a
-matching validation report with `eligible_for_human_review=true` plus confirmed human
-adoption. Scheduler and manual ticks share one lock and one idempotent bar cursor. The
-runtime contains no broker SDK or order-submission route.
+The Phase 6 shadow runtime reads already-ingested normalized bars, builds the same point-in-
+time feature snapshots, applies immutable strategy parameters, and persists candidate → risk
+decision → approved plan → virtual order/fill state with modeled costs. Admission requires a
+static validation certificate bound to the exact strategy ID, feature version, engine, cost
+model, timeframe, and `eligible_for_human_review=true`, plus confirmed human adoption. The
+future execution bar's completed volume cannot size an entry. Scheduler and manual ticks
+share one lock and one idempotent bar cursor. Production gives the scheduler to a dedicated
+heartbeat-reporting worker; the API is not a second scheduler owner. The runtime contains no
+broker SDK or order-submission route.
+
+Workflow jobs use explicit dependencies, atomic lease ownership, lease heartbeats, and stale
+recovery. Ledger events and their SQL outbox records commit together; Redis delivery uses a
+stable event ID, expiring claims, bounded retry, and a dead-letter state. Required dependency
+health returning false produces HTTP 503 readiness.
 
 ### Target architecture
 
@@ -671,8 +704,8 @@ year or more of data.
 | Raw archive | `src/agentic_quant/archive.py` | content-addressed local or MinIO JSON evidence |
 | Market persistence | `src/agentic_quant/market_store.py` | idempotent bars, trades, quotes, options, ingestion runs |
 | Data quality | `src/agentic_quant/data_quality.py` | persisted structural/timing/session checks and fail-closed enforcement |
-| Durable workflow | `src/agentic_quant/workflow.py` | deterministic partition plans, checkpoints, bounded retry, and resume |
-| Event transport | `src/agentic_quant/event_bus.py` | Redis Streams publisher with local no-op fallback |
+| Durable workflow | `src/agentic_quant/workflow.py` | dependency-aware partition plans, owner leases, heartbeats, checkpoints, retry, and resume |
+| Event transport | `src/agentic_quant/event_bus.py`, `src/agentic_quant/ledger.py` | Redis Streams publisher plus transactional SQL outbox, stable delivery IDs, retry, and dead-letter state |
 | Market calendar | `src/agentic_quant/market_calendar.py` | exact XNYS daily availability and missing-minute detection |
 | Document providers | `src/agentic_quant/providers/documents.py` | Alpaca News, SEC EDGAR, approved-host IR, gated social adapters |
 | Event ingestion | `src/agentic_quant/document_ingestion.py` | raw-first document/fact ingestion and normalized events |
@@ -691,7 +724,9 @@ year or more of data.
 | LLM budgets | `src/agentic_quant/llm_budget.py`, `configs/llm_budget.yaml` | atomic reservation/settlement, confirmed immutable workload-limit revisions, and Control Center usage summary |
 | Research intelligence | `src/agentic_quant/intelligence.py` | point-in-time retrieval, structured analyst, citation checks, abstention, Decision Inspector graph |
 | ML training/registry | `src/agentic_quant/ml.py`, `configs/ml_policy.yaml` | PIT labels, logistic/stump walk-forward, calibration, drift, JSON registry, forecasts |
-| Schema migrations | `migrations/` | Alembic schema history through completed Phase 6 (`20260905_0021`) |
+| Strategy generator | `src/agentic_quant/strategy_generation.py` | evidence/forecast-bound LLM generation, adversarial critique, constrained research DSL |
+| Runtime worker | `src/agentic_quant/worker.py` | dedicated production shadow scheduler and persistent SQL heartbeat |
+| Schema migrations | `migrations/` | Alembic schema history through Phase 6.1 (`20260905_0025`) |
 
 ## Current executable risk baseline
 
@@ -717,9 +752,10 @@ The active policy is `risk_policy@0.2.0`. A caller must provide `RiskEvaluationC
 gate rejects unknown restriction or macro-calendar state, unverified required catalysts,
 unconfirmed liquidity, unhealthy market data, duplicate intent, and applicable macro
 blackouts. It also rejects mismatched feature IDs and future signal/feature timestamps. The
-current broker-free daily-bar shadow harness has not yet been wired through
-the complete tactical candidate/risk/plan path, so that integration remains a Phase 6 exit
-criterion rather than a claimed capability.
+broker-free daily-bar shadow harness now persists the complete baseline candidate/risk/plan
+path. Its `baseline_shadow` profile marks catalyst, VWAP, opening-range, sector, and macro-
+calendar checks not applicable rather than inventing those facts as true. Event-driven
+tactical strategies must use the stricter `tactical_intraday` profile.
 
 ## Current API and operational workflow
 
@@ -730,12 +766,15 @@ Implemented endpoints:
 - `POST /v1/auth/login`; `GET /v1/auth/session`; `POST /v1/auth/logout` and
   `/v1/auth/revoke-all`
 - `GET /v1/system/status`
-- `GET /v1/control/summary`; versioned `/v1/lists`; `/v1/explorer/data` and bounded
+- `GET /v1/control/summary`; versioned `/v1/lists`; paginated `/v1/explorer/data`,
+  `/v1/explorer/datasets/{provider}/{data_type}`, `/v1/explorer/market-bars`, and bounded
   `/v1/explorer/raw/*`
-- `GET /v1/strategies`; `/v1/threads/{object_type}/{object_id}` discussion reads/posts
+- `GET /v1/strategies` and `/v1/strategies/{strategy_spec_id}`;
+  `/v1/threads/{object_type}/{object_id}` discussion reads/posts
 - `GET|POST /v1/actions`; `POST /v1/actions/{id}/confirm`
 - `POST /v1/steward/ask`; persistent steward conversation reads
-- `GET /v1/shadow/deployments`, `/v1/shadow/events`, and `/v1/shadow/runs`
+- `GET /v1/shadow/deployments`, `/v1/shadow/events`, `/v1/shadow/runs`,
+  `/v1/shadow/decisions`, `/v1/shadow/reports`, and `/v1/shadow/alerts`
 - `GET /v1/runtime/controls`; confirmation-gated global and per-pipeline controls
 - `GET /v1/code-changes`; tested candidate recording and separate commit approval
 - `GET /v1/events`
@@ -743,14 +782,15 @@ Implemented endpoints:
 - `POST /v1/demo/run`
 - `POST /v1/demo/market-data`
 - `GET /v1/data-health`
-- `GET /v1/data-quality`
-- `GET /v1/workflow-jobs`
+- `GET /v1/data-quality` and `/v1/data-quality/{report_id}`
+- `GET /v1/workflow-jobs` and `/v1/workflow-jobs/{job_id}`
 - `GET /v1/documents/search`
 - `GET /v1/catalysts`
 - `GET /v1/research/experiments`
 - `GET /v1/research/experiments/{experiment_run_id}/events`
 - `GET /v1/research/validations`
 - `GET /v1/research/validations/{validation_report_id}`
+- `POST /v1/research/strategy-candidates`; constrained, critique-required, research-only
 - `GET /v1/llm/routes`
 - `GET /v1/llm/budget`
 - `PUT /v1/llm/budget`; proposes a confirmation-gated complete workload-limit revision
@@ -1233,8 +1273,9 @@ The Compose stack is currently intended to remain running for local inspection. 
   tokens and estimated USD for each workload. Saving creates a pending administrator action;
   the revision becomes effective only after the existing exact confirmation protocol.
 - The tracked YAML remains the reviewed base and owns project/provider hard caps. A database
-  revision is accepted only against the current YAML content hash and cannot exceed the
-  project daily cap. A base-file change invalidates stale overrides.
+  revision is accepted only for the current base policy version and cannot exceed the
+  project daily cap. Material base-file changes must bump that version; its content hash is
+  still retained for audit.
 - Revision activation updates the limit on an existing current-day workload window instead
   of generating a fresh accounting key. Previously consumed and in-flight amounts therefore
   remain counted, preventing repeated edits from resetting the budget.
@@ -1257,6 +1298,38 @@ The Compose stack is currently intended to remain running for local inspection. 
 - Milestone reporting now distinguishes implemented tooling from passed empirical and
   production-operational exit criteria. The detailed reconciliation is
   `docs/REVIEW_ALIGNMENT_2026-09-05.md`; ADR 0019 records the safety decisions.
+
+### D034 — Operator LLM budgets are estimated-USD only
+
+- Date: 2026-09-05 PDT.
+- The user does not want to reason about or configure token ceilings and requested one dollar
+  budget per workflow instead.
+- Decision: the current LLM budget policy retains token counts only as internal/per-invocation diagnostic
+  telemetry. Project, provider, and workload admission is enforced only against estimated
+  USD. Overview and the workload editor show dollars; a confirmed cap change preserves
+  current spend and immediately recalculates usage percentage against the new cap.
+- Existing same-version workload revisions keep their USD fields when the retired token
+  field disappears; material base-policy changes must increment the policy version.
+- Provider pricing remains versioned planning input and may differ from the invoice. This
+  limitation is visible in the UI and does not weaken the pre-call reservation breaker.
+
+### D035 — Phase 6.1 closes deterministic review defects before Phase 7
+
+- Date: 2026-09-05 PDT.
+- The user asked to complete the work before Phase 7, improve the Phase 6.1 UI, and then
+  reconcile the independent `06b6853` fix verification.
+- Decision: repair the review's deterministic F01–F11 counterexamples and Phase 6 runtime
+  contracts without adding a broker adapter. Exact strategy/execution certificates,
+  executable labels, purged ML evaluation, exact evidence quotes, actual shadow risk lineage,
+  workflow leases, a ledger outbox, dedicated worker ownership, and fail-closed readiness are
+  now mandatory.
+- Phase 6.1 also makes datasets, bars, strategies, jobs, quality reports, prompts, shadow
+  decisions, alerts, and daily/weekly results individually inspectable. UI copy explains the
+  object lifecycle and separates shadow simulation from future Alpaca paper trading.
+- Local code completion cannot substitute for production-scale statistical evidence, an
+  elapsed continuous-shadow observation period, or VPS-specific TLS/backup/restore proof.
+  Those remain explicit gates, not hidden implementation claims. ADR 0020 and
+  `docs/REVIEW_REMEDIATION_2026-09-05.md` record the boundary.
 
 ## Iteration and commit ledger
 
@@ -2082,7 +2155,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C025 — `Reconcile design handoff safety gaps`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `741d58b`.
 - Date: 2026-09-05 PDT.
 - User intent: reread the supplied design/context review, compare it with the current
   repository, and modify the implementation where the review exposed real gaps.
@@ -2115,7 +2188,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C026 — `Update CI actions to Node 24 runtimes`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `a1cd56c`.
 - Date: 2026-09-05 PDT.
 - User intent: finish the design-review revision with a clean repository-side verification.
 - Scope:
@@ -2134,7 +2207,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C027 — `Pin current Node 24 CI actions`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `06b6853`.
 - Date: 2026-09-05 PDT.
 - User intent: correct the CI dependency update discovered by repository-side validation.
 - Scope:
@@ -2148,24 +2221,76 @@ The Compose stack is currently intended to remain running for local inspection. 
 - Expected global state after commit:
   - CI runs on supported Node 24 action runtimes without an unresolved action reference.
 
+### C028 — `Complete Phase 6.1 review remediation`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-05 PDT.
+- User intent: complete the locally implementable work before Phase 7, make LLM budget
+  controls dollar-only, improve the Phase 6.1 object UI, and apply the independent
+  `06b6853` verification findings.
+- Scope:
+  - Bound validation and shadow adoption to exact static strategy/execution contracts;
+    separated the literal multi-session buy-and-hold research benchmark from one-bar shadow
+    strategies and made all declared signal windows executable.
+  - Removed future execution-volume sizing, aligned ML labels to next-open/future-close over
+    actual bars, purged calibration/selection/final OOS partitions, improved cumulative gate
+    statistics, fixed date-only SEC availability, and required exact evidence quotations.
+  - Persisted the actual shadow candidate → deterministic risk decision → approved plan →
+    virtual order/fill chain, account/risk inputs, daily/weekly reports, and deduplicated
+    operational alerts.
+  - Added dependency-aware workflow leases, production schema-head checks, a transactional
+    ledger outbox with retry/dead-letter state, and a dedicated heartbeat-reporting production
+    worker. Required dependency-health false values now fail readiness.
+  - Added constrained ML + evidence-bound LLM strategy generation with mandatory adversarial
+    critique. Generated output remains an immutable research spec with no execution authority.
+  - Reworked the Control Center into Phase 6.1 drill-down views for datasets/date groups,
+    normalized records, strategies/experiments/trades/validations, shadow lineage/reports/
+    alerts, worker status, workflow jobs, quality reports, and sanitized invocation prompts.
+  - Made LLM budgets estimated-USD only in the UI and enforcement contract, preserved prior
+    same-version workload dollar overrides and current spend, and reduced Steward prompt size
+    with selective snapshots, bounded recent history, and single inclusion of the current
+    message.
+  - Added Alembic revisions `20260905_0022`–`0025`, ADR 0020, an itemized remediation report,
+    updated runbooks/state/README, and a one-command `make release-check` gate.
+- Architecture/decision impact:
+  - Phase 6 production scheduler ownership is separate from the API and shared state is SQL-
+    authoritative. LLM/ML outputs remain research inputs; deterministic gates and explicit
+    human confirmation remain the only path toward broker-free shadow adoption.
+  - Phase 7 remains absent. Completed-bar shadow replay is explicitly not represented as an
+    exchange clock or broker paper fill.
+- Validation:
+  - `make release-check` passed: Flake8, strict mypy across 51 source files, all 96 tests,
+    local authenticated doctor, secret scan, Docker rebuild, PostgreSQL/Redis/MinIO/API doctor,
+    and PostgreSQL Alembic zero-drift check.
+  - A fresh SQLite database upgraded base-to-`20260905_0025`, downgraded to `0021`, and
+    re-upgraded to head successfully. The production Compose file rendered successfully with
+    non-secret verification placeholders.
+  - Final focused budget/Steward/API tests, full `make check`, JavaScript parse, diff check,
+    secret scan, PostgreSQL drift check, and Docker doctor passed after the compatibility
+    adjustment. The existing confirmed workload USD revision remained active at `$10.000001`
+    while its prior token cap became non-authoritative.
+- Expected global state after commit:
+  - All deterministic F01–F11 review counterexamples are repaired and Phase 6.1's locally
+    implementable UI/runtime deliverables are present without a broker path.
+  - Phase 5 statistical promotion still requires adequate production-scale evidence. Phase 6
+    continuous-operation/recovery evidence, and VPS TLS/backup/monitoring gates, still require
+    real elapsed time or infrastructure input before Phase 7 can start.
+
 ## Open work
 
 Ordered near-term work:
 
-1. Complete the persistent Phase 6 candidate → risk decision → approved plan → virtual-order
-   chain using the explicit risk context; the current daily-bar shadow harness is not that
-   complete tactical path.
-2. Run the agreed continuous shadow observation period and prove replay equivalence.
-3. Continue interactive Phase 6 UI review and refinement with the user.
-4. Size remote backfill concurrency and identify equity/options sources with suitable historical
+1. Run the agreed continuous shadow observation period and prove replay equivalence.
+2. Continue interactive Phase 6.1 UI review and refinement with the user.
+3. Size remote backfill concurrency and identify equity/options sources with suitable historical
    coverage, retention, and licensing; do not require those large downloads for local tests.
-5. Add a governed point-in-time macro-event calendar source for the new risk contract.
-6. Extend replay with multi-bar partial fills, cancellation, symbol changes, delistings, and
+4. Add a governed point-in-time macro-event calendar source for tactical intraday strategies.
+5. Extend replay with multi-bar partial fills, cancellation, symbol changes, delistings, and
    later capacity calibration on production-scale data.
-7. Add Redis consumer groups, a transactional outbox, dead-letter replay, provider lag,
-   sequence-gap, reconciliation, and data-quality dashboards.
-8. Build a labeled corpus and measure cross-provider catalyst dedup precision/recall.
-9. Validate the guarded TLS/cloud pipeline from the existing GitHub repository on a selected VPS;
+6. Add operator-driven dead-letter replay, provider lag, sequence-gap, reconciliation, and
+   dedicated collection/research schedules on top of the new outbox/lease foundation.
+7. Build a labeled corpus and measure cross-provider catalyst dedup precision/recall.
+8. Validate the guarded TLS/cloud pipeline from the existing GitHub repository on a selected VPS;
    add backup/restore, monitoring, and notification integrations.
 
 ## Blocked or unresolved decisions

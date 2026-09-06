@@ -107,7 +107,8 @@ def evaluate_candidate(
         reasons.append("GLOBAL_NEW_EXPOSURE_PAUSED")
     if mode not in policy.allowed_execution_modes:
         reasons.append("EXECUTION_MODE_NOT_ALLOWED")
-    if context.catalyst_required and not context.catalyst_verified:
+    tactical = context.evaluation_profile == "tactical_intraday"
+    if tactical and context.catalyst_required and not context.catalyst_verified:
         reasons.append("CATALYST_UNVERIFIED")
     if not context.restriction_status_known:
         reasons.append("RESTRICTION_STATUS_UNKNOWN")
@@ -126,10 +127,11 @@ def evaluate_candidate(
         reasons.append("LIQUIDITY_NOT_CONFIRMED")
     if not context.market_data_healthy:
         reasons.append("MARKET_DATA_UNHEALTHY")
-    if not context.macro_calendar_status_known:
+    if tactical and not context.macro_calendar_status_known:
         reasons.append("MACRO_CALENDAR_STATUS_UNKNOWN")
     if (
-        context.nearest_major_macro_event_at is not None
+        tactical
+        and context.nearest_major_macro_event_at is not None
         and not context.macro_event_strategy_approved
         and abs(context.nearest_major_macro_event_at - evaluated_at)
         <= timedelta(hours=policy.macro_event_blackout_hours)
@@ -143,16 +145,17 @@ def evaluate_candidate(
         reasons.append("DAILY_LOSS_HALT")
     if account.concurrent_planned_risk >= policy.maximum_concurrent_risk_usd:
         reasons.append("PORTFOLIO_RISK_LIMIT")
-    if features.relative_volume < policy.minimum_relative_volume:
-        reasons.append("RELATIVE_VOLUME_TOO_LOW")
-    if not features.vwap_confirmed:
-        reasons.append("VWAP_NOT_CONFIRMED")
-    if not features.opening_range_confirmed:
-        reasons.append("OPENING_RANGE_NOT_CONFIRMED")
-    if not features.sector_compatible:
-        reasons.append("SECTOR_CONFLICT")
-    if features.quote_age_seconds > policy.maximum_quote_age_seconds:
-        reasons.append("STALE_QUOTE")
+    if tactical:
+        if features.relative_volume < policy.minimum_relative_volume:
+            reasons.append("RELATIVE_VOLUME_TOO_LOW")
+        if not features.vwap_confirmed:
+            reasons.append("VWAP_NOT_CONFIRMED")
+        if not features.opening_range_confirmed:
+            reasons.append("OPENING_RANGE_NOT_CONFIRMED")
+        if not features.sector_compatible:
+            reasons.append("SECTOR_CONFLICT")
+        if features.quote_age_seconds > policy.maximum_quote_age_seconds:
+            reasons.append("STALE_QUOTE")
     if evaluated_at > candidate.expires_at:
         reasons.append("SIGNAL_EXPIRED")
 
@@ -193,6 +196,15 @@ def evaluate_candidate(
             "PRICE_CONFIRMATION_OK",
             "RR_OK",
         ]
+        if not tactical:
+            approved_reasons = [
+                "BASELINE_SHADOW_PROFILE",
+                "RESTRICTION_STATUS_VERIFIED",
+                "LIQUIDITY_OK",
+                "MARKET_DATA_HEALTHY",
+                "ACCOUNT_LIMITS_OK",
+                "RR_OK",
+            ]
         if context.catalyst_required:
             approved_reasons.insert(0, "CATALYST_VERIFIED")
         reason_codes = tuple(approved_reasons)

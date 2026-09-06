@@ -17,7 +17,7 @@ from agentic_quant.llm import (
     build_llm_gateway,
 )
 from agentic_quant.llm_store import LLMStore
-from agentic_quant.migrations import upgrade_database
+from agentic_quant.migrations import prepare_database
 
 
 def _git_sha(settings: Settings) -> str:
@@ -36,7 +36,7 @@ def _git_sha(settings: Settings) -> str:
 
 
 def _services(settings: Settings) -> tuple[LLMStore, LLMGateway]:
-    upgrade_database(settings.database_url)
+    prepare_database(settings)
     ledger = EventLedger(settings.database_url)
     store = LLMStore(ledger.engine)
     return store, build_llm_gateway(

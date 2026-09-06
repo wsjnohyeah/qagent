@@ -357,7 +357,7 @@ def test_sec_adapters_normalize_primary_filings_and_company_facts() -> None:
     assert filings.documents[0].published_at == datetime(2026, 9, 3, 16, 5, tzinfo=UTC)
     assert facts.facts[0].tag == "RevenueFromContractWithCustomerExcludingAssessedTax"
     assert facts.facts[0].numeric_value == Decimal("100000000000")
-    assert facts.facts[0].available_from == datetime(2026, 10, 30, tzinfo=UTC)
+    assert facts.facts[0].available_from == facts.provider_received_at
 
 
 def test_fundamentals_pipeline_is_idempotent(tmp_path: Path, settings: Any) -> None:

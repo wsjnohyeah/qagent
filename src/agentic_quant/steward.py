@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any, Callable
 
 from sqlalchemy import Engine, insert, select, update
@@ -12,6 +13,7 @@ from agentic_quant.database import (
     admin_action_requests,
     data_quality_reports,
     ingestion_runs,
+    llm_budget_reservations,
     ml_models,
     research_analyses,
     steward_conversations,
@@ -62,17 +64,43 @@ class SystemSteward:
             context_object_id=context_object_id,
         )
         conversation_id = str(conversation["conversation_id"])
+        history = self.messages(conversation_id=conversation_id, limit=12)
         self._record_message(
             conversation_id=conversation_id,
             role="user",
             content=message,
         )
-        snapshot, allowed_citations = self._snapshot()
-        history = self.messages(conversation_id=conversation_id, limit=20)
+        full_snapshot, _ = self._snapshot()
+        snapshot = self._select_snapshot(
+            full_snapshot,
+            message=message,
+            context_object_type=context_object_type,
+        )
+        allowed_citations = self._citation_ids(snapshot)
+        included_history = [
+            {"role": item["role"], "content": str(item["content"])[-3_000:]}
+            for item in history[-6:]
+        ]
+        request_payload = {
+            "system_snapshot": snapshot,
+            "page_context": {
+                "object_type": context_object_type,
+                "object_id": context_object_id,
+            },
+            "recent_conversation": included_history,
+            "direct_user_request": message,
+            "allowlisted_admin_actions": sorted(ALLOWED_ACTIONS),
+        }
+        input_text = json.dumps(
+            request_payload,
+            ensure_ascii=False,
+            default=str,
+            separators=(",", ":"),
+        )
         invocation = await self.llm_gateway.complete(
             LLMRequest(
                 workload=LLMWorkload.INTERACTIVE_EXPLANATION,
-                prompt_version="system_steward@0.2.0",
+                prompt_version="system_steward@0.3.0",
                 instructions=(
                     "You are the single System Steward for an auditable quantitative "
                     "research and shadow-trading system. Reply in the user's language. "
@@ -89,24 +117,8 @@ class SystemSteward:
                     "and proposed_action (null or object with action_type, target_type, "
                     "target_id, parameters, reason)."
                 ),
-                input_text=json.dumps(
-                    {
-                        "system_snapshot": snapshot,
-                        "page_context": {
-                            "object_type": context_object_type,
-                            "object_id": context_object_id,
-                        },
-                        "recent_conversation": [
-                            {"role": item["role"], "content": item["content"]}
-                            for item in history[-12:]
-                        ],
-                        "direct_user_request": message,
-                        "allowlisted_admin_actions": sorted(ALLOWED_ACTIONS),
-                    },
-                    ensure_ascii=False,
-                    default=str,
-                ),
-                max_output_tokens=1_800,
+                input_text=input_text,
+                max_output_tokens=1_200,
                 timeout_seconds=120,
             ),
             provider_override=provider,
@@ -141,6 +153,13 @@ class SystemSteward:
             ),
             llm_invocation_id=invocation.invocation_id,
         )
+        with self.engine.connect() as connection:
+            actual_cost_microusd = connection.execute(
+                select(llm_budget_reservations.c.actual_cost_microusd).where(
+                    llm_budget_reservations.c.invocation_id
+                    == invocation.invocation_id
+                )
+            ).scalar_one_or_none()
         return {
             "conversation_id": conversation_id,
             "message": stored,
@@ -150,8 +169,19 @@ class SystemSteward:
             "model": invocation.model,
             "provider": invocation.provider,
             "usage": invocation.usage.model_dump(mode="json"),
+            "estimated_cost_usd": (
+                str(Decimal(int(actual_cost_microusd)) / Decimal("1000000"))
+                if actual_cost_microusd is not None
+                else None
+            ),
             "latency_ms": invocation.latency_ms,
             "invocation_id": invocation.invocation_id,
+            "context_manifest": {
+                "included_sections": sorted(snapshot),
+                "history_messages": len(included_history),
+                "input_characters": len(input_text),
+                "current_user_message_sent_once": True,
+            },
         }
 
     def conversations(self, *, limit: int = 100) -> list[dict[str, Any]]:
@@ -255,15 +285,15 @@ class SystemSteward:
 
     def _snapshot(self) -> tuple[dict[str, Any], set[str]]:
         lists = self.objects.lists()
-        strategies = self.objects.strategies(limit=100)
-        deployments = self.shadow.deployments(limit=100)
+        strategies = self.objects.strategies(limit=25)
+        deployments = self.shadow.deployments(limit=25)
         with self.engine.connect() as connection:
             jobs = [
                 dict(row._mapping)
                 for row in connection.execute(
                     select(workflow_jobs)
                     .order_by(workflow_jobs.c.created_at.desc())
-                    .limit(50)
+                    .limit(10)
                 )
             ]
             ingestions = [
@@ -280,7 +310,7 @@ class SystemSteward:
                         ingestion_runs.c.error_code,
                     )
                     .order_by(ingestion_runs.c.requested_at.desc())
-                    .limit(25)
+                    .limit(10)
                 )
             ]
             quality = [
@@ -297,7 +327,7 @@ class SystemSteward:
                         data_quality_reports.c.created_at,
                     )
                     .order_by(data_quality_reports.c.created_at.desc())
-                    .limit(25)
+                    .limit(10)
                 )
             ]
             validations = [
@@ -312,7 +342,7 @@ class SystemSteward:
                         validation_reports.c.created_at,
                     )
                     .order_by(validation_reports.c.created_at.desc())
-                    .limit(25)
+                    .limit(10)
                 )
             ]
             analyses = [
@@ -328,7 +358,7 @@ class SystemSteward:
                         research_analyses.c.created_at,
                     )
                     .order_by(research_analyses.c.created_at.desc())
-                    .limit(25)
+                    .limit(10)
                 )
             ]
             models = [
@@ -347,7 +377,7 @@ class SystemSteward:
                         ml_models.c.created_at,
                     )
                     .order_by(ml_models.c.created_at.desc())
-                    .limit(25)
+                    .limit(10)
                 )
             ]
             pending_actions = [
@@ -363,7 +393,7 @@ class SystemSteward:
                         admin_action_requests.c.created_at,
                     )
                     .order_by(admin_action_requests.c.created_at.desc())
-                    .limit(25)
+                    .limit(10)
                 )
             ]
         citations: set[str] = {"SYSTEM:summary"}
@@ -403,11 +433,36 @@ class SystemSteward:
                 f"DATASET:{dataset['provider']}:{dataset['data_type']}"
             )
             citations.add(dataset["citation_id"])
+        system_status = self.system_status()
+        budget = dict(system_status.get("llm_budget") or {})
+        if budget:
+            current_windows = [
+                {
+                    "scope": item.get("scope"),
+                    "period_kind": item.get("period_kind"),
+                    "consumed_estimated_cost_usd": item.get(
+                        "consumed_estimated_cost_usd"
+                    ),
+                    "reserved_estimated_cost_usd": item.get(
+                        "reserved_estimated_cost_usd"
+                    ),
+                    "estimated_cost_limit_usd": item.get(
+                        "estimated_cost_limit_usd"
+                    ),
+                }
+                for item in budget.get("windows", [])
+                if item.get("scope") == "project"
+            ]
+            system_status["llm_budget"] = {
+                "policy_version": budget.get("policy_version"),
+                "pricing_is_estimate": budget.get("pricing_is_estimate"),
+                "project_windows": current_windows[:2],
+            }
         return (
             {
                 "citation_id": "SYSTEM:summary",
                 "generated_at": datetime.now(UTC),
-                "system_status": self.system_status(),
+                "system_status": system_status,
                 "counts": self.objects.object_summary(),
                 "lists": lists,
                 "data_catalog": catalog,
@@ -429,6 +484,91 @@ class SystemSteward:
             },
             citations,
         )
+
+    @staticmethod
+    def _select_snapshot(
+        snapshot: dict[str, Any],
+        *,
+        message: str,
+        context_object_type: str | None,
+    ) -> dict[str, Any]:
+        """Route only relevant state sections into a stateless provider call."""
+        query = message.casefold()
+        selected = {
+            key: snapshot[key]
+            for key in (
+                "citation_id",
+                "generated_at",
+                "system_status",
+                "counts",
+                "constraints",
+                "pipeline_controls",
+            )
+        }
+        section_terms = {
+            "lists": ("list", "watchlist", "universe", "名单", "股票池"),
+            "data_catalog": ("data", "news", "filing", "raw", "数据", "新闻"),
+            "recent_ingestions": ("pipeline", "ingest", "data", "采集", "管线"),
+            "recent_data_quality": ("quality", "data", "质量", "数据"),
+            "recent_workflow_jobs": ("job", "workflow", "pipeline", "任务", "管线"),
+            "strategies": ("strategy", "backtest", "策略", "回测"),
+            "recent_validations": ("strategy", "validation", "策略", "验证"),
+            "recent_research_analyses": ("analysis", "research", "分析", "研究"),
+            "recent_ml_models": ("model", "ml", "模型"),
+            "shadow_deployments": ("shadow", "trade", "交易", "模拟"),
+            "recent_admin_actions": ("action", "audit", "change", "操作", "审计"),
+        }
+        context_sections = {
+            "list": {"lists"},
+            "raw_object": {"data_catalog", "recent_ingestions", "recent_data_quality"},
+            "dataset": {"data_catalog", "recent_ingestions", "recent_data_quality"},
+            "strategy": {"strategies", "recent_validations"},
+            "validation": {"strategies", "recent_validations"},
+            "shadow": {"shadow_deployments"},
+            "job": {"recent_workflow_jobs"},
+            "quality": {"recent_data_quality"},
+            "analysis": {"recent_research_analyses"},
+            "model": {"recent_ml_models"},
+            "action": {"recent_admin_actions"},
+        }
+        matched = False
+        for section, terms in section_terms.items():
+            context_match = section in context_sections.get(
+                context_object_type or "", set()
+            )
+            if context_match or any(term in query for term in terms):
+                selected[section] = snapshot[section]
+                matched = True
+        if not matched:
+            for section in (
+                "lists",
+                "data_catalog",
+                "strategies",
+                "shadow_deployments",
+                "recent_workflow_jobs",
+                "recent_data_quality",
+                "recent_validations",
+                "recent_research_analyses",
+                "recent_ml_models",
+                "recent_admin_actions",
+            ):
+                value = snapshot[section]
+                selected[section] = value[:3] if isinstance(value, list) else value
+        return selected
+
+    @staticmethod
+    def _citation_ids(value: Any) -> set[str]:
+        found: set[str] = set()
+        if isinstance(value, dict):
+            citation = value.get("citation_id")
+            if isinstance(citation, str):
+                found.add(citation)
+            for child in value.values():
+                found.update(SystemSteward._citation_ids(child))
+        elif isinstance(value, list):
+            for child in value:
+                found.update(SystemSteward._citation_ids(child))
+        return found
 
     @staticmethod
     def _parse_response(output: str) -> dict[str, Any]:

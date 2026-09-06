@@ -1,5 +1,8 @@
 # Design handoff review alignment — 2026-09-05
 
+> Historical review snapshot for commit `741d58b`. The current item-by-item status after the
+> independent `06b6853` verification is in `REVIEW_REMEDIATION_2026-09-05.md`.
+
 ## Scope and authority
 
 The reviewed `README_AGENTIC_QUANT_TRADING_SYSTEM_CONTEXT_TRANSFER.md` is the original

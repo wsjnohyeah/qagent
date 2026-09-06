@@ -443,6 +443,10 @@ class ResearchStore:
                     symbol=report.symbol,
                     timeframe=report.timeframe,
                     strategy_types=list(report.strategy_types),
+                    validation_subject=report.validation_subject,
+                    validated_strategy_spec_ids=report.validated_strategy_spec_ids,
+                    execution_contract_json=report.execution_contract,
+                    execution_contract_sha256=report.execution_contract_sha256,
                     selection_metric=report.selection_metric,
                     train_bars=report.train_bars,
                     test_bars=report.test_bars,
@@ -463,6 +467,7 @@ class ResearchStore:
                     created_at=report.created_at,
                 )
             )
+
             connection.execute(
                 insert(validation_folds),
                 [
@@ -483,6 +488,17 @@ class ResearchStore:
                     }
                     for fold in report.folds
                 ],
+            )
+
+    def strategy_trial_count(self, *, symbol: str, timeframe: str) -> int:
+        """Count every distinct executable spec tried for this market contract."""
+        with self.engine.connect() as connection:
+            return int(
+                connection.execute(
+                    select(func.count(func.distinct(experiment_runs.c.strategy_spec_id)))
+                    .where(experiment_runs.c.symbol == symbol.upper())
+                    .where(experiment_runs.c.timeframe == timeframe)
+                ).scalar_one()
             )
 
     def recent_experiments(self, *, limit: int = 50) -> list[dict[str, Any]]:

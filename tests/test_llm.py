@@ -306,7 +306,22 @@ def test_gateway_routes_and_persists_immutable_audit(
         "llm_routing_revisions": 0,
     }
     assert store.recent(limit=1)[0]["output_preview"] == "completed by openai"
-    assert store.get(invocation.invocation_id)["output_text"] == "completed by openai"
+    stored = store.get(invocation.invocation_id)
+    assert stored is not None
+    assert stored["output_text"] == "completed by openai"
+    assert stored["request_envelope"] == {
+        "model": "gpt-5.6-sol",
+        "instructions": "Use only supplied evidence.",
+        "input": "Evidence packet IDs: packet-1, packet-2",
+        "max_output_tokens": 4096,
+        "reasoning": {"effort": "high"},
+        "store": False,
+        "temperature": None,
+        "top_p": None,
+        "audit_note": (
+            "Application payload after credential redaction; HTTP headers omitted"
+        ),
+    }
     events = ledger.by_correlation_id(invocation.invocation_id)
     assert events[-1]["event_type"] == "llm.invocation.recorded.v1"
     assert "input_text" not in events[-1]["payload"]

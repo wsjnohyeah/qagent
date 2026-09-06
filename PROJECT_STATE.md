@@ -2,10 +2,12 @@
 
 ## Current
 
-- Implemented foundations through Phase 6 pass bounded-development validation, including
-  Phase 1B open-session checks and the authenticated Control Center/System Steward/shadow
-  baseline. Phase 5 statistical promotion and Phase 6 continuous-operation/full runtime
-  lineage exit criteria have not yet passed.
+- Implemented foundations through Phase 6.1 pass bounded-development validation, including
+  Phase 1B open-session checks, corrected point-in-time research/ML contracts, constrained
+  ML + LLM strategy generation, and the authenticated Control Center/System Steward/shadow
+  decision lineage. Phase 5 statistical promotion and Phase 6 continuous-operation exit
+  criteria have not passed because bounded development data and elapsed observation time are
+  intentionally insufficient.
 - Local-lite uses Python 3.12, a project-local `uv`, SQLite, and filesystem object storage.
 - The Control API, single-admin object-centric web console, persistent System Steward,
   append-only event ledger, deterministic risk engine, and shadow runtime exist.
@@ -33,7 +35,8 @@
 - Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
   experiment runs, backtest trades, corporate actions, historical universe membership,
   feature parity checks, and walk-forward reports are stored through Alembic revision
-  `20260905_0021`.
+  `20260905_0025`, including exact validation contracts, shadow risk lineage, workflow
+  leases, and the event outbox.
 - The Phase 3 runner provides buy-and-hold, long/cash momentum, and long/cash
   mean-reversion baselines with next-bar execution, commission, slippage, metrics, hashes,
   and append-only completion events.
@@ -64,17 +67,20 @@
   CSRF protection. Its default view is a dedicated full-page System Steward workspace with
   persistent conversations and safely rendered Markdown; the remaining navigation exposes
   overview, lists, data, strategy, shadow, pipeline, model, activity, and code-change objects.
-- Overview reads the persistent LLM budget ledger and shows current daily/monthly token and
-  estimated-cost consumption, reservations, limits, and provider/workload utilization.
-- Each workload's daily token and estimated-cost limit is editable through an immutable,
-  explicit-confirmation revision; changes preserve rather than reset current-period usage,
-  and the YAML project daily limit remains a hard cap.
+- Overview reads the persistent LLM budget ledger and shows current daily/monthly estimated-
+  USD consumption, reservations, limits, and provider/workload utilization.
+- Each workload's daily estimated-USD limit is editable through an immutable, explicit-
+  confirmation revision. There is no operator token ceiling. Changes preserve current-period
+  spend and immediately recalculate percentage usage against the new cap; the YAML project
+  daily limit remains a hard cap.
 - One System Steward reads a bounded current-state snapshot, returns validated object
   citations, persists conversations, and can propose allowlisted admin actions. It cannot
   execute them; a separate exact confirmation is required.
-- The persistent broker-free shadow runtime admits only gate-eligible, human-confirmed
-  strategies, processes newly stored bars idempotently, and records modeled virtual
-  signal/order/fill events, cash, and P&L. No broker adapter exists.
+- The persistent broker-free shadow runtime admits only the exact static strategy ID and
+  execution contract covered by a gate-eligible, human-confirmed validation certificate.
+  It records candidate → deterministic risk decision → approved plan → modeled virtual
+  order/fill lineage, cash, and P&L. Research-only buy-and-hold cannot be shadow-adopted.
+  No broker adapter exists.
 - The global new-exposure pause is enforced inside the shadow tick boundary, so a manually
   confirmed tick cannot bypass the scheduler's kill switch.
 - Tactical risk evaluation now requires explicit, auditable catalyst, restriction-status,
@@ -83,18 +89,24 @@
   strategy is separately approved for that event. Candidate/snapshot mismatches and future
   signal/feature timestamps also reject.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; local and remote `main`
-  were synchronized at `a3447ec` before this review iteration.
+  were synchronized at `06b6853` before this remediation iteration.
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases.
-- Current reviewed baseline passes 89 tests, authenticated local and PostgreSQL/MinIO/Redis
-  doctors, JavaScript parsing, a fresh migration roundtrip, zero PostgreSQL schema drift, and
-  one bounded live Meta System Steward snapshot/citation call.
-- Phase 4 adds point-in-time document retrieval, `research_analysis@0.1.0`, exact citation
-  validation, deterministic abstention, atomic LLM budget reservations, and Decision
+- Current reviewed baseline passes 96 tests, authenticated local and PostgreSQL/MinIO/Redis
+  doctors, JavaScript parsing, schema migration checks, zero PostgreSQL schema drift, and the
+  repository secret scan. Paid providers were not called during this remediation.
+- Phase 4 adds point-in-time document retrieval, `research_analysis@0.2.0`, exact quotation
+  validation, deterministic abstention, atomic estimated-USD reservations, and Decision
   Inspector graph `ai_infrastructure_graph@0.1.0`.
 - Phase 5 builds point-in-time labels, compares logistic and boosted-stump models with
-  embargoed walk-forward splits, evaluates Platt calibration on a later OOS holdout, measures
-  PSI drift, stores JSON artifacts/forecasts, and enforces human-only champion promotion.
+  embargoed walk-forward splits, separates purged OOS calibration, model-selection, and final
+  holdout partitions, measures PSI drift, stores JSON artifacts/forecasts, and enforces human-
+  only champion promotion. Labels match the executable next-open-to-future-close contract
+  and advance by actual bars rather than sparse snapshot rows.
+- A constrained generator combines a matching feature snapshot, linked ML forecast, and
+  evidence-bound analysis, then requires adversarial LLM critique before compiling an
+  immutable research-only strategy DSL. It cannot emit code, size exposure, adopt a strategy,
+  or place an order.
 - Bounded local ML evidence remains `CANDIDATE`; no model or strategy has been promoted.
 - `.env` explicitly selects `APP_ENV=development`; development daily/news backfills are
   capped at 120 days and one-minute backfills at 7 days by default. The active scope is
@@ -102,20 +114,26 @@
 - Production settings fail unless authentication is enabled with a hash-only password, new
   exposure starts paused, and automatic migration is disabled. The production local raw
   archive is mounted on a persistent named volume.
+- Production Compose separates the authenticated API from a persistent shadow worker with a
+  SQL heartbeat. Workflow jobs have dependency-aware leases and ownership checks; ledger
+  events have a retryable SQL outbox with stable event IDs and dead-letter visibility.
+- Phase 6.1 data pages support dataset-specific drill-down, date grouping, pagination,
+  normalized-object views, and collapsed raw payloads. Strategy pages explain provenance and
+  expose exact validation, experiments, trades, and shadow state. Pipeline jobs and quality
+  reports are individually inspectable.
 
 ## Next
 
-1. Complete the persistent Phase 6 candidate → risk decision → approved plan → virtual-order
-   chain; the current shadow baseline reuses research signals and cost accounting but is not
-   yet the full tactical risk workflow.
-2. Run and document the agreed continuous shadow observation period and replay comparison.
-3. Continue interactive Phase 6 UI review with the user after the full-page steward redesign.
-4. Size remote long-horizon backfill concurrency and storage; continue using bounded samples for local
+1. Run and document the agreed continuous shadow observation period and replay comparison.
+2. Continue interactive Phase 6.1 UI review with real operator navigation and refine labels
+   where the user identifies remaining ambiguity.
+3. Size remote long-horizon backfill concurrency and storage; continue using bounded samples for local
    correctness verification.
-5. Extend fill realism with multi-bar partial fills, order cancellation, quote-derived
+4. Extend fill realism with multi-bar partial fills, order cancellation, quote-derived
    rather than configured spread, and symbol-change/delisting replay.
-6. Add Redis consumer groups, durable offsets, a transactional outbox, and dead-letter replay.
-7. Select TLS/reverse proxy, backup, monitoring, and secret delivery before remotely exposing
+5. Add operator-driven dead-letter replay and dedicated collection/research worker schedules;
+   the durable outbox and lease contracts are now implemented.
+6. Select TLS/reverse proxy, backup, monitoring, and secret delivery before remotely exposing
    the already-authenticated Control Center.
 
 ## Blocked
@@ -156,3 +174,5 @@
 - ADR 0017: use one authenticated System Steward with object context and explicit,
   expiring, single-use confirmation for sensitive operations.
 - ADR 0018: run adopted strategies in a persistent, idempotent, broker-free shadow runtime.
+- ADR 0019: require explicit external risk context and enforce pause at the shadow boundary.
+- ADR 0020: bind exact research/execution contracts and use recoverable Phase 6 operations.

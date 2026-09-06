@@ -3,8 +3,9 @@
 ## Scope
 
 The gateway connects research-plane workloads to OpenAI GPT-5.6 Sol and Meta Muse Spark
-1.3. It does not generate strategies yet, receive broker credentials, approve risk, promote
-candidates, or submit orders.
+1.3. The constrained generator may use it to propose and critique a research-only strategy
+specification. It never receives broker credentials, approves risk, promotes candidates, or
+submits orders.
 
 ## Configuration
 
@@ -37,19 +38,20 @@ The model panel shows provider readiness, model/cost/reasoning metadata, and the
 provider for every workload. Saving the complete workload map creates an immutable SQL
 routing revision; it never edits the base YAML or exposes a credential.
 
-`Auto` in Research Copilot follows the effective `interactive_explanation` route. Selecting
-OpenAI or Meta overrides the provider for only that chat invocation. Conversation history is
-kept in the current browser session and capped at 20 prior turns/100,000 characters per call.
-Each call is capped at 1,200 output tokens and 120 seconds. The invocation audit stores the
-output and hashes the input rather than storing raw user messages.
+`Auto` in System Steward follows the effective `interactive_explanation` route. Selecting
+OpenAI or Meta overrides the provider for only that invocation. Conversations are durable,
+but each request sends only the six most recent prior messages, truncated to 3,000 characters
+each, plus a question-relevant system snapshot. The current message is included once. Each
+call is capped at 1,200 output tokens and 120 seconds. The invocation audit stores output,
+hashes, and a sanitized request envelope for the administrator's prompt inspector.
 
-These unauthenticated paid/write controls return HTTP 403 outside `APP_ENV=development`.
-Do not expose them remotely until authentication, authorization, rate limits, budgets, CSRF
-protection, and session auditing are implemented.
+All paid and write controls require the authenticated administrator session and CSRF token.
+Development-only provider probes and bounded ingestion helpers remain disabled outside
+`APP_ENV=development`.
 
-The tracked YAML is the base configuration. Only the newest database revision whose
-`base_routing_sha256` matches that YAML is active. A reviewed YAML change therefore retires
-prior runtime overrides automatically. Inspect the current and historical states with:
+The tracked model-routing YAML is the base configuration. Only the newest database revision
+whose `base_routing_sha256` matches that YAML is active. A reviewed routing change therefore
+retires prior runtime overrides automatically. Inspect the current and historical states with:
 
 ```sh
 curl -fsS 'http://127.0.0.1:8000/v1/llm/routes'
@@ -90,7 +92,8 @@ The development-only HTTP probes are `POST /v1/llm/probe/openai` and
 - Every completed or failed attempt is appended to `llm_invocations` and the event ledger.
 - Audit records retain source Git SHA, route/prompt version, provider/model, request/routing
   hashes, response ID, token usage, latency, status, and output.
-- Raw input and instructions are represented by hashes rather than copied into the audit row.
+- A sanitized request envelope is retained for administrator inspection. Provider keys,
+  authorization headers, cookies, and other credentials are never captured.
 - Automatic cross-provider fallback is disabled; changing provider is an explicit route
   decision so behavior and cost cannot drift silently.
 - Global route changes are immutable revisions. A chat provider override is explicit in the
@@ -100,10 +103,11 @@ The development-only HTTP probes are `POST /v1/llm/probe/openai` and
 
 ## Budget breaker
 
-`configs/llm_budget.yaml` defines versioned project, provider, and workload ceilings. Before
-an upstream call, the gateway atomically reserves a conservative UTF-8-byte-based input
-ceiling plus the maximum output tokens. A successful call settles actual token usage and an
-estimated USD amount; a provider failure releases the reservation.
+`configs/llm_budget.yaml` defines versioned project, provider, and workload estimated-USD
+ceilings. Before an upstream call, the gateway estimates the maximum cost from a conservative
+UTF-8-byte input estimate plus maximum output length and reserves that dollar amount
+atomically. A successful call settles actual token telemetry into an estimated USD amount; a
+provider failure releases the reservation. There is intentionally no operator token limit.
 
 Inspect the current windows without making a paid call:
 
@@ -116,8 +120,10 @@ contracts before production. Exhaustion returns HTTP 429 before the provider is 
 
 The authenticated Overview page can create a complete daily workload-limit revision through
 `PUT /v1/llm/budget`. The change remains pending until the administrator confirms its exact
-preview. Confirmed revisions are immutable, are valid only for their matching YAML base hash,
-and update the existing UTC-day window without resetting consumed or reserved capacity.
+preview. Confirmed revisions are immutable and valid for their matching versioned YAML base;
+material YAML changes must bump that version. A same-version removal of the retired token cap
+therefore preserves existing USD overrides. Revision activation updates the existing UTC-day
+window without resetting consumed or reserved capacity.
 Project and provider caps remain the outer hard limits.
 
 ## Evidence-bound research analysis
@@ -132,9 +138,10 @@ curl -fsS -X POST http://127.0.0.1:8000/v1/intelligence/analyze \
   -d '{"symbol":"AAPL","as_of":"2026-09-03T20:00:00Z","feature_snapshot_id":"REPLACE_ME","horizon":"5 trading days"}'
 ```
 
-The output must validate against `research_analysis@0.1.0`. Claims may cite only exact IDs
-from the supplied bundle. Unknown citations or malformed JSON produce a durable `REJECTED`
-record; insufficient independent evidence produces `ABSTAINED` without an LLM call.
+The output must validate against the current `research_analysis` schema. Factual claims may
+cite only exact IDs and must reproduce exact source quotations. Unknown citations,
+unsupported claims, or malformed JSON produce a durable `REJECTED` record; insufficient
+independent evidence produces `ABSTAINED` without an LLM call.
 
 Inspect recent records and provenance:
 

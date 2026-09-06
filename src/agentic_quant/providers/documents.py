@@ -408,6 +408,17 @@ class SecEdgarProvider(_HttpJsonProvider):
                             else None
                         )
                         filed_at = _utc_timestamp(str(filed))
+                        # SEC company-facts often provides only a calendar date in
+                        # ``filed``. Midnight UTC is not evidence that the fact was
+                        # publicly available then. Without an acceptance timestamp the
+                        # first defensible availability is this ingestion receipt.
+                        filed_has_intraday_precision = not bool(
+                            re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(filed).strip())
+                        )
+                        available_from = (
+                            accepted_at
+                            or (filed_at if filed_has_intraday_precision else received_at)
+                        )
                         try:
                             numeric_value = Decimal(value_text)
                         except InvalidOperation:
@@ -438,7 +449,7 @@ class SecEdgarProvider(_HttpJsonProvider):
                                 accession_number=item.get("accn"),
                                 numeric_value=numeric_value,
                                 value_text=value_text,
-                                available_from=accepted_at or filed_at,
+                                available_from=available_from,
                                 raw_object_id="PENDING_ARCHIVE",
                                 ingested_at=received_at,
                             )

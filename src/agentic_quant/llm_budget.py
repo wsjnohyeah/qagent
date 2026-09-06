@@ -41,7 +41,6 @@ class LLMTokenPricing(FrozenModel):
 
 
 class LLMBudgetLimit(FrozenModel):
-    max_tokens: int = Field(gt=0)
     max_estimated_cost_usd: Decimal = Field(gt=0)
 
 
@@ -158,7 +157,9 @@ class LLMBudgetManager:
                         scope=scope,
                         period_kind=period_kind,
                         period_start=period_start,
-                        token_limit=limit.max_tokens,
+                        # Token totals remain diagnostic telemetry. Zero means
+                        # there is intentionally no operator token ceiling.
+                        token_limit=0,
                         cost_limit_microusd=self._usd_to_microusd(
                             limit.max_estimated_cost_usd
                         ),
@@ -174,7 +175,7 @@ class LLMBudgetManager:
                     .where(llm_budget_windows.c.window_key == window_key)
                     .values(
                         policy_version=effective_policy.version,
-                        token_limit=limit.max_tokens,
+                        token_limit=0,
                         cost_limit_microusd=self._usd_to_microusd(
                             limit.max_estimated_cost_usd
                         ),
@@ -186,12 +187,6 @@ class LLMBudgetManager:
                     .where(
                         and_(
                             llm_budget_windows.c.window_key == window_key,
-                            (
-                                llm_budget_windows.c.reserved_tokens
-                                + llm_budget_windows.c.consumed_tokens
-                                + reserved_tokens
-                                <= llm_budget_windows.c.token_limit
-                            ),
                             (
                                 llm_budget_windows.c.reserved_cost_microusd
                                 + llm_budget_windows.c.consumed_cost_microusd
@@ -346,6 +341,7 @@ class LLMBudgetManager:
             item["consumed_estimated_cost_usd"] = str(
                 self._microusd_to_usd(item.pop("consumed_cost_microusd"))
             )
+            item.pop("token_limit", None)
         return {
             "base_policy_version": self.policy.version,
             "base_policy_sha256": self.base_policy_sha256,
@@ -442,7 +438,7 @@ class LLMBudgetManager:
                     .where(llm_budget_windows.c.window_key == window_key)
                     .values(
                         policy_version=policy_version,
-                        token_limit=limit.max_tokens,
+                        token_limit=0,
                         cost_limit_microusd=self._usd_to_microusd(
                             limit.max_estimated_cost_usd
                         ),
@@ -472,8 +468,11 @@ class LLMBudgetManager:
         statement = (
             select(llm_budget_revisions)
             .where(
-                llm_budget_revisions.c.base_policy_sha256
-                == self.base_policy_sha256
+                # A same-version schema/UI refinement may remove a retired field
+                # (the former token ceiling) without discarding the operator's USD
+                # limits. Material base-policy changes must bump the policy version.
+                llm_budget_revisions.c.base_policy_version
+                == self.policy.version
             )
             .order_by(
                 llm_budget_revisions.c.created_at.desc(),
@@ -596,10 +595,6 @@ class LLMBudgetManager:
         }
         project_cap = self.policy.limits.project_daily
         for workload, limit in limits.items():
-            if limit.max_tokens > project_cap.max_tokens:
-                raise ValueError(
-                    f"{workload.value} token limit exceeds the project daily hard cap"
-                )
             if limit.max_estimated_cost_usd > project_cap.max_estimated_cost_usd:
                 raise ValueError(
                     f"{workload.value} cost limit exceeds the project daily hard cap"

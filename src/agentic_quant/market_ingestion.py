@@ -154,9 +154,5 @@ class MarketDataIngestionService:
                 ),
             },
         )
-        self.ledger.append(event)
-        self.publisher.publish(
-            event_type=event.event_type,
-            event_id=event.event_id,
-            envelope_json=event.model_dump_json(),
-        )
+        if self.ledger.append(event):
+            self.ledger.deliver(event, self.publisher)

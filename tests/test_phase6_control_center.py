@@ -5,12 +5,16 @@ from decimal import Decimal
 
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import insert, select
+from sqlalchemy import insert, select, update
 
 from agentic_quant.api import create_app
 from agentic_quant.config import Settings
-from agentic_quant.database import admin_sessions, validation_reports
-from agentic_quant.domain import StockBar
+from agentic_quant.database import (
+    admin_sessions,
+    shadow_deployments,
+    validation_reports,
+)
+from agentic_quant.domain import BacktestCostModel, StockBar
 from agentic_quant.domain import LLMUsage
 from agentic_quant.ids import uuid7
 from agentic_quant.ledger import EventLedger
@@ -18,8 +22,13 @@ from agentic_quant.llm import LLMProviderResult, LLMRequest, ResponsesAPIProvide
 from agentic_quant.market_calendar import MarketSessionClock
 from agentic_quant.market_store import MarketDataStore
 from agentic_quant.migrations import upgrade_database
-from agentic_quant.research import default_strategy_spec, research_code_sha256
-from agentic_quant.research_store import ResearchStore
+from agentic_quant.research import (
+    BACKTEST_ENGINE_VERSION,
+    FEATURE_SET_VERSION,
+    default_strategy_spec,
+    research_code_sha256,
+)
+from agentic_quant.research_store import ResearchStore, _canonical_hash
 
 
 def test_admin_session_is_required_and_csrf_protects_writes(
@@ -196,14 +205,13 @@ def test_workload_budget_update_requires_confirmation(settings: Settings) -> Non
         initial = client.get("/v1/llm/budget").json()
         limits = initial["limits"]["workload_daily"]
         over_cap = {name: dict(limit) for name, limit in limits.items()}
-        over_cap["interactive_explanation"]["max_tokens"] = 500_001
+        over_cap["interactive_explanation"]["max_estimated_cost_usd"] = "20.01"
         rejected = client.put(
             "/v1/llm/budget",
             json={"workload_daily": over_cap, "reason": "Unsafe oversized limit"},
         )
         assert rejected.status_code == 422
         limits["interactive_explanation"] = {
-            "max_tokens": 125_000,
             "max_estimated_cost_usd": "4.00",
         }
         proposed = client.put(
@@ -229,7 +237,6 @@ def test_workload_budget_update_requires_confirmation(settings: Settings) -> Non
         assert effective["limits"]["workload_daily"][
             "interactive_explanation"
         ] == {
-            "max_tokens": 125_000,
             "max_estimated_cost_usd": "4.00",
         }
         history = client.get("/v1/llm/budget/history").json()
@@ -280,7 +287,7 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
     research = ResearchStore(ledger.engine)
     market = MarketDataStore(ledger.engine)
     clock = MarketSessionClock("XNYS")
-    sessions = clock.calendar.sessions_in_range("2025-01-02", "2025-04-30")[:31]
+    sessions = clock.calendar.sessions_in_range("2025-01-02", "2025-04-30")[:32]
     bars: list[StockBar] = []
     price = Decimal("100")
     for index, session in enumerate(sessions):
@@ -307,7 +314,7 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
             )
         )
         price = close
-    market.insert_bars(tuple(bars[:-1]), raw_object_id="TEST_RAW")
+    market.insert_bars(tuple(bars[:-2]), raw_object_id="TEST_RAW")
     spec = research.record_strategy_spec(
         default_strategy_spec(
             "momentum",
@@ -316,6 +323,13 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
         )
     )
     report_id = uuid7()
+    execution_contract = {
+        "subject": "static_strategy",
+        "strategy_spec_ids": {"momentum": spec.strategy_spec_id},
+        "feature_set_version": FEATURE_SET_VERSION,
+        "backtest_engine_version": BACKTEST_ENGINE_VERSION,
+        "cost_model": BacktestCostModel().model_dump(mode="json"),
+    }
     with ledger.engine.begin() as connection:
         connection.execute(
             insert(validation_reports).values(
@@ -323,6 +337,10 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
                 symbol="AAPL",
                 timeframe="1Day",
                 strategy_types=["momentum"],
+                validation_subject="static_strategy",
+                validated_strategy_spec_ids={"momentum": spec.strategy_spec_id},
+                execution_contract_json=execution_contract,
+                execution_contract_sha256=_canonical_hash(execution_contract),
                 selection_metric="sharpe_ratio",
                 train_bars=20,
                 test_bars=5,
@@ -338,6 +356,29 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
             )
         )
     with TestClient(create_app(settings)) as client:
+        altered = research.record_strategy_spec(
+            spec.model_copy(
+                update={
+                    "strategy_spec_id": uuid7(),
+                    "name": "untested-momentum-variant",
+                    "version": "99.0.0+untested",
+                    "parameters": {**spec.parameters, "minimum_return": "0.80"},
+                    "code_sha256": "f" * 64,
+                }
+            )
+        )
+        untested = client.post(
+            "/v1/actions",
+            json={
+                "action_type": "strategy.adopt",
+                "target_type": "strategy",
+                "target_id": altered.strategy_spec_id,
+                "parameters": {"validation_report_id": report_id},
+                "reason": "This exact variant was never validated",
+            },
+        )
+        assert untested.status_code == 422
+        assert "exact strategy" in untested.json()["detail"]
         adoption = client.post(
             "/v1/actions",
             json={
@@ -370,7 +411,7 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
             f"/v1/actions/{deployment['action_request_id']}/confirm",
             json={"confirmation_phrase": deployment["confirmation_phrase"]},
         ).status_code == 200
-        market.insert_bars((bars[-1],), raw_object_id="TEST_RAW")
+        market.insert_bars((bars[-2],), raw_object_id="TEST_RAW")
         pause = client.post(
             "/v1/commands/pause",
             json={"reason": "Verify the global pause blocks manual shadow ticks"},
@@ -422,7 +463,57 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
         events = client.get("/v1/shadow/events").json()
         assert events
         assert all(event["payload_json"]["virtual_only"] is True for event in events)
-        first_count = len(events)
+        assert {event["event_type"] for event in events} >= {
+            "SIGNAL_CANDIDATE",
+            "RISK_DECISION",
+            "TRADE_PLAN",
+            "VIRTUAL_ORDER",
+            "VIRTUAL_FILL",
+        }
+        decisions = client.get("/v1/shadow/decisions").json()
+        assert decisions[0]["verdict"] == "APPROVE"
+
+        active = client.get("/v1/shadow/deployments").json()[0]
+        with ledger.engine.begin() as connection:
+            connection.execute(
+                update(shadow_deployments)
+                .where(
+                    shadow_deployments.c.shadow_deployment_id
+                    == active["shadow_deployment_id"]
+                )
+                .values(cash_balance=Decimal("30000"))
+            )
+        market.insert_bars((bars[-1],), raw_object_id="TEST_RAW")
+        floor_tick = client.post(
+            "/v1/actions",
+            json={
+                "action_type": "shadow.tick",
+                "target_type": "runtime",
+                "target_id": "shadow",
+                "parameters": {},
+                "reason": "Verify account floor at the actual order boundary",
+            },
+        ).json()
+        assert client.post(
+            f"/v1/actions/{floor_tick['action_request_id']}/confirm",
+            json={"confirmation_phrase": floor_tick["confirmation_phrase"]},
+        ).status_code == 200
+        after_floor = client.get("/v1/shadow/events").json()
+        assert sum(
+            event["event_type"] == "VIRTUAL_FILL" for event in after_floor
+        ) == sum(event["event_type"] == "VIRTUAL_FILL" for event in events)
+        rejected = client.get("/v1/shadow/decisions").json()[0]
+        assert rejected["verdict"] == "REJECT"
+        assert "ACCOUNT_FLOOR_REACHED" in rejected["reason_codes_json"]
+        assert rejected["trade_plan_id"] is None
+        reports = client.get("/v1/shadow/reports?period=daily").json()
+        assert sum(item["candidate_count"] for item in reports) == 2
+        assert sum(item["approved_count"] for item in reports) == 1
+        assert sum(item["rejected_count"] for item in reports) == 1
+        assert sum(item["round_trip_count"] for item in reports) == 1
+        alerts = client.get("/v1/shadow/alerts").json()
+        assert alerts[0]["kind"] == "RISK_REJECTION"
+        assert alerts[0]["occurrence_count"] == 1
         second_tick = client.post(
             "/v1/actions",
             json={
@@ -437,7 +528,7 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
             f"/v1/actions/{second_tick['action_request_id']}/confirm",
             json={"confirmation_phrase": second_tick["confirmation_phrase"]},
         ).status_code == 200
-        assert len(client.get("/v1/shadow/events").json()) == first_count
+        assert len(client.get("/v1/shadow/events").json()) == len(after_floor)
 
 
 def test_system_steward_cites_snapshot_and_only_proposes_actions(
@@ -476,6 +567,7 @@ def test_system_steward_cites_snapshot_and_only_proposes_actions(
         )
         assert result.status_code == 200
         payload = result.json()
+        assert payload["estimated_cost_usd"] == "0.000025"
         assert payload["citations"] == ["LIST:focus-watchlist"]
         assert payload["proposed_action"]["status"] == "PENDING_CONFIRMATION"
         assert client.get("/v1/lists/focus-watchlist").json()["members"] == []

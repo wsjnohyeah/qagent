@@ -66,4 +66,15 @@ until curl -fsS http://127.0.0.1:8000/health/ready >/dev/null 2>&1; do
   fi
   sleep 2
 done
-echo "Deployment health gate passed. New exposure remains paused."
+
+attempt=0
+until docker compose --env-file .env.production -f compose.production.yml exec -T worker \
+  python -m agentic_quant.worker --healthcheck >/dev/null 2>&1; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -ge 30 ]; then
+    docker compose --env-file .env.production -f compose.production.yml logs --tail=200 worker
+    exit 1
+  fi
+  sleep 2
+done
+echo "API and worker health gates passed. New exposure remains paused."

@@ -220,11 +220,7 @@ class DocumentIngestionService:
     def _publish(self, event: EventEnvelope) -> None:
         if not self.ledger.append(event):
             return
-        self.publisher.publish(
-            event_type=event.event_type,
-            event_id=event.event_id,
-            envelope_json=event.model_dump_json(),
-        )
+        self.ledger.deliver(event, self.publisher)
 
 
 class FundamentalsIngestionService:
@@ -277,11 +273,7 @@ class FundamentalsIngestionService:
                     payload=normalized.model_dump(mode="json"),
                 )
                 if self.ledger.append(event):
-                    self.publisher.publish(
-                        event_type=event.event_type,
-                        event_id=event.event_id,
-                        envelope_json=event.model_dump_json(),
-                    )
+                    self.ledger.deliver(event, self.publisher)
         except Exception as exc:
             self.market_store.finish_run(
                 ingestion_run_id=run_id,

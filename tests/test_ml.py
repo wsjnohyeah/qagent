@@ -19,11 +19,13 @@ from agentic_quant.domain import (
     ResearchAnalysisRecord,
     ResearchAnalysisStatus,
     ResearchRecommendation,
+    StockBar,
     StructuredResearchAnalysis,
 )
 from agentic_quant.ids import uuid7
 from agentic_quant.intelligence import IntelligenceStore, ResearchEvidenceRetriever
 from agentic_quant.ledger import EventLedger
+from agentic_quant.market_store import MarketDataStore
 from agentic_quant.migrations import upgrade_database
 from agentic_quant.ml import (
     MLDatasetBuilder,
@@ -44,6 +46,7 @@ def _seed_snapshots(
     count: int = 96,
 ) -> tuple[PointInTimeFeatureSnapshot, ...]:
     snapshots = []
+    bars = []
     closes = [100.0 + 4.0 * math.sin(index / 3.0) + index * 0.04 for index in range(count)]
     for index, close in enumerate(closes):
         as_of = datetime(2025, 1, 1, tzinfo=UTC) + timedelta(days=index)
@@ -94,6 +97,27 @@ def _seed_snapshots(
             )
         )
         snapshots.append(snapshot)
+        bars.append(
+            StockBar(
+                bar_id=f"bar-{index}",
+                symbol="AAPL",
+                timeframe="1Day",
+                event_time=as_of - timedelta(hours=7),
+                available_from=as_of,
+                open=Decimal(str(close - 0.25)),
+                high=Decimal(str(close + 0.5)),
+                low=Decimal(str(close - 0.5)),
+                close=Decimal(str(close)),
+                volume=1_000_000,
+                trade_count=10_000,
+                vwap=Decimal(str(close)),
+                source="fixture",
+                feed="test",
+                raw_object_id="TEST_RAW",
+                ingested_at=as_of,
+            )
+        )
+    MarketDataStore(store.engine).insert_bars(tuple(bars), raw_object_id="TEST_RAW")
     return tuple(snapshots)
 
 
@@ -131,7 +155,7 @@ def test_walk_forward_training_calibration_drift_and_forecast(
         "boosted_stumps",
     }
     assert all(
-        model.metrics["calibrated_holdout"]["sample_count"] > 0
+        model.metrics["calibrated_final_holdout"]["sample_count"] > 0
         for model in result.models
     )
     assert all("maximum_psi" in model.drift for model in result.models)
@@ -167,13 +191,13 @@ def test_walk_forward_training_calibration_drift_and_forecast(
         symbol="AAPL",
         as_of=snapshots[-1].as_of,
         status=ResearchAnalysisStatus.ABSTAINED,
-        schema_version="research_analysis@0.1.0",
+        schema_version="research_analysis@0.2.0",
         prompt_version="test@1",
         evidence_bundle=evidence,
         feature_snapshot_id=snapshots[-1].feature_snapshot_id,
         forecast_id=forecast.forecast_id,
         analysis=StructuredResearchAnalysis(
-            schema_version="research_analysis@0.1.0",
+            schema_version="research_analysis@0.2.0",
             symbol="AAPL",
             as_of=snapshots[-1].as_of,
             horizon="1 bar",
@@ -208,6 +232,78 @@ def test_walk_forward_training_calibration_drift_and_forecast(
             approved_by="human-reviewer",
             reason="test promotion",
         )
+
+
+def test_ml_labels_follow_executable_bars_and_ignore_sparse_snapshot_spacing(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    research = ResearchStore(ledger.engine)
+    snapshots = _seed_snapshots(research, count=40)
+    policy = load_ml_policy(ROOT / "configs/ml_policy.yaml")
+    bars = research.load_bars(
+        symbol="AAPL",
+        timeframe="1Day",
+        as_of_end=snapshots[-1].as_of,
+    )
+    dense = MLDatasetBuilder(research).build(
+        symbol="AAPL",
+        timeframe="1Day",
+        as_of_end=snapshots[-1].as_of,
+        horizon_bars=1,
+        policy=policy,
+    )
+    assert dense[0].forward_return == pytest.approx(
+        float(bars[1].close / bars[1].open - Decimal("1"))
+    )
+    assert dense[0].label_available_from == bars[1].available_from
+
+    class SparseSnapshotStore:
+        engine = research.engine
+
+        @staticmethod
+        def feature_snapshots_for_training(**_kwargs):  # type: ignore[no-untyped-def]
+            return snapshots[::3]
+
+        @staticmethod
+        def load_bars(**_kwargs):  # type: ignore[no-untyped-def]
+            return bars
+
+    sparse = MLDatasetBuilder(SparseSnapshotStore()).build(  # type: ignore[arg-type]
+        symbol="AAPL",
+        timeframe="1Day",
+        as_of_end=snapshots[-1].as_of,
+        horizon_bars=1,
+        policy=policy,
+    )
+    assert sparse[0].label_available_from == bars[1].available_from
+    assert sparse[1].label_available_from == bars[4].available_from
+
+
+def test_ml_oos_partitions_purge_label_overlap(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    research = ResearchStore(EventLedger(settings.database_url).engine)
+    snapshots = _seed_snapshots(research, count=60)
+    policy = load_ml_policy(ROOT / "configs/ml_policy.yaml")
+    examples = MLDatasetBuilder(research).build(
+        symbol="AAPL",
+        timeframe="1Day",
+        as_of_end=snapshots[-1].as_of,
+        horizon_bars=5,
+        policy=policy,
+    )
+    calibration_end, selection_start, selection_end, evaluation_start = (
+        WalkForwardMLTrainer._purged_oos_partitions(examples)
+    )
+    assert examples[calibration_end - 1].label_available_from <= examples[
+        selection_start
+    ].as_of
+    assert examples[selection_end - 1].label_available_from <= examples[
+        evaluation_start
+    ].as_of
 
 
 def test_registry_requires_ml_gate_and_human_approval(

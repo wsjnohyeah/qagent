@@ -17,6 +17,7 @@ from agentic_quant.research import (
     ResearchBacktester,
     default_strategy_spec,
     research_code_sha256,
+    strategy_signal_action,
 )
 from agentic_quant.research_store import ResearchStore
 
@@ -211,6 +212,34 @@ def test_research_store_refuses_future_market_bar(settings) -> None:  # type: ig
         raise AssertionError("Future-unavailable bars must not enter a feature snapshot")
 
 
+def test_strategy_window_parameters_select_the_declared_features() -> None:
+    values = {
+        "close": Decimal("101"),
+        "return_1": Decimal("-0.01"),
+        "return_5": Decimal("0.05"),
+        "sma_2": Decimal("102"),
+        "sma_20": Decimal("100"),
+    }
+    assert strategy_signal_action(
+        strategy_type="momentum",
+        parameters={
+            "return_window": 5,
+            "slow_window": 20,
+            "minimum_return": "0",
+        },
+        values=values,
+    ).value == "long"
+    assert strategy_signal_action(
+        strategy_type="momentum",
+        parameters={
+            "return_window": 1,
+            "slow_window": 2,
+            "minimum_return": "0",
+        },
+        values=values,
+    ).value == "flat"
+
+
 def test_event_driven_entry_respects_volume_participation_cap(
     settings,  # type: ignore[no-untyped-def]
 ) -> None:
@@ -243,3 +272,33 @@ def test_event_driven_entry_respects_volume_participation_cap(
 
     assert result.trades[0].quantity == 5
     assert result.trades[0].exit_quantity == Decimal("5")
+
+    # The order is submitted at the next open, before that bar's final volume is
+    # knowable. Changing only the execution bar's future volume must not resize it.
+    alternate = tuple(
+        bar.model_copy(
+            update={
+                "bar_id": uuid7(),
+                "symbol": "MSFT",
+                "volume": 1_000_000 if index == 21 else bar.volume,
+            }
+        )
+        for index, bar in enumerate(bars)
+    )
+    market_store.insert_bars(alternate, raw_object_id="TEST_RAW")
+    alternate_result = ResearchBacktester(research_store, ledger).run(
+        spec=spec,
+        symbol="MSFT",
+        as_of_start=alternate[20].available_from,
+        as_of_end=alternate[-1].available_from,
+        code_git_sha="test-git-sha",
+        cost_model=BacktestCostModel(
+            commission_per_share=Decimal("0"),
+            minimum_commission_per_order=Decimal("0"),
+            slippage_bps_per_side=Decimal("0"),
+            half_spread_bps_per_side=Decimal("0"),
+            market_impact_bps_per_side=Decimal("0"),
+            max_volume_participation=Decimal("0.05"),
+        ),
+    )
+    assert alternate_result.trades[0].quantity == result.trades[0].quantity

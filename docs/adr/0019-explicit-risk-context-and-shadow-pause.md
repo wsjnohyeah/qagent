@@ -14,9 +14,8 @@ slice inferred several of those facts and recorded only the final decision. Sepa
 background shadow scheduler honored the global pause, but a manually confirmed `shadow.tick`
 could call the runtime directly while paused.
 
-The current Phase 6 runtime is still a broker-free daily-bar validation harness. It does not
-yet claim to be the complete candidate-to-risk-to-approved-plan runtime described by the
-target architecture.
+The initial Phase 6 runtime was a broker-free daily-bar validation harness without the
+complete candidate-to-risk-to-approved-plan persistence described by the target architecture.
 
 ## Decision
 
@@ -41,5 +40,5 @@ target architecture.
 - The global pause is defense in depth rather than only a scheduler convention.
 - A future macro-calendar adapter must resolve and persist the nearest qualifying event before
   a runtime candidate can pass the gate.
-- The next runtime milestone must replace the current daily-bar shadow harness with persisted
-  candidate, risk-decision, approved-plan, and virtual-order lineage using this same contract.
+- The follow-up implementation now persists candidate, risk-decision, approved-plan, and
+  virtual-order lineage using this same contract; see ADR 0020.

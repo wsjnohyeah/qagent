@@ -16,7 +16,7 @@ from agentic_quant.document_store import DocumentStore
 from agentic_quant.event_bus import NullEventPublisher, RedisStreamPublisher
 from agentic_quant.ledger import EventLedger
 from agentic_quant.market_store import MarketDataStore
-from agentic_quant.migrations import upgrade_database
+from agentic_quant.migrations import prepare_database
 from agentic_quant.providers.base import CorporateFactsRequest, DocumentFetchRequest
 from agentic_quant.providers.documents import (
     AlpacaNewsProvider,
@@ -34,7 +34,7 @@ def _parse_time(value: str) -> datetime:
 
 
 def _runtime(settings: Settings) -> tuple[Any, MarketDataStore, DocumentStore, EventLedger, Any]:
-    upgrade_database(settings.database_url)
+    prepare_database(settings)
     ledger = EventLedger(settings.database_url)
     market_store = MarketDataStore(ledger.engine)
     document_store = DocumentStore(ledger.engine)

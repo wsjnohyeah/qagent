@@ -13,7 +13,7 @@ from agentic_quant.domain import BacktestCostModel, BacktestResult, StockBar
 from agentic_quant.ledger import EventLedger
 from agentic_quant.market_calendar import MarketSessionClock
 from agentic_quant.market_store import MarketDataStore
-from agentic_quant.migrations import upgrade_database
+from agentic_quant.migrations import prepare_database
 from agentic_quant.ml import (
     MLDatasetBuilder,
     MLPredictor,
@@ -133,7 +133,7 @@ def _summary(result: BacktestResult) -> dict[str, object]:
 
 
 def _services(settings: Settings) -> tuple[MarketDataStore, ResearchStore, ResearchBacktester]:
-    upgrade_database(settings.database_url)
+    prepare_database(settings)
     ledger = EventLedger(settings.database_url)
     research_store = ResearchStore(ledger.engine)
     return (
@@ -327,7 +327,7 @@ def _parity(settings: Settings, args: argparse.Namespace) -> None:
 
 
 def _quality(settings: Settings, args: argparse.Namespace) -> None:
-    upgrade_database(settings.database_url)
+    prepare_database(settings)
     ledger = EventLedger(settings.database_url)
     store = ResearchStore(ledger.engine)
     bars = store.load_bars(
@@ -351,7 +351,7 @@ def _quality(settings: Settings, args: argparse.Namespace) -> None:
 
 
 def _import_reference(settings: Settings, args: argparse.Namespace) -> None:
-    upgrade_database(settings.database_url)
+    prepare_database(settings)
     payload = json.loads(Path(args.path).read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("Reference import root must be an object")
@@ -364,7 +364,7 @@ def _import_reference(settings: Settings, args: argparse.Namespace) -> None:
 
 
 def _ml_train(settings: Settings, args: argparse.Namespace) -> None:
-    upgrade_database(settings.database_url)
+    prepare_database(settings)
     ledger = EventLedger(settings.database_url)
     research_store = ResearchStore(ledger.engine)
     snapshots = research_store.feature_snapshots_for_training(
@@ -397,7 +397,7 @@ def _ml_train(settings: Settings, args: argparse.Namespace) -> None:
 
 
 def _ml_models(settings: Settings, args: argparse.Namespace) -> None:
-    upgrade_database(settings.database_url)
+    prepare_database(settings)
     ledger = EventLedger(settings.database_url)
     print(
         json.dumps(
@@ -409,7 +409,7 @@ def _ml_models(settings: Settings, args: argparse.Namespace) -> None:
 
 
 def _ml_forecast(settings: Settings, args: argparse.Namespace) -> None:
-    upgrade_database(settings.database_url)
+    prepare_database(settings)
     ledger = EventLedger(settings.database_url)
     ml_store = MLStore(ledger.engine, ledger)
     model = ml_store.model(args.model_id)

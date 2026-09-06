@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from statistics import mean, stdev
+from typing import Any
 
 from agentic_quant.backtest_engine import EventDrivenPortfolio
 from agentic_quant.data_quality import MarketDataQualityService
@@ -33,8 +34,8 @@ from agentic_quant.reference_data import ReferenceDataStore
 from agentic_quant.research_store import ResearchStore, _canonical_hash
 
 
-FEATURE_SET_VERSION = "price_event_pit@0.2.0"
-BACKTEST_ENGINE_VERSION = "event_driven_portfolio@0.1.0"
+FEATURE_SET_VERSION = "price_event_pit@0.3.0"
+BACKTEST_ENGINE_VERSION = "event_driven_portfolio@0.2.0"
 SUPPORTED_STRATEGIES = ("buy_and_hold", "momentum", "mean_reversion")
 _MINIMUM_HISTORY = 21
 _ZERO = Decimal("0")
@@ -47,6 +48,41 @@ def _average(values: list[Decimal]) -> Decimal:
 
 def _decimal(value: float | int | Decimal) -> Decimal:
     return Decimal(str(round(float(value), 10)))
+
+
+def strategy_signal_action(
+    *,
+    strategy_type: str,
+    parameters: dict[str, Any],
+    values: dict[str, Any],
+) -> SignalAction:
+    """Evaluate the versioned baseline signal contract shared by replay and shadow."""
+    if strategy_type == "buy_and_hold":
+        return SignalAction.LONG
+    close = Decimal(str(values["close"]))
+    return_window = int(parameters["return_window"])
+    slow_window = int(parameters["slow_window"])
+    if not 1 <= return_window < _MINIMUM_HISTORY:
+        raise ValueError("return_window must be between 1 and 20 bars")
+    if not 1 <= slow_window <= _MINIMUM_HISTORY:
+        raise ValueError("slow_window must be between 1 and 21 bars")
+    return_value = Decimal(str(values[f"return_{return_window}"]))
+    slow_average = Decimal(str(values[f"sma_{slow_window}"]))
+    if strategy_type == "momentum":
+        minimum_return = Decimal(str(parameters["minimum_return"]))
+        return (
+            SignalAction.LONG
+            if return_value > minimum_return and close > slow_average
+            else SignalAction.FLAT
+        )
+    if strategy_type == "mean_reversion":
+        maximum_return = Decimal(str(parameters["maximum_return"]))
+        return (
+            SignalAction.LONG
+            if return_value < maximum_return and close < slow_average
+            else SignalAction.FLAT
+        )
+    raise ValueError(f"Unsupported daily strategy: {strategy_type}")
 
 
 class PointInTimeFeatureBuilder:
@@ -113,10 +149,6 @@ class PointInTimeFeatureBuilder:
         )
         values: dict[str, Decimal | int | bool | str | None] = {
             "close": closes[-1],
-            "return_1": closes[-1] / closes[-2] - _ONE,
-            "return_5": closes[-1] / closes[-6] - _ONE,
-            "sma_5": _average(closes[-5:]),
-            "sma_20": _average(closes[-20:]),
             "distance_sma_20": closes[-1] / _average(closes[-20:]) - _ONE,
             "realized_vol_20": variance.sqrt() * periods_per_year.sqrt(),
             "volume_ratio_20": volumes[-1] / _average(volumes[-20:]),
@@ -139,6 +171,13 @@ class PointInTimeFeatureBuilder:
             ),
             "bar_count": len(eligible),
         }
+        # Windowed features are materialized explicitly so an immutable strategy's
+        # declared parameters select real inputs instead of silently falling back to
+        # hard-coded return_5/sma_20 values.
+        for window in range(1, _MINIMUM_HISTORY):
+            values[f"return_{window}"] = closes[-1] / closes[-(window + 1)] - _ONE
+        for window in range(1, _MINIMUM_HISTORY + 1):
+            values[f"sma_{window}"] = _average(closes[-window:])
         data_hash = _canonical_hash(
             {
                 "evidence_hash": evidence.evidence_hash,
@@ -256,11 +295,18 @@ def default_strategy_spec(
     elif strategy_type == "mean_reversion":
         parameters = {"return_window": 5, "slow_window": 20, "maximum_return": "-0.02"}
     else:
-        parameters = {"minimum_history": _MINIMUM_HISTORY}
+        parameters = {
+            "minimum_history": _MINIMUM_HISTORY,
+            "holding_period": "backtest_end",
+        }
     return StrategySpec(
         strategy_spec_id=uuid7(),
-        name=f"phase3b_{strategy_type}_{timeframe.casefold()}",
-        version=f"0.2.0+{code_sha256[:12]}",
+        name=(
+            f"phase3b_buy_and_hold_benchmark_{timeframe.casefold()}"
+            if strategy_type == "buy_and_hold"
+            else f"phase3b_{strategy_type}_{timeframe.casefold()}"
+        ),
+        version=f"0.3.0+{code_sha256[:12]}",
         strategy_type=strategy_type,
         timeframe=timeframe,
         feature_set_version=FEATURE_SET_VERSION,
@@ -268,6 +314,11 @@ def default_strategy_spec(
         data_requirements={
             "minimum_bars": _MINIMUM_HISTORY + 1,
             "execution": "signal available at t; earliest fill is next bar open",
+            "holding_period": (
+                "backtest_end" if strategy_type == "buy_and_hold" else "one_bar"
+            ),
+            "entry_liquidity_source": "latest completed decision bar volume",
+            "shadow_deployable": strategy_type != "buy_and_hold",
             "point_in_time_required": True,
             "backtest_engine": BACKTEST_ENGINE_VERSION,
             "corporate_action_accounting": ["split", "cash_dividend"],
@@ -466,16 +517,11 @@ class ResearchBacktester:
         spec: StrategySpec,
         snapshot: PointInTimeFeatureSnapshot,
     ) -> bool:
-        close = Decimal(str(snapshot.values["close"]))
-        sma_20 = Decimal(str(snapshot.values["sma_20"]))
-        return_5 = Decimal(str(snapshot.values["return_5"]))
-        if spec.strategy_type == "momentum":
-            minimum_return = Decimal(str(spec.parameters["minimum_return"]))
-            return return_5 > minimum_return and close > sma_20
-        if spec.strategy_type == "mean_reversion":
-            maximum_return = Decimal(str(spec.parameters["maximum_return"]))
-            return return_5 < maximum_return and close < sma_20
-        raise ValueError(f"Unsupported daily strategy: {spec.strategy_type}")
+        return strategy_signal_action(
+            strategy_type=spec.strategy_type,
+            parameters=spec.parameters,
+            values=dict(snapshot.values),
+        ) == SignalAction.LONG
 
     def _run_daily_strategy(
         self,
@@ -523,7 +569,9 @@ class ResearchBacktester:
                     signal_as_of=snapshot.as_of,
                     entry_time=entry_time,
                     raw_price=execution_bar.open,
-                    available_volume=execution_bar.volume,
+                    # A next-open order cannot use the execution bar's final volume.
+                    # The latest completed decision bar is the newest knowable input.
+                    available_volume=bars[index].volume,
                     feature_snapshot_id=snapshot.feature_snapshot_id,
                 )
             exit_time = self._bar_close_time(execution_bar)
@@ -563,6 +611,7 @@ class ResearchBacktester:
         tuple[Decimal, ...],
         tuple[BacktestPortfolioEvent, ...],
     ]:
+        """Run the non-deployable benchmark with its literal buy-and-hold contract."""
         entry_bar = bars[decision_index + 1]
         exit_bar = bars[-1]
         portfolio = EventDrivenPortfolio(
@@ -582,7 +631,8 @@ class ResearchBacktester:
             signal_as_of=snapshot.as_of,
             entry_time=self._bar_open_time(entry_bar),
             raw_price=entry_bar.open,
-            available_volume=entry_bar.volume,
+            # Sizing at the next open may only use the completed decision bar.
+            available_volume=bars[decision_index].volume,
             feature_snapshot_id=snapshot.feature_snapshot_id,
         )
         if not entered:
@@ -596,12 +646,7 @@ class ResearchBacktester:
                 start_index=action_index,
                 cutoff=close_time,
             )
-            curve.append(
-                portfolio.mark(
-                    event_time=close_time,
-                    raw_price=bar.close,
-                )
-            )
+            curve.append(portfolio.mark(event_time=close_time, raw_price=bar.close))
         trade = portfolio.exit_long(
             exit_time=self._bar_close_time(exit_bar),
             raw_price=exit_bar.close,
