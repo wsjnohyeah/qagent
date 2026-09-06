@@ -1,6 +1,6 @@
 # Agentic Quant Trading System
 
-A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains the completed **Phase 0** safety skeleton, the verified read-only **Phase 1** market-data foundation, the completed **Phase 2** event/document pipeline, a **Phase 3D** bias-aware research validation gate, the completed **Phase 4** evidence-bound LLM analyst, the completed **Phase 5** ML/registry tooling, and the **Phase 6** authenticated System Steward, object explorer, and persistent shadow runtime.
+A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains implemented and locally verified foundations through **Phase 6**: safety controls, read-only market data, event/document ingestion, point-in-time research, evidence-bound LLM analysis, ML/registry tooling, an authenticated System Steward, an object explorer, and a persistent broker-free shadow baseline. Implementation completeness is not the same as passing statistical or production-operational exit criteria; see `docs/REVIEW_ALIGNMENT_2026-09-05.md`.
 
 > Live-money execution is not implemented. `live` is not a valid mode, and setting `LIVE_TRADING_ENABLED=true` makes startup fail.
 
@@ -164,6 +164,14 @@ in Compose. The red pause operation is distinct from liquidation; this build has
 liquidation or live broker endpoint.
 
 Risk values are versioned in `configs/risk_policy.yaml`. Restricted securities are effective-dated in `configs/restricted_securities.yaml`. Changes require tests and review.
+
+Each tactical risk evaluation also requires an explicit `RiskEvaluationContext`: catalyst
+status where applicable, known restriction status, liquidity confirmation, market-data
+health, macro-calendar status, the nearest major macro event, and duplicate-order state.
+Unknown or unsafe facts reject deterministically. The current policy applies a 24-hour major
+macro-event blackout unless a separately validated event strategy is explicitly approved.
+Candidate/snapshot ID mismatches and signal or feature timestamps later than evaluation time
+also reject.
 
 Long-horizon market backfills use `quant-alpaca resumable-backfill`; completed date
 partitions are skipped on rerun. `quant-research quality` persists a dataset audit, and
@@ -469,6 +477,9 @@ in `docs/DEPLOYMENT.md`.
 
 ## GitHub and cloud path
 
+The source repository is [wsjnohyeah/qagent](https://github.com/wsjnohyeah/qagent), with
+local `main` tracking `origin/main`.
+
 When a GitHub remote is supplied, the intended flow is:
 
 ```text
@@ -477,4 +488,7 @@ feature branch -> pull request -> CI -> merge main
 -> readiness gate -> new exposure remains paused
 ```
 
-The cloud agent must follow `docs/DEPLOYMENT.md`. It must not invent missing credentials, expose PostgreSQL/Redis publicly, or bypass TLS/authentication. Cloud deployment is intentionally not attempted from this local bootstrap because no repository, VPS, domain, or secret channel has been selected yet.
+The cloud agent must follow `docs/DEPLOYMENT.md`. It must not invent missing credentials,
+expose PostgreSQL/Redis publicly, or bypass TLS/authentication. Cloud deployment has not yet
+been attempted because the VPS, domain/TLS approach, production secret channel, backup, and
+monitoring choices are still unresolved.

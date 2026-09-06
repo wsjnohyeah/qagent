@@ -32,6 +32,18 @@ def test_vertical_slice_records_complete_lineage(settings: Settings) -> None:
         "trade.plan.approved.v1",
         "order.state.changed.v1",
     ]
+    risk_event = ledger.by_correlation_id(result.correlation_id)[3]
+    assert risk_event["payload"]["evaluation_context"] == {
+        "catalyst_required": True,
+        "catalyst_verified": True,
+        "restriction_status_known": True,
+        "liquidity_confirmed": True,
+        "market_data_healthy": True,
+        "macro_calendar_status_known": True,
+        "nearest_major_macro_event_at": None,
+        "macro_event_strategy_approved": False,
+        "duplicate_order_detected": False,
+    }
 
 
 def test_api_health_and_demo(settings: Settings) -> None:

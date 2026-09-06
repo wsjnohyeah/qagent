@@ -11,6 +11,7 @@ from agentic_quant.domain import (
     Direction,
     EventEnvelope,
     FeatureSnapshot,
+    RiskEvaluationContext,
     ShadowOrder,
     SignalCandidate,
     TradePlan,
@@ -113,6 +114,14 @@ def run_synthetic_vertical_slice(
 
     policy = RiskPolicy.from_yaml(settings.risk_policy_path)
     restrictions = RestrictionRegistry.from_yaml(settings.restricted_securities_path)
+    risk_context = RiskEvaluationContext(
+        catalyst_required=True,
+        catalyst_verified=True,
+        restriction_status_known=True,
+        liquidity_confirmed=True,
+        market_data_healthy=True,
+        macro_calendar_status_known=True,
+    )
     decision = evaluate_candidate(
         candidate=candidate,
         features=features,
@@ -124,6 +133,7 @@ def run_synthetic_vertical_slice(
         mode=settings.trading_mode,
         policy=policy,
         restrictions=restrictions,
+        context=risk_context,
         evaluated_at=now,
         new_exposure_paused=new_exposure_paused,
     )
@@ -133,7 +143,10 @@ def run_synthetic_vertical_slice(
         producer="risk-worker",
         correlation_id=correlation_id,
         causation_id=candidate_event.event_id,
-        payload=decision.model_dump(mode="json"),
+        payload={
+            **decision.model_dump(mode="json"),
+            "evaluation_context": risk_context.model_dump(mode="json"),
+        },
     )
     ledger.append(decision_event)
 
@@ -186,4 +199,3 @@ def run_synthetic_vertical_slice(
         trade_plan=plan,
         shadow_order=order,
     )
-

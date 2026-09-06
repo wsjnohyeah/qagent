@@ -438,7 +438,14 @@ class ShadowRuntime:
         with self.engine.connect() as connection:
             return [dict(row._mapping) for row in connection.execute(statement)]
 
-    async def tick(self, *, trigger: str = "manual") -> dict[str, Any]:
+    async def tick(
+        self,
+        *,
+        trigger: str = "manual",
+        new_exposure_paused: bool,
+    ) -> dict[str, Any]:
+        if new_exposure_paused:
+            raise ValueError("Global new-exposure pause blocks shadow processing")
         async with self._tick_lock:
             return self._tick_locked(trigger=trigger)
 

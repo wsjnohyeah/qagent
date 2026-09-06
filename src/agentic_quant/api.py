@@ -289,6 +289,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def set_runtime_paused(paused: bool) -> None:
         application.state.new_exposure_paused = paused
 
+    def runtime_is_paused() -> bool:
+        return bool(
+            getattr(
+                application.state,
+                "new_exposure_paused",
+                app_settings.global_new_exposure_paused,
+            )
+        )
+
     def activate_routes(
         raw_routes: dict[str, str],
         reason: str,
@@ -347,6 +356,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         shadow,
         code_changes,
         runtime_callback=set_runtime_paused,
+        runtime_paused_callback=runtime_is_paused,
         route_callback=activate_routes,
         budget_preview_callback=preview_budget,
         budget_update_callback=activate_budget,
@@ -423,7 +433,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     and actions.pipeline_enabled("shadow")
                 ):
                     try:
-                        await shadow.tick(trigger="scheduler")
+                        await shadow.tick(
+                            trigger="scheduler",
+                            new_exposure_paused=application.state.new_exposure_paused,
+                        )
                     except Exception:
                         pass
                 try:

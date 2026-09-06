@@ -1,7 +1,8 @@
-version: risk_policy@0.1.0
+version: risk_policy@0.2.0
 minimum_reward_risk: "1.50"
 minimum_relative_volume: "2.00"
 maximum_quote_age_seconds: 15
+macro_event_blackout_hours: 24
 initial_risk_fraction: "0.0025"
 maximum_trade_risk_usd: "130.00"
 maximum_concurrent_risk_usd: "780.00"
@@ -12,4 +13,3 @@ maximum_equity_quantity: 250
 allowed_execution_modes:
   - shadow
   - paper
-

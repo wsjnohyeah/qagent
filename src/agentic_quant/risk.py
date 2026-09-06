@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, ROUND_FLOOR
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agentic_quant.config import TradingMode
 from agentic_quant.domain import (
@@ -13,6 +13,7 @@ from agentic_quant.domain import (
     Direction,
     FeatureSnapshot,
     RiskDecision,
+    RiskEvaluationContext,
     SignalCandidate,
     Verdict,
 )
@@ -23,21 +24,28 @@ class RiskPolicy(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     version: str
-    minimum_reward_risk: Decimal
-    minimum_relative_volume: Decimal
-    maximum_quote_age_seconds: int
-    initial_risk_fraction: Decimal
-    maximum_trade_risk_usd: Decimal
-    maximum_concurrent_risk_usd: Decimal
-    daily_loss_stop_usd: Decimal
-    account_floor_usd: Decimal
-    slippage_buffer_per_share_usd: Decimal
-    maximum_equity_quantity: int
-    allowed_execution_modes: tuple[TradingMode, ...]
+    minimum_reward_risk: Decimal = Field(gt=0)
+    minimum_relative_volume: Decimal = Field(ge=0)
+    maximum_quote_age_seconds: int = Field(ge=0)
+    macro_event_blackout_hours: int = Field(ge=0, le=168)
+    initial_risk_fraction: Decimal = Field(gt=0, le=1)
+    maximum_trade_risk_usd: Decimal = Field(gt=0)
+    maximum_concurrent_risk_usd: Decimal = Field(gt=0)
+    daily_loss_stop_usd: Decimal = Field(gt=0)
+    account_floor_usd: Decimal = Field(gt=0)
+    slippage_buffer_per_share_usd: Decimal = Field(ge=0)
+    maximum_equity_quantity: int = Field(ge=1)
+    allowed_execution_modes: tuple[TradingMode, ...] = Field(min_length=1)
 
     @classmethod
     def from_yaml(cls, path: Path) -> RiskPolicy:
         return cls.model_validate(yaml.safe_load(path.read_text()))
+
+    @model_validator(mode="after")
+    def limits_are_coherent(self) -> RiskPolicy:
+        if self.maximum_trade_risk_usd > self.maximum_concurrent_risk_usd:
+            raise ValueError("Per-trade risk cannot exceed concurrent portfolio risk")
+        return self
 
 
 class Restriction(BaseModel):
@@ -87,17 +95,48 @@ def evaluate_candidate(
     mode: TradingMode,
     policy: RiskPolicy,
     restrictions: RestrictionRegistry,
+    context: RiskEvaluationContext,
     evaluated_at: datetime,
     new_exposure_paused: bool,
 ) -> RiskDecision:
     """Deterministically approve or reject a candidate; no LLM input is authoritative here."""
+    if evaluated_at.tzinfo is None:
+        raise ValueError("Risk evaluation timestamp must be timezone-aware")
     reasons: list[str] = []
     if new_exposure_paused:
         reasons.append("GLOBAL_NEW_EXPOSURE_PAUSED")
     if mode not in policy.allowed_execution_modes:
         reasons.append("EXECUTION_MODE_NOT_ALLOWED")
-    if restrictions.is_restricted(candidate.symbol, evaluated_at.date()):
+    if context.catalyst_required and not context.catalyst_verified:
+        reasons.append("CATALYST_UNVERIFIED")
+    if not context.restriction_status_known:
+        reasons.append("RESTRICTION_STATUS_UNKNOWN")
+    if candidate.feature_snapshot_id != features.feature_snapshot_id:
+        reasons.append("FEATURE_SNAPSHOT_MISMATCH")
+    if candidate.as_of > evaluated_at:
+        reasons.append("SIGNAL_FROM_FUTURE")
+    if features.as_of > evaluated_at:
+        reasons.append("FEATURE_FROM_FUTURE")
+    if restrictions.is_restricted(
+        candidate.symbol,
+        evaluated_at.astimezone(UTC).date(),
+    ):
         reasons.append("SECURITY_RESTRICTED")
+    if not context.liquidity_confirmed:
+        reasons.append("LIQUIDITY_NOT_CONFIRMED")
+    if not context.market_data_healthy:
+        reasons.append("MARKET_DATA_UNHEALTHY")
+    if not context.macro_calendar_status_known:
+        reasons.append("MACRO_CALENDAR_STATUS_UNKNOWN")
+    if (
+        context.nearest_major_macro_event_at is not None
+        and not context.macro_event_strategy_approved
+        and abs(context.nearest_major_macro_event_at - evaluated_at)
+        <= timedelta(hours=policy.macro_event_blackout_hours)
+    ):
+        reasons.append("MACRO_EVENT_BLACKOUT")
+    if context.duplicate_order_detected:
+        reasons.append("DUPLICATE_ORDER")
     if account.equity <= policy.account_floor_usd:
         reasons.append("ACCOUNT_FLOOR_REACHED")
     if account.daily_pnl <= -policy.daily_loss_stop_usd:
@@ -146,7 +185,17 @@ def evaluate_candidate(
     verdict = Verdict.REJECT if reasons else Verdict.APPROVE
     reason_codes: tuple[str, ...]
     if verdict == Verdict.APPROVE:
-        reason_codes = ("CATALYST_VERIFIED", "LIQUIDITY_OK", "PRICE_CONFIRMATION_OK", "RR_OK")
+        approved_reasons = [
+            "RESTRICTION_STATUS_VERIFIED",
+            "LIQUIDITY_OK",
+            "MARKET_DATA_HEALTHY",
+            "MACRO_CALENDAR_VERIFIED",
+            "PRICE_CONFIRMATION_OK",
+            "RR_OK",
+        ]
+        if context.catalyst_required:
+            approved_reasons.insert(0, "CATALYST_VERIFIED")
+        reason_codes = tuple(approved_reasons)
         approved_risk = (per_share_risk * quantity).quantize(Decimal("0.01"))
     else:
         reason_codes = tuple(dict.fromkeys(reasons))

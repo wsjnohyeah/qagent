@@ -50,6 +50,7 @@ class AdminActionService:
         code_changes: CodeChangeStore,
         *,
         runtime_callback: Callable[[bool], None],
+        runtime_paused_callback: Callable[[], bool],
         route_callback: Callable[
             [dict[str, str], str, str], dict[str, Any]
         ],
@@ -65,6 +66,7 @@ class AdminActionService:
         self.shadow = shadow
         self.code_changes = code_changes
         self.runtime_callback = runtime_callback
+        self.runtime_paused_callback = runtime_paused_callback
         self.route_callback = route_callback
         self.budget_preview_callback = budget_preview_callback
         self.budget_update_callback = budget_update_callback
@@ -485,7 +487,10 @@ class AdminActionService:
         if action_type == "shadow.tick":
             if not self.pipeline_enabled("shadow"):
                 raise ValueError("Shadow pipeline is paused")
-            return await self.shadow.tick(trigger=f"admin:{confirmed_by}")
+            return await self.shadow.tick(
+                trigger=f"admin:{confirmed_by}",
+                new_exposure_paused=self.runtime_paused_callback(),
+            )
         if action_type == "code_change.open":
             return self.code_changes.open(
                 request=str(parameters["request"]),

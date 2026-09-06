@@ -2,8 +2,10 @@
 
 ## Current
 
-- Phases 0–6 are complete in bounded-development form, including Phase 1B open-session
-  validation and the Phase 6 authenticated Control Center/System Steward/shadow runtime.
+- Implemented foundations through Phase 6 pass bounded-development validation, including
+  Phase 1B open-session checks and the authenticated Control Center/System Steward/shadow
+  baseline. Phase 5 statistical promotion and Phase 6 continuous-operation/full runtime
+  lineage exit criteria have not yet passed.
 - Local-lite uses Python 3.12, a project-local `uv`, SQLite, and filesystem object storage.
 - The Control API, single-admin object-centric web console, persistent System Steward,
   append-only event ledger, deterministic risk engine, and shadow runtime exist.
@@ -73,7 +75,16 @@
 - The persistent broker-free shadow runtime admits only gate-eligible, human-confirmed
   strategies, processes newly stored bars idempotently, and records modeled virtual
   signal/order/fill events, cash, and P&L. No broker adapter exists.
-- Current Phase 6 validation passes 80 tests, authenticated local and PostgreSQL/MinIO/Redis
+- The global new-exposure pause is enforced inside the shadow tick boundary, so a manually
+  confirmed tick cannot bypass the scheduler's kill switch.
+- Tactical risk evaluation now requires explicit, auditable catalyst, restriction-status,
+  liquidity, data-health, macro-calendar, and duplicate-order facts. Unknown/unsafe facts
+  reject, and `risk_policy@0.2.0` applies a 24-hour major-macro-event blackout unless the
+  strategy is separately approved for that event. Candidate/snapshot mismatches and future
+  signal/feature timestamps also reject.
+- GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; local and remote `main`
+  were synchronized at `a3447ec` before this review iteration.
+- Current reviewed baseline passes 89 tests, authenticated local and PostgreSQL/MinIO/Redis
   doctors, JavaScript parsing, a fresh migration roundtrip, zero PostgreSQL schema drift, and
   one bounded live Meta System Steward snapshot/citation call.
 - Phase 4 adds point-in-time document retrieval, `research_analysis@0.1.0`, exact citation
@@ -92,19 +103,23 @@
 
 ## Next
 
-1. Continue interactive Phase 6 UI review with the user after the full-page steward redesign,
-   refining visual and interaction details without changing security/runtime contracts.
-2. Size remote long-horizon backfill concurrency and storage; continue using bounded samples for local
+1. Complete the persistent Phase 6 candidate → risk decision → approved plan → virtual-order
+   chain; the current shadow baseline reuses research signals and cost accounting but is not
+   yet the full tactical risk workflow.
+2. Run and document the agreed continuous shadow observation period and replay comparison.
+3. Continue interactive Phase 6 UI review with the user after the full-page steward redesign.
+4. Size remote long-horizon backfill concurrency and storage; continue using bounded samples for local
    correctness verification.
-3. Extend fill realism with multi-bar partial fills, order cancellation, quote-derived
+5. Extend fill realism with multi-bar partial fills, order cancellation, quote-derived
    rather than configured spread, and symbol-change/delisting replay.
-4. Add Redis consumer groups, durable offsets, a transactional outbox, and dead-letter replay.
-5. Select TLS/reverse proxy, backup, monitoring, and secret delivery before remotely exposing
+6. Add Redis consumer groups, durable offsets, a transactional outbox, and dead-letter replay.
+7. Select TLS/reverse proxy, backup, monitoring, and secret delivery before remotely exposing
    the already-authenticated Control Center.
 
 ## Blocked
 
-- Cloud deployment needs the user's GitHub repository, VPS/provider, domain/TLS plan, and secret delivery mechanism.
+- Cloud deployment needs the VPS/provider, domain/TLS plan, backup/monitoring choices, and
+  secret delivery mechanism. The GitHub repository is configured.
 - Paper submission remains blocked until the inherited percentage and dollar risk limits are reconciled.
 
 ## Decisions

@@ -4,9 +4,10 @@ Last updated: 2026-09-05 PDT
 
 Context format: v1
 
-Current phase: Phases 0–6 implemented and locally verified; Phase 6 UI review remains iterative
+Current phase: implementation foundations through Phase 6 are locally verified; Phase 5
+statistical promotion and Phase 6 production/runtime exit criteria remain open
 
-Current documented baseline: C024 — `Add confirmed per-workload LLM budget controls`
+Current documented baseline: C025 — `Reconcile design handoff safety gaps`
 
 ## Purpose and authority
 
@@ -102,12 +103,24 @@ A Git commit cannot contain its own content-derived hash without changing that h
 - Code modification is represented by scoped change sessions. The web process exposes no
   shell; a trusted external coding worker must produce a diff and passing test record before
   a separate local-commit approval. Push and deployment remain external actions.
-- No GitHub remote or cloud host is configured yet.
+- GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; `main` was first pushed and
+  verified at `a3447ec` on 2026-09-05. No cloud host is configured yet.
+- A 2026-09-05 rereview of the original design handoff corrected milestone language: code
+  foundations through Phase 6 exist, but Phase 5 has not passed its statistical exit gate and
+  Phase 6 has not passed continuous-operation or full runtime-lineage exit criteria.
+- Tactical risk calls now require a typed external context covering catalyst applicability,
+  known restriction status, liquidity, market-data health, macro-calendar knowledge, nearest
+  major macro event, event-strategy approval, and duplicate intent. Unknown or unsafe facts
+  reject deterministically and are retained in the decision event. Candidate/snapshot ID
+  mismatches and signal/feature timestamps later than evaluation time also reject.
+- The global new-exposure pause is enforced at the shadow runtime entry point, preventing a
+  manually confirmed tick from bypassing the scheduler kill switch.
 
 ### Repository state
 
 - Local repository root: `/Users/ethanhqc/Documents/Codex/2026-09-03/files-mentioned-by-the-user-readme`
 - Default branch: `main`
+- GitHub remote: `https://github.com/wsjnohyeah/qagent.git`
 - First commit: `5374c1b Bootstrap safety-first Phase 0 environment`
 - Local runtime artifacts and secrets are excluded through `.gitignore`.
 - CI is defined for lint, strict typing, tests, a secret-pattern scan, and Docker image build.
@@ -155,7 +168,7 @@ Development service ports bind only to loopback. The local Compose credentials a
 - `make check`: passed.
 - Flake8: passed.
 - Strict mypy: passed for 49 source files.
-- Pytest: 78 passed.
+- Pytest: 89 passed after the design-handoff safety review.
 - `make doctor`: passed against the local-lite SQLite profile.
 - `make docker-doctor`: passed against the PostgreSQL-backed Compose profile.
 - PostgreSQL query: passed; the first container replay stored six lineage events.
@@ -163,8 +176,8 @@ Development service ports bind only to loopback. The local Compose credentials a
 - MinIO live health endpoint: passed.
 - API `/health/ready`: ready, database healthy, risk/restriction versions loaded, live trading false.
 - Container vertical slice: risk verdict `APPROVE`; order state `RECORDED_NOT_SUBMITTED`.
-- Phase 6 validation: 78 tests pass; JavaScript parses; authenticated SQLite and PostgreSQL
-  doctors pass; PostgreSQL Alembic reports no schema drift at `20260905_0020`.
+- Phase 6 validation: 89 tests pass; JavaScript parses; authenticated SQLite and PostgreSQL
+  doctors pass; PostgreSQL Alembic reports no schema drift at `20260905_0021`.
 - A live Meta `muse-spark-1.3` System Steward request read the bounded system snapshot,
   returned only the valid `SYSTEM:summary` citation, proposed no action, persisted both
   messages, and logged out successfully.
@@ -687,6 +700,7 @@ The Phase 0 configuration uses the lower conservative inherited caps where appli
 | Minimum reward/risk | 1.50 |
 | Minimum relative volume | 2.00 |
 | Maximum quote age | 15 seconds |
+| Major macro-event blackout | 24 hours unless separately validated |
 | Initial risk fraction | 0.25% of equity |
 | Maximum trade risk | $130 |
 | Maximum concurrent planned risk | $780 |
@@ -696,6 +710,14 @@ The Phase 0 configuration uses the lower conservative inherited caps where appli
 | Maximum equity quantity | 250 shares |
 
 These are baseline configuration values, not authorization for paper submission. The inherited percentage and later dollar limits still require reconciliation before a paper broker adapter may submit orders.
+
+The active policy is `risk_policy@0.2.0`. A caller must provide `RiskEvaluationContext`; the
+gate rejects unknown restriction or macro-calendar state, unverified required catalysts,
+unconfirmed liquidity, unhealthy market data, duplicate intent, and applicable macro
+blackouts. It also rejects mismatched feature IDs and future signal/feature timestamps. The
+current broker-free daily-bar shadow harness has not yet been wired through
+the complete tactical candidate/risk/plan path, so that integration remains a Phase 6 exit
+criterion rather than a claimed capability.
 
 ## Current API and operational workflow
 
@@ -1214,6 +1236,25 @@ The Compose stack is currently intended to remain running for local inspection. 
 - Revision activation updates the limit on an existing current-day workload window instead
   of generating a fresh accounting key. Previously consumed and in-flight amounts therefore
   remain counted, preventing repeated edits from resetting the budget.
+
+### D033 — Reconcile the original design handoff against the implemented system
+
+- Date: 2026-09-05 PDT.
+- The user requested changes based on a fresh review of the original 2026-09-04 context
+  transfer. That document remains design reference rather than an instruction to overwrite
+  later explicit decisions or its now-stale “design only” project status.
+- The review confirmed the no-live boundary, point-in-time/audit model, LLM separation, and
+  deterministic risk authority. The later single-admin System Steward decision supersedes
+  the handoff's generic role-based-permissions recommendation.
+- The review found a real kill-switch bypass: the scheduler honored global pause but a
+  separately confirmed manual `shadow.tick` did not recheck it. The runtime boundary now
+  requires the pause state and rejects all processing while paused.
+- The risk boundary now requires explicit external safety facts and applies a versioned
+  24-hour macro-event blackout. Missing status fails closed and the full context is retained
+  with the decision event.
+- Milestone reporting now distinguishes implemented tooling from passed empirical and
+  production-operational exit criteria. The detailed reconciliation is
+  `docs/REVIEW_ALIGNMENT_2026-09-05.md`; ADR 0019 records the safety decisions.
 
 ## Iteration and commit ledger
 
@@ -2007,7 +2048,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C024 — `Add confirmed per-workload LLM budget controls`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `a3447ec`.
 - Date: 2026-09-05 PDT.
 - User intent: allow the administrator to adjust the LLM budget ceiling independently for
   every workflow from the Control Center.
@@ -2037,24 +2078,62 @@ The Compose stack is currently intended to remain running for local inspection. 
   - The sole administrator can tune all workload budgets in the web UI with durable audit
     history and explicit confirmation while project/provider hard caps continue to fail closed.
 
+### C025 — `Reconcile design handoff safety gaps`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-05 PDT.
+- User intent: reread the supplied design/context review, compare it with the current
+  repository, and modify the implementation where the review exposed real gaps.
+- Scope:
+  - Added mandatory `RiskEvaluationContext` facts for catalyst applicability/verification,
+    restriction-status knowledge, liquidity, market-data health, macro-calendar state,
+    nearest major event, event-strategy approval, and duplicate intent.
+  - Upgraded the policy to `risk_policy@0.2.0` with a 24-hour major-macro-event blackout and
+    added deterministic rejection reasons, feature/signal point-in-time checks, and
+    decision-event context lineage.
+  - Enforced the global new-exposure pause inside the shadow runtime so manual confirmation
+    cannot bypass the scheduler kill switch.
+  - Added ADR 0019 and a requirement-by-requirement review reconciliation; corrected stale
+    GitHub and milestone-completion language across the operator documents.
+- Architecture/decision impact:
+  - External risk facts must be explicit and auditable rather than inferred or omitted.
+  - Implemented code and passed milestone exit criteria are now reported separately.
+  - The existing daily-bar shadow harness is not mislabeled as the complete tactical
+    candidate/risk/approved-plan runtime.
+- Validation:
+  - Targeted safety, vertical-slice, and Phase 6 tests passed (25 tests).
+  - `make check` passed: Flake8, strict mypy across 49 source files, and 89 tests.
+  - Local doctor, secret scan, migration/schema checks, and Docker health are completed
+    before commit.
+- Expected global state after commit:
+  - The reviewed hard-risk and kill-switch contracts are stricter without adding any broker
+    or live-money path.
+  - The repository and handoff docs agree on what is implemented, what is empirically
+    unproven, and what still blocks production or paper execution.
+
 ## Open work
 
 Ordered near-term work:
 
-1. Review the implemented Phase 6 UI interactively with the user and refine layout/workflows.
-2. Size remote backfill concurrency and identify equity/options sources with suitable historical
+1. Complete the persistent Phase 6 candidate → risk decision → approved plan → virtual-order
+   chain using the explicit risk context; the current daily-bar shadow harness is not that
+   complete tactical path.
+2. Run the agreed continuous shadow observation period and prove replay equivalence.
+3. Continue interactive Phase 6 UI review and refinement with the user.
+4. Size remote backfill concurrency and identify equity/options sources with suitable historical
    coverage, retention, and licensing; do not require those large downloads for local tests.
-3. Extend replay with multi-bar partial fills, cancellation, symbol changes, delistings, and
+5. Add a governed point-in-time macro-event calendar source for the new risk contract.
+6. Extend replay with multi-bar partial fills, cancellation, symbol changes, delistings, and
    later capacity calibration on production-scale data.
-4. Add Redis consumer groups, a transactional outbox, dead-letter replay, provider lag,
+7. Add Redis consumer groups, a transactional outbox, dead-letter replay, provider lag,
    sequence-gap, reconciliation, and data-quality dashboards.
-5. Build a labeled corpus and measure cross-provider catalyst dedup precision/recall.
-6. Create the GitHub remote and validate the guarded TLS/cloud pipeline on a selected VPS;
+8. Build a labeled corpus and measure cross-provider catalyst dedup precision/recall.
+9. Validate the guarded TLS/cloud pipeline from the existing GitHub repository on a selected VPS;
    add backup/restore, monitoring, and notification integrations.
 
 ## Blocked or unresolved decisions
 
-- GitHub organization/repository and branch-protection policy.
+- GitHub branch-protection policy.
 - VPS/cloud provider, region, instance size, and domain/TLS approach.
 - Secure secret-delivery mechanism for the VPS and CI.
 - Historical options, premium news/fundamentals, and compliant social-data vendors/budgets.

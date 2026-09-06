@@ -371,6 +371,39 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
             json={"confirmation_phrase": deployment["confirmation_phrase"]},
         ).status_code == 200
         market.insert_bars((bars[-1],), raw_object_id="TEST_RAW")
+        pause = client.post(
+            "/v1/commands/pause",
+            json={"reason": "Verify the global pause blocks manual shadow ticks"},
+        ).json()
+        assert client.post(
+            f"/v1/actions/{pause['action_request_id']}/confirm",
+            json={"confirmation_phrase": pause["confirmation_phrase"]},
+        ).status_code == 200
+        blocked_tick = client.post(
+            "/v1/actions",
+            json={
+                "action_type": "shadow.tick",
+                "target_type": "runtime",
+                "target_id": "shadow",
+                "parameters": {},
+                "reason": "A manual tick must not bypass the global pause",
+            },
+        ).json()
+        blocked_confirmation = client.post(
+            f"/v1/actions/{blocked_tick['action_request_id']}/confirm",
+            json={"confirmation_phrase": blocked_tick["confirmation_phrase"]},
+        )
+        assert blocked_confirmation.status_code == 409
+        assert "Global new-exposure pause" in blocked_confirmation.json()["detail"]
+        assert client.get("/v1/shadow/events").json() == []
+        resume = client.post(
+            "/v1/commands/resume",
+            json={"reason": "Resume after verifying the kill switch"},
+        ).json()
+        assert client.post(
+            f"/v1/actions/{resume['action_request_id']}/confirm",
+            json={"confirmation_phrase": resume["confirmation_phrase"]},
+        ).status_code == 200
         tick = client.post(
             "/v1/actions",
             json={

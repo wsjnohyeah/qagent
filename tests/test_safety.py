@@ -9,7 +9,14 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from agentic_quant.config import AppEnvironment, Settings, TradingMode
-from agentic_quant.domain import AccountState, Direction, FeatureSnapshot, SignalCandidate, Verdict
+from agentic_quant.domain import (
+    AccountState,
+    Direction,
+    FeatureSnapshot,
+    RiskEvaluationContext,
+    SignalCandidate,
+    Verdict,
+)
 from agentic_quant.ids import uuid7
 from agentic_quant.risk import RestrictionRegistry, RiskPolicy, evaluate_candidate
 
@@ -33,13 +40,33 @@ def features() -> FeatureSnapshot:
     )
 
 
-def evaluate(settings: Settings, item: SignalCandidate, *, max_risk: str = "130"):
+def risk_context(**updates: object) -> RiskEvaluationContext:
+    return RiskEvaluationContext(
+        catalyst_required=True,
+        catalyst_verified=True,
+        restriction_status_known=True,
+        liquidity_confirmed=True,
+        market_data_healthy=True,
+        macro_calendar_status_known=True,
+    ).model_copy(update=updates)
+
+
+def evaluate(
+    settings: Settings,
+    item: SignalCandidate,
+    *,
+    max_risk: str = "130",
+    context: RiskEvaluationContext | None = None,
+    feature_snapshot: FeatureSnapshot | None = None,
+):
     policy = RiskPolicy.from_yaml(settings.risk_policy_path).model_copy(
         update={"maximum_trade_risk_usd": Decimal(max_risk)}
     )
     return evaluate_candidate(
         candidate=item,
-        features=features(),
+        features=feature_snapshot or features().model_copy(
+            update={"feature_snapshot_id": item.feature_snapshot_id}
+        ),
         account=AccountState(
             equity=Decimal("52000"),
             daily_pnl=Decimal("0"),
@@ -48,6 +75,7 @@ def evaluate(settings: Settings, item: SignalCandidate, *, max_risk: str = "130"
         mode=TradingMode.SHADOW,
         policy=policy,
         restrictions=RestrictionRegistry.from_yaml(settings.restricted_securities_path),
+        context=context or risk_context(),
         evaluated_at=item.as_of,
         new_exposure_paused=False,
     )
@@ -58,6 +86,28 @@ def test_live_mode_is_not_representable() -> None:
         Settings(_env_file=None, trading_mode="live")
     with pytest.raises(ValidationError):
         Settings(_env_file=None, live_trading_enabled=True)
+
+
+def test_risk_inputs_require_aware_ordered_timestamps() -> None:
+    feature_values = features().model_dump()
+    feature_values["as_of"] = datetime(2026, 9, 4, 14, 45)
+    with pytest.raises(ValidationError, match="Feature snapshot as_of"):
+        FeatureSnapshot.model_validate(feature_values)
+    with pytest.raises(ValidationError, match="Signal expiry"):
+        item = candidate()
+        SignalCandidate.model_validate(
+            item.model_copy(update={"expires_at": item.as_of}).model_dump()
+        )
+    with pytest.raises(ValidationError, match="Major macro event timestamp"):
+        RiskEvaluationContext(
+            catalyst_required=False,
+            catalyst_verified=False,
+            restriction_status_known=True,
+            liquidity_confirmed=True,
+            market_data_healthy=True,
+            macro_calendar_status_known=True,
+            nearest_major_macro_event_at=datetime(2026, 9, 4, 14, 45),
+        )
 
 
 def test_development_backfills_are_bounded_but_production_is_not() -> None:
@@ -152,8 +202,70 @@ def test_pause_fails_closed(settings: Settings) -> None:
         mode=TradingMode.SHADOW,
         policy=RiskPolicy.from_yaml(settings.risk_policy_path),
         restrictions=RestrictionRegistry.from_yaml(settings.restricted_securities_path),
+        context=risk_context(),
         evaluated_at=item.as_of,
         new_exposure_paused=True,
     )
     assert result.verdict == Verdict.REJECT
     assert "GLOBAL_NEW_EXPOSURE_PAUSED" in result.reason_codes
+
+
+@pytest.mark.parametrize(
+    ("updates", "reason_code"),
+    [
+        ({"catalyst_verified": False}, "CATALYST_UNVERIFIED"),
+        ({"restriction_status_known": False}, "RESTRICTION_STATUS_UNKNOWN"),
+        ({"liquidity_confirmed": False}, "LIQUIDITY_NOT_CONFIRMED"),
+        ({"market_data_healthy": False}, "MARKET_DATA_UNHEALTHY"),
+        ({"macro_calendar_status_known": False}, "MACRO_CALENDAR_STATUS_UNKNOWN"),
+        ({"duplicate_order_detected": True}, "DUPLICATE_ORDER"),
+    ],
+)
+def test_external_risk_facts_fail_closed(
+    settings: Settings,
+    updates: dict[str, object],
+    reason_code: str,
+) -> None:
+    result = evaluate(settings, candidate(), context=risk_context(**updates))
+    assert result.verdict == Verdict.REJECT
+    assert reason_code in result.reason_codes
+    assert result.max_quantity == 0
+
+
+def test_major_macro_event_blackout_requires_strategy_approval(settings: Settings) -> None:
+    item = candidate()
+    macro_event = item.as_of + timedelta(hours=12)
+    rejected = evaluate(
+        settings,
+        item,
+        context=risk_context(nearest_major_macro_event_at=macro_event),
+    )
+    assert rejected.verdict == Verdict.REJECT
+    assert "MACRO_EVENT_BLACKOUT" in rejected.reason_codes
+
+    approved = evaluate(
+        settings,
+        item,
+        context=risk_context(
+            nearest_major_macro_event_at=macro_event,
+            macro_event_strategy_approved=True,
+        ),
+    )
+    assert approved.verdict == Verdict.APPROVE
+
+
+def test_risk_gate_rejects_mismatched_or_future_inputs(settings: Settings) -> None:
+    item = candidate()
+    mismatch = evaluate(settings, item, feature_snapshot=features())
+    assert mismatch.verdict == Verdict.REJECT
+    assert "FEATURE_SNAPSHOT_MISMATCH" in mismatch.reason_codes
+
+    future_feature = features().model_copy(
+        update={
+            "feature_snapshot_id": item.feature_snapshot_id,
+            "as_of": item.as_of + timedelta(minutes=1),
+        }
+    )
+    future = evaluate(settings, item, feature_snapshot=future_feature)
+    assert future.verdict == Verdict.REJECT
+    assert "FEATURE_FROM_FUTURE" in future.reason_codes

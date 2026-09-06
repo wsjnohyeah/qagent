@@ -21,6 +21,8 @@ No override can convert an insufficient/rejected validation report into an adopt
 ## Runtime semantics
 
 - The scheduler polls at `SHADOW_POLL_SECONDS`; a confirmed `shadow.tick` runs the same path.
+- The runtime entry point itself rejects every tick while global new exposure is paused. This
+  applies to scheduled and manually confirmed calls, preventing a controller bypass.
 - Only `ACTIVE` deployments are evaluated.
 - A new deployment establishes its cursor at the current data edge; historical bars seed its
   first pending signal but are not replayed as pretend forward shadow results. Backtests own
@@ -56,3 +58,8 @@ This baseline closes tactical positions within one execution bar and does not ye
 multi-bar partial fills, cancellation, queue position, quote-derived dynamic spread,
 delistings, or symbol-change replay. These limitations affect realism, not the persistence,
 point-in-time, confirmation, or no-broker invariants.
+
+It also does not yet persist the complete tactical `SignalCandidate` → `RiskDecision` →
+`TradePlan` chain for every shadow action. The standalone deterministic risk engine now has
+an explicit fail-closed context contract, but wiring that contract into this baseline is the
+next runtime milestone and is required before claiming the original Phase 6 exit criteria.

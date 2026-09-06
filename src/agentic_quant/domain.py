@@ -43,6 +43,35 @@ class FeatureSnapshot(FrozenModel):
     sector_compatible: bool
     quote_age_seconds: int = Field(ge=0)
 
+    @model_validator(mode="after")
+    def as_of_is_aware(self) -> Self:
+        if self.as_of.tzinfo is None:
+            raise ValueError("Feature snapshot as_of must be timezone-aware")
+        return self
+
+
+class RiskEvaluationContext(FrozenModel):
+    """Externally resolved facts that the deterministic risk gate must not infer."""
+
+    catalyst_required: bool
+    catalyst_verified: bool
+    restriction_status_known: bool
+    liquidity_confirmed: bool
+    market_data_healthy: bool
+    macro_calendar_status_known: bool
+    nearest_major_macro_event_at: datetime | None = None
+    macro_event_strategy_approved: bool = False
+    duplicate_order_detected: bool = False
+
+    @model_validator(mode="after")
+    def timestamps_are_aware(self) -> Self:
+        if (
+            self.nearest_major_macro_event_at is not None
+            and self.nearest_major_macro_event_at.tzinfo is None
+        ):
+            raise ValueError("Major macro event timestamp must be timezone-aware")
+        return self
+
 
 class SignalAction(StrEnum):
     LONG = "long"
@@ -831,6 +860,14 @@ class SignalCandidate(FrozenModel):
     invalidation: Decimal = Field(gt=0)
     targets: tuple[Decimal, ...] = Field(min_length=1)
     expires_at: datetime
+
+    @model_validator(mode="after")
+    def timing_is_aware_and_ordered(self) -> Self:
+        if self.as_of.tzinfo is None or self.expires_at.tzinfo is None:
+            raise ValueError("Signal timestamps must be timezone-aware")
+        if self.expires_at <= self.as_of:
+            raise ValueError("Signal expiry must follow its as_of timestamp")
+        return self
 
 
 class AccountState(FrozenModel):
