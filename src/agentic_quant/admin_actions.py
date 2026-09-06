@@ -36,6 +36,7 @@ ALLOWED_ACTIONS = {
     "shadow.resume",
     "shadow.retire",
     "shadow.tick",
+    "account.risk.update",
     "code_change.open",
     "code_change.approve_commit",
 }
@@ -356,6 +357,11 @@ class AdminActionService:
             if not isinstance(raw_limits, dict):
                 raise ValueError("LLM budget action requires workload_daily limits")
             return self.budget_preview_callback(raw_limits)
+        if action_type == "account.risk.update":
+            raw_limits = parameters.get("limits")
+            if not isinstance(raw_limits, dict):
+                raise ValueError("Account risk action requires limits")
+            return self.shadow.preview_account_risk(raw_limits)
         if action_type == "code_change.open":
             try:
                 return self.code_changes.preview(
@@ -380,6 +386,9 @@ class AdminActionService:
             "shadow.resume": "Resume this virtual deployment",
             "shadow.retire": "Permanently retire this virtual deployment",
             "shadow.tick": "Process newly available stored bars once",
+            "account.risk.update": (
+                "Activate a new shared virtual-account risk revision"
+            ),
             "code_change.open": "Queue an isolated, scoped code-change session",
             "code_change.approve_commit": "Approve a tested diff for local commit",
         }
@@ -449,6 +458,15 @@ class AdminActionService:
             if not isinstance(raw_limits, dict):
                 raise ValueError("LLM budget parameters are invalid")
             return self.budget_update_callback(raw_limits, reason, confirmed_by)
+        if action_type == "account.risk.update":
+            raw_limits = parameters.get("limits")
+            if not isinstance(raw_limits, dict):
+                raise ValueError("Account risk parameters are invalid")
+            return self.shadow.update_account_risk(
+                raw_limits,
+                reason=reason,
+                created_by=confirmed_by,
+            )
         if action_type == "ml.model.promote":
             return self.model_promote_callback(target_id, reason, confirmed_by)
         if action_type == "strategy.adopt":
@@ -528,6 +546,7 @@ class AdminActionService:
             "market-data": True,
             "documents": True,
             "research": True,
+            "coordinator": True,
             "ml": True,
             "llm": True,
             "shadow": True,

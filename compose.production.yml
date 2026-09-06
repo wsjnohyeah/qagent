@@ -3,13 +3,15 @@ name: agentic-quant-production
 services:
   api:
     image: ${APP_IMAGE:?Set APP_IMAGE to an immutable GHCR image tag}
-    env_file: .env.production
+    env_file: ${APP_ENV_FILE:-.env.production}
     environment:
       APP_ENV: production
+      DEPLOYMENT_ENVIRONMENT_ID: ${DEPLOYMENT_ENVIRONMENT_ID:?Set a unique environment ID}
       LIVE_TRADING_ENABLED: "false"
       GLOBAL_NEW_EXPOSURE_PAUSED: "true"
       AUTO_MIGRATE: "false"
       SHADOW_RUNTIME_ENABLED: "false"
+      AUTONOMOUS_COORDINATOR_ENABLED: "false"
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
@@ -29,13 +31,15 @@ services:
   worker:
     image: ${APP_IMAGE:?Set APP_IMAGE to an immutable GHCR image tag}
     command: ["python", "-m", "agentic_quant.worker"]
-    env_file: .env.production
+    env_file: ${APP_ENV_FILE:-.env.production}
     environment:
       APP_ENV: production
+      DEPLOYMENT_ENVIRONMENT_ID: ${DEPLOYMENT_ENVIRONMENT_ID:?Set a unique environment ID}
       LIVE_TRADING_ENABLED: "false"
       GLOBAL_NEW_EXPOSURE_PAUSED: "true"
       AUTO_MIGRATE: "false"
       SHADOW_RUNTIME_ENABLED: "true"
+      AUTONOMOUS_COORDINATOR_ENABLED: "false"
     volumes:
       - object-store-data:/app/work/object-store
     depends_on:
@@ -50,9 +54,36 @@ services:
       retries: 12
     restart: unless-stopped
 
+  coordinator:
+    image: ${APP_IMAGE:?Set APP_IMAGE to an immutable GHCR image tag}
+    command: ["python", "-m", "agentic_quant.worker"]
+    env_file: ${APP_ENV_FILE:-.env.production}
+    environment:
+      APP_ENV: production
+      DEPLOYMENT_ENVIRONMENT_ID: ${DEPLOYMENT_ENVIRONMENT_ID:?Set a unique environment ID}
+      LIVE_TRADING_ENABLED: "false"
+      GLOBAL_NEW_EXPOSURE_PAUSED: "true"
+      AUTO_MIGRATE: "false"
+      SHADOW_RUNTIME_ENABLED: "false"
+      AUTONOMOUS_COORDINATOR_ENABLED: "${AUTONOMOUS_COORDINATOR_ENABLED:-true}"
+      COORDINATOR_PAID_RESEARCH_ENABLED: "${COORDINATOR_PAID_RESEARCH_ENABLED:-false}"
+    volumes:
+      - object-store-data:/app/work/object-store
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-m", "agentic_quant.worker", "--healthcheck", "--pipeline", "coordinator"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
   postgres:
     image: postgres:17-alpine
-    env_file: .env.production
+    env_file: ${APP_ENV_FILE:-.env.production}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:

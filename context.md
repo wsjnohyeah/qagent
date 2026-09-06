@@ -4,10 +4,11 @@ Last updated: 2026-09-06 PDT
 
 Context format: v1
 
-Current phase: implementation foundations through Phase 6.1 are locally verified; Phase 5
-statistical promotion and Phase 6 elapsed continuous-operation evidence remain open
+Current phase: implementation foundations through Phase 6.1 plus the four pre-cloud
+hardening milestones are locally implemented; Phase 7 paper integration is next, before
+cloud deployment, while statistical/elapsed production evidence remains open
 
-Current documented baseline: C029 — `Harden forward shadow and recovery contracts`
+Current documented baseline: C030 — `Build shared account and autonomous bootstrap`
 
 ## Purpose and authority
 
@@ -110,13 +111,15 @@ A Git commit cannot contain its own content-derived hash without changing that h
   exposure persists candidate → deterministic risk decision → approved plan → virtual order/
   fill lineage, including account context and known decision-bar liquidity. A plan is durable
   before a later bar can fill it; missed worker-time bars are recorded and never fabricated as
-  forward fills. It maintains isolated candidate-account cash/P&L and processes each stored bar idempotently. The literal multi-session buy-
+  forward fills. Every strategy/symbol deployment is now an attribution sleeve under one
+  `SHARED_MASTER` virtual account; open plans atomically reserve shared cash and concurrent
+  risk and settle P&L once. It processes each stored bar idempotently. The literal multi-session buy-
   and-hold benchmark is research-only. No broker order path exists.
 - Code modification is represented by scoped change sessions. The web process exposes no
   shell; a trusted external coding worker must produce a diff and passing test record before
   a separate local-commit approval. Push and deployment remain external actions.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; this iteration starts from
-  synchronized commit `06b6853`. No cloud host is configured yet.
+  synchronized commit `3b3926e`. No cloud host is configured yet.
 - The independent `06b6853` fix verification is mapped item-by-item in
   `docs/REVIEW_REMEDIATION_2026-09-05.md`. The deterministic F01–F11 counterexamples are
   followed by the corrections from the `56bb979` review in
@@ -129,11 +132,24 @@ A Git commit cannot contain its own content-derived hash without changing that h
   mismatches and signal/feature timestamps later than evaluation time also reject.
 - The global new-exposure pause is enforced at the shadow runtime entry point, preventing a
   manually confirmed tick from bypassing the scheduler kill switch.
-- Production Compose separates the authenticated API from the persistent shadow scheduler.
+- The shared account begins with a versioned `$130` maximum trade risk and `$780` maximum
+  concurrent risk. These are conservative bootstrap defaults, not permanent policy. An
+  `account.risk.update` action requires explicit confirmation, appends a revision, and changes
+  the exact validation contract so older certificates cannot silently authorize new limits.
+- A durable autonomous research coordinator now owns eight dependency-linked stages per
+  symbol and UTC-hour cycle: market data, point-in-time features, ML training, forecast,
+  Research LLM, constrained strategy generation, exact validation, and human-gated shadow
+  readiness. Completed stages are not repeated after restart. Data/budget/human prerequisites
+  are explicit `WAITING_*` outcomes; infrastructure failures use fenced bounded retries.
+- Production Compose separates the authenticated API, shadow scheduler, and research
+  coordinator into dedicated processes so research CPU/provider latency cannot delay shadow.
   SQL runtime controls and worker heartbeats are shared across processes; workflow jobs use
   dependency-aware attempt tokens and expiry-fenced completion, portfolio ticks use a global
   SQL execution lease, and normalized ingestion reconciles stable business events into a
   transactional SQL outbox before network delivery.
+- One-shot production bootstrap requires PostgreSQL/Redis, registers an immutable environment
+  identity, initializes governed lists and the shared account idempotently, and forces new
+  exposure paused. Development data remains local and is not treated as production evidence.
 - `/health/ready` now fails with HTTP 503 when any required dependency reports false.
 
 ### Repository state
@@ -189,8 +205,8 @@ Development service ports bind only to loopback. The local Compose credentials a
 
 - `make check`: passed.
 - Flake8: passed.
-- Strict mypy: passed for 51 source files.
-- Pytest: 106 passed after the second independent review remediation.
+- Strict mypy: passed for 56 source files.
+- Pytest: 113 passed for the completed pre-cloud implementation.
 - `make doctor`: passed against the local-lite SQLite profile.
 - `make docker-doctor`: passed against the PostgreSQL-backed Compose profile.
 - PostgreSQL query: passed; the first container replay stored six lineage events.
@@ -198,8 +214,8 @@ Development service ports bind only to loopback. The local Compose credentials a
 - MinIO live health endpoint: passed.
 - API `/health/ready`: ready, database healthy, risk/restriction versions loaded, live trading false.
 - Container vertical slice: risk verdict `APPROVE`; order state `RECORDED_NOT_SUBMITTED`.
-- Phase 6.1 validation: 106 tests pass locally; final JavaScript, doctor, secret, Docker,
-  PostgreSQL migration-drift, and CI checks are recorded in C029 after completion.
+- Phase 6.1 validation: 106 tests passed at C029. Shared-account, coordinator, environment-
+  isolation, and recovery tests were added in C030.
 - A live Meta `muse-spark-1.3` System Steward request read the bounded system snapshot,
   returned only the valid `SYSTEM:summary` citation, proposed no action, persisted both
   messages, and logged out successfully.
@@ -218,7 +234,7 @@ Development service ports bind only to loopback. The local Compose credentials a
 - Phase 2 fixtures verify primary/secondary source distinction, correction-version retention, SEC filing and XBRL normalization, IR feed parsing, and cross-document catalyst deduplication.
 - Alpaca REST results are now normalized to the internal half-open `[start, end)` contract;
   `market_data_quality@0.2.0` rejects out-of-window rows and live gap seeds use only 1Min bars.
-- Alembic migrations through `20260906_0026` own the Phase 3D/4/5/6.1 schema, including exact
+- Alembic migrations through `20260906_0027` own the Phase 3D/4/5/6.1 schema, including exact
   validation contracts, shadow decision lineage, fenced workflow/runtime leases, the event
   outbox, and strategy-generation attempt audit.
 - `make research-smoke`: passed with 100 deterministic daily bars, three immutable baseline
@@ -423,7 +439,7 @@ flowchart LR
     PIPE --> FEAT["Immutable feature snapshot"]
     FEAT --> STRAT["Deterministic candidate"]
     STRAT --> RISK["Deterministic risk engine"]
-    CONFIG["Versioned risk + restriction YAML"] --> RISK
+    CONFIG["Versioned base risk + account revisions"] --> RISK
     RISK -->|approved| PLAN["Trade plan"]
     PLAN --> SHADOW["Shadow-only order record"]
     PIPE --> LEDGER["Append-only event ledger"]
@@ -485,13 +501,22 @@ flowchart LR
     GENERATE --> PITSPEC
     MLTRAIN --> DB
     FORECAST --> DB
+    COORD["Persistent research coordinator DAG"] --> INGEST
+    COORD --> PITFEATURES
+    COORD --> MLTRAIN
+    COORD --> ANALYST
+    COORD --> GENERATE
+    COORD --> VALIDATE
     REPORT --> ADOPT["Human-confirmed adoption"]
-    ADOPT --> SHRUNTIME["Persistent broker-free shadow runtime"]
+    ADOPT --> SLEEVE["Strategy/symbol sleeve"]
+    ACCOUNT["Shared virtual master account"] --> SLEEVE
+    SLEEVE --> SHRUNTIME["Persistent broker-free shadow runtime"]
     PITFEATURES --> SHRUNTIME
     SHRUNTIME --> SHLINEAGE["Candidate → risk → plan"]
     SHLINEAGE --> SHEVENTS["Virtual event journal + P&L"]
     SHEVENTS --> DB
     WORKER["Dedicated worker + SQL heartbeat"] --> SHRUNTIME
+    WORKER --> COORD
     LEDGER --> OUTBOX["Transactional event outbox"]
     OUTBOX --> REDIS
     UI --> OBJECTS["Lists + object threads + raw explorer"]
@@ -690,6 +715,9 @@ year or more of data.
 | Domain contracts | `src/agentic_quant/domain.py` | immutable evidence, research, strategy, experiment, risk, plan, order, and event models |
 | IDs | `src/agentic_quant/ids.py` | RFC 9562 UUIDv7 generation |
 | Risk engine | `src/agentic_quant/risk.py` | deterministic gates and equity position sizing |
+| Shared account | `src/agentic_quant/virtual_account.py` | atomic cash/risk reservations, sleeve attribution, and immutable risk revisions |
+| Research coordinator | `src/agentic_quant/coordinator.py`, `coordinator_runtime.py` | resumable dependency DAG and concrete data/features/ML/LLM/validation stages |
+| Production bootstrap | `src/agentic_quant/production_bootstrap.py`, `infra/deploy/deploy_vps.sh` | environment identity, defaults, forced pause, migration/startup health gates |
 | Event ledger | `src/agentic_quant/ledger.py` | append-only SQL event storage and lineage queries |
 | Vertical slice | `src/agentic_quant/pipeline.py` | synthetic catalyst through shadow-order record |
 | Control API | `src/agentic_quant/api.py` | authenticated object APIs, stewardship, confirmation actions, health, research, models, and shadow operations |
@@ -730,8 +758,8 @@ year or more of data.
 | Research intelligence | `src/agentic_quant/intelligence.py` | point-in-time retrieval, structured analyst, citation checks, abstention, Decision Inspector graph |
 | ML training/registry | `src/agentic_quant/ml.py`, `configs/ml_policy.yaml` | PIT labels, logistic/stump walk-forward, calibration, drift, JSON registry, forecasts |
 | Strategy generator | `src/agentic_quant/strategy_generation.py` | evidence/forecast-bound LLM generation, adversarial critique, constrained research DSL |
-| Runtime worker | `src/agentic_quant/worker.py` | supervised production shadow scheduler, persistent heartbeat, SQL execution lease |
-| Schema migrations | `migrations/` | Alembic schema history through Phase 6.1 (`20260906_0026`) |
+| Runtime worker | `src/agentic_quant/worker.py` | supervised shadow and autonomous research schedulers with persistent heartbeats |
+| Schema migrations | `migrations/` | Alembic schema history through shared-account revision `20260906_0027` |
 
 ## Current executable risk baseline
 
@@ -1358,6 +1386,22 @@ The Compose stack is currently intended to remain running for local inspection. 
   account allocation model and a collection/paid-research coordinator require separate
   product policies; neither is implied by the shadow worker. ADR 0021 and
   `docs/REVIEW_REMEDIATION_2026-09-06.md` record the corrected boundary.
+
+### D037 — Shared account, coordinator, and reordered delivery
+
+- Date: 2026-09-06 PDT.
+- The user approved one virtual master account while retaining the `$130` per-trade and `$780`
+  concurrent-risk defaults, then clarified that these conservative figures should not be
+  treated as permanent. They are now revisioned administrator controls whose changes require
+  exact revalidation.
+- The user asked to complete shared accounting, automatic orchestration, recovery validation,
+  and production bootstrap locally, then move Phase 7 paper integration immediately after
+  those four tasks and before cloud deployment.
+- Development continues to validate workflow correctness on bounded data. Production creates
+  a separate data plane, performs its own long-horizon collection/derivation, and does not
+  inherit local runtime records through Git.
+- ADR 0022 supersedes D036's temporary isolated-account/operator-scheduled boundary while
+  retaining its human-adoption, deterministic-risk, and no-broker guarantees.
 
 ## Iteration and commit ledger
 
@@ -2349,18 +2393,17 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 Ordered near-term work:
 
-1. Run the agreed continuous shadow observation period and prove research/shadow equivalence.
-2. Continue interactive Phase 6.1 UI review and refinement with the user.
-3. Size remote backfill concurrency and identify equity/options sources with suitable historical
-   coverage, retention, and licensing; do not require those large downloads for local tests.
-4. Add a governed point-in-time macro-event calendar source for tactical intraday strategies.
-5. Extend replay with multi-bar partial fills, cancellation, symbol changes, delistings, and
-   later capacity calibration on production-scale data.
-6. Add operator-driven dead-letter replay, provider lag, sequence-gap monitoring, and
-   dedicated collection/research schedules on top of the reconciled outbox/lease foundation.
-7. Build a labeled corpus and measure cross-provider catalyst dedup precision/recall.
-8. Validate the guarded TLS/cloud pipeline from the existing GitHub repository on a selected VPS;
-   add backup/restore, monitoring, and notification integrations.
+1. Implement and locally validate Phase 7 Alpaca paper submission/reconciliation after the
+   four pre-cloud milestones, with no live-money path and explicit confirmation gates.
+2. Select the VPS/cloud provider, domain/TLS, backup/monitoring, and secret-delivery inputs;
+   then execute the guarded bootstrap against a fresh production data plane.
+3. Run production long-horizon backfill, enable paid coordinator stages only after route/USD-
+   budget review, and collect Phase 5 statistical plus continuous-shadow evidence.
+4. Continue interactive UI review and add account/coordinator affordances where operator use
+   shows they are needed.
+5. Add a governed point-in-time macro-event calendar and remaining licensed data sources.
+6. Extend fill realism and add dead-letter replay plus provider-lag/sequence notifications.
+7. Build a labeled corpus and measure catalyst-dedup precision/recall.
 
 ## Blocked or unresolved decisions
 
@@ -2369,14 +2412,55 @@ Ordered near-term work:
 - Secure secret-delivery mechanism for the VPS and CI.
 - Historical options, premium news/fundamentals, and compliant social-data vendors/budgets.
 - Final restricted-security list beyond META/work-related names.
-- Reconciled paper account size and percentage-versus-dollar risk limits.
 - Minimum shadow/paper sample sizes and promotion gates.
 - Notification channels beyond the dashboard.
 - Whether credit spreads enter the first paper release.
 
-None of these blocks local implementation or fixture testing. Provider credentials,
-public exposure, paper submission, and cloud deployment must remain gated until their
-corresponding decisions are made.
+None of these blocks local implementation or fixture testing. Public exposure, paper
+submission, and cloud deployment remain gated until their corresponding decisions are made.
+The user explicitly reordered Phase 7 paper implementation to occur locally after these four
+hardening milestones and before cloud deployment.
+
+### C030 — `Build shared account and autonomous bootstrap`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-06 PDT.
+- User intent: move Phase 7 immediately after the four pre-cloud tasks, then complete those
+  tasks autonomously: shared master-account/sleeves, research coordination, local recovery
+  validation, and reproducible production bootstrap.
+- Scope:
+  - Added Alembic `20260906_0027`, one shared virtual account, deterministic strategy sleeves,
+    atomic cash/risk reservations, settlement, and administrator-confirmed risk revisions.
+  - Replaced isolated-candidate portfolio risk with account-wide equity, daily P&L, and open-
+    plan risk while retaining each deployment's attribution ledger.
+  - Added an hourly, persistent eight-stage coordinator over existing workflow leases and
+    concrete handlers for Alpaca daily collection, PIT features, ML, forecasts, evidence-bound
+    LLM research, constrained strategy generation, exact validation, and human-gated shadow
+    readiness.
+  - Added environment identity enforcement and an idempotent production bootstrap invoked by
+    the guarded one-command VPS deployment script. Production initializes paused and does not
+    import development runtime data.
+  - Added coordinator/shared-account/environment recovery tests, ADR 0022, and operator
+    runbooks; updated the milestone ordering so Phase 7 local paper testing precedes cloud.
+- Architecture/decision impact:
+  - One account is the capital/risk source of truth; strategy deployments are sleeves.
+  - Automation can carry research to an auditable human gate but cannot promote, adopt, or
+    trade. Paid coordinator calls are separately disabled by default and retain USD breakers.
+  - Local and production use identical workflow contracts but distinct data planes and
+    immutable environment identities.
+- Validation:
+  - `make release-check` passed: Flake8, strict mypy across 56 source files, all 113 tests,
+    authenticated local doctor, secret scan, Docker rebuild/doctor, and PostgreSQL Alembic
+    zero-drift check.
+  - A fresh SQLite database upgraded base-to-`20260906_0027`, downgraded to `0026`, and
+    re-upgraded to head with one account and one initial risk revision.
+  - The production Compose file renders with an explicit environment-file override, the VPS
+    deploy script passes shell syntax validation, and the Control Center JavaScript parses in
+    the macOS JavaScript runtime.
+  - GitHub CI is verified after push; until then it remains the only pending validation item.
+- Expected global state after commit:
+  - The four pre-cloud implementation tasks are complete locally. Phase 7 paper adapter is
+    next; real cloud provisioning still needs user-selected infrastructure inputs.
 
 ## Template for future commit entries
 

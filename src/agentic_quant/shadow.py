@@ -25,6 +25,7 @@ from agentic_quant.database import (
     strategy_specs,
     validation_reports,
     runtime_leases,
+    virtual_accounts,
 )
 from agentic_quant.domain import (
     AccountState,
@@ -54,6 +55,10 @@ from agentic_quant.risk import (
     baseline_long_exit,
     baseline_long_geometry,
     evaluate_candidate,
+)
+from agentic_quant.virtual_account import (
+    MAIN_VIRTUAL_ACCOUNT_ID,
+    VirtualAccountStore,
 )
 
 
@@ -92,7 +97,44 @@ class ShadowRuntime:
             calendar_name=calendar_name,
         )
         self.costs = BacktestCostModel()
+        self.accounts = VirtualAccountStore(engine)
         self._tick_lock = asyncio.Lock()
+
+    def initialize_virtual_account(
+        self,
+        *,
+        initial_cash: Decimal = Decimal("100000"),
+    ) -> dict[str, Any]:
+        return self.accounts.ensure_main_account(
+            initial_cash=initial_cash,
+            risk_policy=self.risk_policy,
+        )
+
+    def virtual_account(self) -> dict[str, Any]:
+        return self.accounts.account(MAIN_VIRTUAL_ACCOUNT_ID)
+
+    def effective_risk_policy(self) -> RiskPolicy:
+        return self.accounts.effective_risk_policy(self.risk_policy)
+
+    def preview_account_risk(self, limits: dict[str, Any]) -> dict[str, Any]:
+        return self.accounts.preview_risk_update(
+            MAIN_VIRTUAL_ACCOUNT_ID,
+            limits,
+        )
+
+    def update_account_risk(
+        self,
+        limits: dict[str, Any],
+        *,
+        reason: str,
+        created_by: str,
+    ) -> dict[str, Any]:
+        return self.accounts.update_risk(
+            MAIN_VIRTUAL_ACCOUNT_ID,
+            limits,
+            reason=reason,
+            created_by=created_by,
+        )
 
     def adoption_preview(
         self,
@@ -142,7 +184,7 @@ class ShadowRuntime:
             "feature_set_version": FEATURE_SET_VERSION,
             "backtest_engine_version": BACKTEST_ENGINE_VERSION,
             "cost_model": self.costs.model_dump(mode="json"),
-            "risk_policy": self.risk_policy.model_dump(mode="json"),
+            "risk_policy": self.effective_risk_policy().model_dump(mode="json"),
             "restriction_registry_version": self.restrictions.version,
             "initial_equity": str(
                 dict(report.execution_contract_json or {}).get("initial_equity")
@@ -267,6 +309,19 @@ class ShadowRuntime:
                 .where(shadow_deployments.c.strategy_spec_id == strategy_spec_id)
                 .values(status=status, updated_at=now)
             )
+            deployment_ids = tuple(
+                str(value)
+                for value in connection.execute(
+                    select(shadow_deployments.c.shadow_deployment_id).where(
+                        shadow_deployments.c.strategy_spec_id == strategy_spec_id
+                    )
+                ).scalars()
+            )
+            self._cancel_open_plans(
+                connection,
+                deployment_ids=deployment_ids,
+                closed_at=now,
+            )
         return self.adoption(str(row.adoption_id))
 
     def adoption(self, adoption_id: str) -> dict[str, Any]:
@@ -325,9 +380,16 @@ class ShadowRuntime:
             ).one_or_none()
             if existing is None:
                 deployment_id = uuid7()
+                sleeve_id = self.accounts.ensure_sleeve(
+                    strategy_spec_id=strategy_spec_id,
+                    symbol=normalized_symbol,
+                    connection=connection,
+                )
                 connection.execute(
                     insert(shadow_deployments).values(
                         shadow_deployment_id=deployment_id,
+                        virtual_account_id=MAIN_VIRTUAL_ACCOUNT_ID,
+                        strategy_sleeve_id=sleeve_id,
                         strategy_spec_id=strategy_spec_id,
                         adoption_id=adoption.adoption_id,
                         symbol=normalized_symbol,
@@ -348,12 +410,22 @@ class ShadowRuntime:
                 if existing.status == "RETIRED":
                     raise ValueError("Retired deployments are immutable; create a new strategy")
                 deployment_id = str(existing.shadow_deployment_id)
+                sleeve_id = self.accounts.ensure_sleeve(
+                    strategy_spec_id=strategy_spec_id,
+                    symbol=normalized_symbol,
+                    connection=connection,
+                )
                 connection.execute(
                     update(shadow_deployments)
                     .where(
                         shadow_deployments.c.shadow_deployment_id == deployment_id
                     )
-                    .values(status="ACTIVE", updated_at=now)
+                    .values(
+                        status="ACTIVE",
+                        virtual_account_id=MAIN_VIRTUAL_ACCOUNT_ID,
+                        strategy_sleeve_id=sleeve_id,
+                        updated_at=now,
+                    )
                 )
         self._sync_active_symbols(
             normalized_symbol,
@@ -371,6 +443,11 @@ class ShadowRuntime:
     ) -> dict[str, Any]:
         if initial_cash <= 0:
             raise ValueError("Initial shadow cash must be positive")
+        master = self.virtual_account()
+        if Decimal(str(master["initial_cash"])) != initial_cash:
+            raise ValueError(
+                "Shadow capital must match the shared virtual master account"
+            )
         normalized_symbol = symbol.strip().upper()
         if not normalized_symbol or len(normalized_symbol) > 24:
             raise ValueError("Shadow symbol is invalid")
@@ -455,12 +532,68 @@ class ShadowRuntime:
                 .where(shadow_deployments.c.shadow_deployment_id == deployment_id)
                 .values(status=status, updated_at=datetime.now(UTC))
             )
+            if status != "ACTIVE":
+                self._cancel_open_plans(
+                    connection,
+                    deployment_ids=(deployment_id,),
+                    closed_at=datetime.now(UTC),
+                )
         self._sync_active_symbols(
             str(row.symbol),
             add=status == "ACTIVE",
             reason=f"Shadow deployment {status.lower()}: {reason} ({requested_by})",
         )
         return self.deployment(deployment_id)
+
+    def _cancel_open_plans(
+        self,
+        connection: Any,
+        *,
+        deployment_ids: tuple[str, ...],
+        closed_at: datetime,
+    ) -> None:
+        if not deployment_ids:
+            return
+        plans = connection.execute(
+            select(
+                shadow_trade_plans.c.trade_plan_id,
+                shadow_trade_plans.c.reserved_cash,
+                shadow_trade_plans.c.reserved_risk_usd,
+                shadow_deployments.c.virtual_account_id,
+            )
+            .select_from(shadow_trade_plans)
+            .join(
+                shadow_signal_candidates,
+                shadow_signal_candidates.c.candidate_id
+                == shadow_trade_plans.c.candidate_id,
+            )
+            .join(
+                shadow_deployments,
+                shadow_deployments.c.shadow_deployment_id
+                == shadow_signal_candidates.c.shadow_deployment_id,
+            )
+            .where(
+                (shadow_trade_plans.c.status == "OPEN")
+                & shadow_signal_candidates.c.shadow_deployment_id.in_(deployment_ids)
+            )
+        ).all()
+        for plan in plans:
+            changed = connection.execute(
+                update(shadow_trade_plans)
+                .where(
+                    (shadow_trade_plans.c.trade_plan_id == plan.trade_plan_id)
+                    & (shadow_trade_plans.c.status == "OPEN")
+                )
+                .values(status="CANCELLED", closed_at=closed_at)
+            )
+            if int(changed.rowcount or 0) == 1:
+                self.accounts.release_or_settle(
+                    account_id=str(plan.virtual_account_id),
+                    reserved_cash=Decimal(str(plan.reserved_cash)),
+                    reserved_risk_usd=Decimal(str(plan.reserved_risk_usd)),
+                    realized_pnl_delta=_ZERO,
+                    connection=connection,
+                )
 
     def deployments(self, *, limit: int = 200) -> list[dict[str, Any]]:
         statement = (
@@ -493,8 +626,15 @@ class ShadowRuntime:
         )
         with self.engine.connect() as connection:
             values = [dict(row._mapping) for row in connection.execute(statement)]
+        master = self.virtual_account()
         for value in values:
-            value["account_mode"] = "ISOLATED_CANDIDATE"
+            value["account_mode"] = "SHARED_MASTER"
+            value["cash_balance"] = master["cash_balance"]
+            value["sleeve_realized_pnl"] = value["realized_pnl"]
+            value["account_cash_balance"] = master["cash_balance"]
+            value["account_realized_pnl"] = master["realized_pnl"]
+            value["account_reserved_cash"] = master["reserved_cash"]
+            value["account_reserved_risk_usd"] = master["reserved_risk_usd"]
         return values
 
     def deployment(self, deployment_id: str) -> dict[str, Any]:
@@ -996,23 +1136,64 @@ class ShadowRuntime:
                     )
                 )
                 if plan is not None:
-                    connection.execute(
-                        insert(shadow_trade_plans).values(
-                            trade_plan_id=plan.trade_plan_id,
-                            candidate_id=plan.candidate_id,
-                            risk_decision_id=plan.risk_decision_id,
-                            symbol=plan.symbol,
-                            direction=plan.direction.value,
-                            quantity=plan.quantity,
-                            limit_price=plan.limit_price,
-                            invalidation=plan.invalidation,
-                            targets_json=[str(value) for value in plan.targets],
-                            expires_at=plan.expires_at,
-                            status="OPEN",
-                            created_at=snapshot.as_of,
-                            closed_at=None,
-                        )
+                    reserved_cash = (
+                        plan.limit_price * Decimal(plan.quantity)
+                    ).quantize(Decimal("0.01"))
+                    reserved_risk = max(
+                        _ZERO,
+                        decision.portfolio_risk_after_usd
+                        - account.concurrent_planned_risk,
+                    ).quantize(Decimal("0.01"))
+                    reserved = self.accounts.reserve(
+                        account_id=str(refreshed["virtual_account_id"]),
+                        cash=reserved_cash,
+                        risk_usd=reserved_risk,
+                        connection=connection,
                     )
+                    if reserved:
+                        connection.execute(
+                            insert(shadow_trade_plans).values(
+                                trade_plan_id=plan.trade_plan_id,
+                                candidate_id=plan.candidate_id,
+                                risk_decision_id=plan.risk_decision_id,
+                                symbol=plan.symbol,
+                                direction=plan.direction.value,
+                                quantity=plan.quantity,
+                                reserved_cash=reserved_cash,
+                                reserved_risk_usd=reserved_risk,
+                                limit_price=plan.limit_price,
+                                invalidation=plan.invalidation,
+                                targets_json=[str(value) for value in plan.targets],
+                                expires_at=plan.expires_at,
+                                status="OPEN",
+                                created_at=snapshot.as_of,
+                                closed_at=None,
+                            )
+                        )
+                    else:
+                        lineage_values[:] = [
+                            value
+                            for value in lineage_values
+                            if value["event_type"] != "TRADE_PLAN"
+                        ]
+                        lineage_values.append(
+                            self._operational_event(
+                                deployment=refreshed,
+                                run_id=run_id,
+                                bar_id=decision_bar.bar_id,
+                                event_type="TRADE_PLAN_RESERVATION_REJECTED",
+                                event_time=snapshot.as_of,
+                                payload={
+                                    "trade_plan_id": plan.trade_plan_id,
+                                    "reason_codes": [
+                                        "SHARED_ACCOUNT_CAPACITY_CHANGED"
+                                    ],
+                                    "virtual_only": True,
+                                },
+                            )
+                        )
+                        for offset, value in enumerate(lineage_values):
+                            value["sequence"] = next_sequence + offset
             if lineage_values:
                 connection.execute(insert(shadow_events), lineage_values)
             connection.execute(
@@ -1068,7 +1249,7 @@ class ShadowRuntime:
         if not rows:
             return 0
         if len(rows) != 1:
-            raise RuntimeError("An isolated shadow deployment has multiple open plans")
+            raise RuntimeError("A strategy sleeve has multiple open plans")
         pending = dict(rows[0]._mapping)
         entry_time = (
             self.session_clock.daily_bar_session_open(execution_bar.event_time)
@@ -1087,9 +1268,10 @@ class ShadowRuntime:
             rejection_reasons.append("MISSED_EARLIEST_FILL_BAR")
         if entry_time > expires_at:
             rejection_reasons.append("PLAN_EXPIRED")
-        if account.equity <= self.risk_policy.account_floor_usd:
+        policy = self.effective_risk_policy()
+        if account.equity <= policy.account_floor_usd:
             rejection_reasons.append("ACCOUNT_FLOOR_REACHED_AT_EXECUTION")
-        if account.daily_pnl <= -self.risk_policy.daily_loss_stop_usd:
+        if account.daily_pnl <= -policy.daily_loss_stop_usd:
             rejection_reasons.append("DAILY_LOSS_HALT_AT_EXECUTION")
         if self.restrictions.is_restricted(
             str(deployment["symbol"]), entry_time.astimezone(UTC).date()
@@ -1113,12 +1295,16 @@ class ShadowRuntime:
                 )
             ]
             status = "CANCELLED"
-            cash = Decimal(str(deployment["cash_balance"]))
+            cash = account.equity
             realized = Decimal(str(deployment["realized_pnl"]))
         else:
             context = dict(pending["evaluation_context_json"] or {})
+            simulation_deployment = {
+                **deployment,
+                "cash_balance": account.equity,
+            }
             events, cash, realized = self._simulate_one_bar(
-                deployment=deployment,
+                deployment=simulation_deployment,
                 run_id=run_id,
                 decision_bar_id=execution_bar.bar_id,
                 snapshot_id=str(pending["feature_snapshot_id"]),
@@ -1160,6 +1346,14 @@ class ShadowRuntime:
                     status=status,
                     closed_at=execution_bar.available_from,
                 )
+            )
+            realized_delta = cash - account.equity if status == "CLOSED" else _ZERO
+            self.accounts.release_or_settle(
+                account_id=str(deployment["virtual_account_id"]),
+                reserved_cash=Decimal(str(pending["reserved_cash"])),
+                reserved_risk_usd=Decimal(str(pending["reserved_risk_usd"])),
+                realized_pnl_delta=realized_delta,
+                connection=connection,
             )
             if events:
                 connection.execute(insert(shadow_events), events)
@@ -1307,9 +1501,10 @@ class ShadowRuntime:
         RiskEvaluationContext,
         list[dict[str, Any]],
     ]:
+        policy = self.effective_risk_policy()
         invalidation, target = baseline_long_geometry(
             planned_entry,
-            self.risk_policy,
+            policy,
         )
         candidate = SignalCandidate(
             candidate_id=uuid7(),
@@ -1352,7 +1547,7 @@ class ShadowRuntime:
             features=risk_features,
             account=account,
             mode=TradingMode.SHADOW,
-            policy=self.risk_policy,
+            policy=policy,
             restrictions=self.restrictions,
             context=context,
             evaluated_at=entry_time,
@@ -1432,7 +1627,15 @@ class ShadowRuntime:
         with self.engine.connect() as connection:
             rows = connection.execute(
                 select(shadow_events.c.event_time, shadow_events.c.realized_pnl_delta)
-                .where(shadow_events.c.shadow_deployment_id == deployment["shadow_deployment_id"])
+                .join(
+                    shadow_deployments,
+                    shadow_deployments.c.shadow_deployment_id
+                    == shadow_events.c.shadow_deployment_id,
+                )
+                .where(
+                    shadow_deployments.c.virtual_account_id
+                    == deployment["virtual_account_id"]
+                )
             )
             day = evaluated_at.astimezone(UTC).date()
             daily_pnl = sum(
@@ -1443,33 +1646,16 @@ class ShadowRuntime:
                 ),
                 _ZERO,
             )
-            concurrent = connection.execute(
-                select(
-                    func.coalesce(func.sum(shadow_risk_decisions.c.risk_budget_usd), 0)
+            account = connection.execute(
+                select(virtual_accounts).where(
+                    virtual_accounts.c.virtual_account_id
+                    == deployment["virtual_account_id"]
                 )
-                .select_from(shadow_trade_plans)
-                .join(
-                    shadow_risk_decisions,
-                    shadow_risk_decisions.c.risk_decision_id
-                    == shadow_trade_plans.c.risk_decision_id,
-                )
-                .join(
-                    shadow_signal_candidates,
-                    shadow_signal_candidates.c.candidate_id
-                    == shadow_trade_plans.c.candidate_id,
-                )
-                .where(
-                    (shadow_trade_plans.c.status == "OPEN")
-                    & (
-                        shadow_signal_candidates.c.shadow_deployment_id
-                        == deployment["shadow_deployment_id"]
-                    )
-                )
-            ).scalar_one()
+            ).one()
         return AccountState(
-            equity=Decimal(str(deployment["cash_balance"])),
+            equity=Decimal(str(account.cash_balance)),
             daily_pnl=daily_pnl,
-            concurrent_planned_risk=Decimal(str(concurrent)),
+            concurrent_planned_risk=Decimal(str(account.reserved_risk_usd)),
         )
 
     def _simulate_one_bar(

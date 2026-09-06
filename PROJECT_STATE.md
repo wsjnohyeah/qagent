@@ -2,7 +2,8 @@
 
 ## Current
 
-- Implemented foundations through the corrected Phase 6.1 baseline pass bounded-development validation, including
+- Implemented foundations through the corrected Phase 6.1 baseline plus the four pre-cloud
+  hardening milestones pass bounded-development validation, including
   Phase 1B open-session checks, corrected point-in-time research/ML contracts, constrained
   ML + LLM strategy generation, and the authenticated Control Center/System Steward/shadow
   decision lineage. Phase 5 statistical promotion and Phase 6 continuous-operation exit
@@ -35,7 +36,7 @@
 - Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
   experiment runs, backtest trades, corporate actions, historical universe membership,
   feature parity checks, and walk-forward reports are stored through Alembic revision
-  `20260906_0026`, including exact validation contracts, shadow risk lineage, fenced workflow
+  `20260906_0027`, including exact validation contracts, shadow risk lineage, fenced workflow
   attempts, generation-attempt audit, runtime leases, and the event outbox.
 - The Phase 3 runner provides buy-and-hold, long/cash momentum, and long/cash
   mean-reversion baselines with next-bar execution, commission, slippage, metrics, hashes,
@@ -82,6 +83,14 @@
   order/fill lineage, cash, and P&L. A plan is persisted on one completed bar and can execute
   only on a later bar; missed bars are never synthesized into forward fills. Research-only
   buy-and-hold cannot be shadow-adopted. No broker adapter exists.
+- All shadow deployments are attribution sleeves of one shared virtual master account. Open
+  plans atomically reserve its cash and concurrent risk; fills/cancellations settle once.
+  Account risk is an administrator-confirmed immutable revision, and changing it invalidates
+  older exact validation contracts.
+- A persistent hourly coordinator owns the market-data → feature → ML → forecast → Research
+  LLM → constrained strategy → exact-validation → shadow-readiness DAG. It resumes fenced
+  jobs after failure, records `WAITING_*` business gates, defaults paid research off, and
+  cannot promote/adopt/execute without human confirmation.
 - The global new-exposure pause is enforced inside the shadow tick boundary, so a manually
   confirmed tick cannot bypass the scheduler's kill switch.
 - Tactical risk evaluation now requires explicit, auditable catalyst, restriction-status,
@@ -91,10 +100,11 @@
   stop/target geometry used identically by research and shadow. Candidate/snapshot mismatches
   and future signal/feature timestamps also reject.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; local and remote `main`
-  were synchronized at `06b6853` before this remediation iteration.
+  were synchronized at `3b3926e` before this implementation iteration.
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases.
-- Current corrected baseline passes 106 tests, authenticated local and PostgreSQL/MinIO/Redis
+- The prior corrected baseline passed 106 tests; the current pre-cloud implementation passes
+  113 tests, strict typing across 56 source files, authenticated local and PostgreSQL/MinIO/Redis
   doctors, JavaScript parsing, schema migration checks, zero PostgreSQL schema drift, and the
   repository secret scan. Paid providers were not called during this remediation.
 - Phase 4 adds point-in-time document retrieval, `research_analysis@0.2.0`, exact quotation
@@ -116,33 +126,38 @@
 - Production settings fail unless authentication is enabled with a hash-only password, new
   exposure starts paused, and automatic migration is disabled. The production local raw
   archive is mounted on a persistent named volume.
-- Production Compose separates the authenticated API from a persistent shadow worker with a
-  SQL heartbeat. Workflow jobs have dependency-aware leases and ownership checks; ledger
+- Production Compose separates the authenticated API from dedicated persistent shadow and
+  coordinator workers with SQL heartbeats. Workflow jobs have dependency-aware leases and ownership checks; ledger
   events have a retryable SQL outbox with stable event IDs and dead-letter visibility.
 - Phase 6.1 data pages support dataset-specific drill-down, date grouping, pagination,
   normalized-object views, and collapsed raw payloads. Strategy pages explain provenance and
   expose exact validation, experiments, trades, and shadow state. Pipeline jobs and quality
   reports are individually inspectable.
+- The guarded deploy command now migrates once, runs an idempotent production bootstrap,
+  registers a non-reusable environment identity, creates account/list defaults, forces the
+  global pause, and then verifies API/worker health. Development runtime data is never copied
+  as production evidence.
 
 ## Next
 
-1. Run and document the agreed continuous shadow observation period and replay comparison.
-2. Continue interactive Phase 6.1 UI review with real operator navigation and refine labels
-   where the user identifies remaining ambiguity.
-3. Size remote long-horizon backfill concurrency and storage; continue using bounded samples for local
-   correctness verification.
-4. Extend fill realism with multi-bar partial fills, order cancellation, quote-derived
+1. Implement and locally test Phase 7 Alpaca paper order submission/reconciliation behind a
+   separate broker adapter, global pause, idempotency, and explicit administrator gates.
+2. Select cloud/VPS, domain/TLS, backup/monitoring, and secret-delivery inputs; then run the
+   existing one-command bootstrap on a fresh production data plane.
+3. Run production-scale backfill, enable paid coordinator stages only after budget review,
+   and collect Phase 5 statistical plus continuous-shadow evidence.
+4. Continue interactive Phase 6.1 UI review with real operator navigation and refine labels.
+5. Extend fill realism with multi-bar partial fills, order cancellation, quote-derived
    rather than configured spread, and symbol-change/delisting replay.
-5. Add operator-driven dead-letter replay and dedicated collection/research worker schedules;
-   the durable outbox and lease contracts are now implemented.
-6. Select TLS/reverse proxy, backup, monitoring, and secret delivery before remotely exposing
-   the already-authenticated Control Center.
+6. Add operator-driven dead-letter replay and provider-lag/sequence-gap notification channels.
 
 ## Blocked
 
 - Cloud deployment needs the VPS/provider, domain/TLS plan, backup/monitoring choices, and
   secret delivery mechanism. The GitHub repository is configured.
-- Paper submission remains blocked until the inherited percentage and dollar risk limits are reconciled.
+- Paper submission is not implemented yet. The shared account now reconciles percentage and
+  dollar limits; implementing the broker adapter remains the next local milestone and sending
+  any paper order remains confirmation-gated.
 
 ## Decisions
 
@@ -180,3 +195,5 @@
 - ADR 0020: bind exact research/execution contracts and use recoverable Phase 6 operations.
 - ADR 0021: require forward shadow timing, complete execution-contract binding, durable event
   reconciliation, and attempt-level workflow/runtime fencing.
+- ADR 0022: use one shared virtual account, a persistent autonomous research DAG, and immutable
+  development/production environment identities.

@@ -80,6 +80,15 @@ strategy adoption/retirement, shadow deployments/ticks, and code-change sessions
 handler is retained as `FAILED` with a bounded error code. Strategy deletion means retirement,
 not record removal.
 
+Shared-account risk changes use `account.risk.update` and the same two-step confirmation.
+They are blocked while any trade plan has reserved account capacity. A successful revision
+changes the exact execution contract, so affected strategies must be revalidated before a
+new adoption.
+
+The Pipelines page also shows the autonomous coordinator and its durable stage jobs. Use
+`GET /v1/coordinator/status` for the complete recent cycle view; `WAITING_*` outcomes explain
+which data, budget, statistical, or human prerequisite is not yet satisfied.
+
 ## System Steward
 
 The Steward is the default top-level page and uses the full central workspace. Its sidebar

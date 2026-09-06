@@ -287,6 +287,8 @@ class SystemSteward:
         lists = self.objects.lists()
         strategies = self.objects.strategies(limit=25)
         deployments = self.shadow.deployments(limit=25)
+        virtual_account = self.shadow.virtual_account()
+        virtual_account["sleeve_count"] = len(virtual_account.pop("sleeves", []))
         with self.engine.connect() as connection:
             jobs = [
                 dict(row._mapping)
@@ -468,6 +470,7 @@ class SystemSteward:
                 "data_catalog": catalog,
                 "strategies": strategies,
                 "shadow_deployments": deployments,
+                "virtual_account": virtual_account,
                 "recent_workflow_jobs": jobs,
                 "recent_ingestions": ingestions,
                 "recent_data_quality": quality,
@@ -503,6 +506,7 @@ class SystemSteward:
                 "counts",
                 "constraints",
                 "pipeline_controls",
+                "virtual_account",
             )
         }
         section_terms = {

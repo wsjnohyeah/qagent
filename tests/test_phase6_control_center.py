@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from decimal import Decimal
 import time
@@ -13,8 +14,8 @@ from agentic_quant.api import create_app
 from agentic_quant.config import Settings
 from agentic_quant.database import (
     admin_sessions,
-    shadow_deployments,
     validation_reports,
+    virtual_accounts,
 )
 from agentic_quant.domain import BacktestCostModel, StockBar
 from agentic_quant.domain import LLMUsage
@@ -251,6 +252,50 @@ def test_workload_budget_update_requires_confirmation(settings: Settings) -> Non
         assert history[0]["reason"] == (
             "Tune each workload budget from Control Center"
         )
+
+
+def test_shared_account_risk_update_requires_confirmation(settings: Settings) -> None:
+    with TestClient(create_app(settings)) as client:
+        before = client.get("/v1/shadow/account").json()
+        proposal = client.post(
+            "/v1/actions",
+            json={
+                "action_type": "account.risk.update",
+                "target_type": "virtual_account",
+                "target_id": before["virtual_account_id"],
+                "parameters": {
+                    "limits": {"maximum_trade_risk_usd": "180"}
+                },
+                "reason": "Increase bounded shared shadow risk for testing",
+            },
+        ).json()
+        unchanged = client.get("/v1/shadow/account").json()
+        assert unchanged["maximum_trade_risk_usd"] == "130.00000000"
+        confirmed = client.post(
+            f"/v1/actions/{proposal['action_request_id']}/confirm",
+            json={"confirmation_phrase": proposal["confirmation_phrase"]},
+        )
+        assert confirmed.status_code == 200
+        changed = client.get("/v1/shadow/account").json()
+        assert changed["maximum_trade_risk_usd"] == "180.00000000"
+        assert changed["risk_revision"] == 2
+
+
+def test_concrete_coordinator_fails_closed_without_data_credentials(
+    settings: Settings,
+) -> None:
+    with TestClient(create_app(settings)) as client:
+        result = asyncio.run(
+            client.app.state.coordinator.run_once(
+                symbols=("AAPL",),
+                as_of=datetime(2026, 9, 6, 20, tzinfo=UTC),
+            )
+        )
+        assert result["completed"] is True
+        assert result["business_waiting_count"] == 8
+        jobs = client.get("/v1/coordinator/status").json()["cycles"][0]["jobs"]
+        assert jobs[0]["result"]["outcome"] == "WAITING_CREDENTIALS"
+        assert jobs[-1]["result"]["outcome"] == "WAITING_EXACT_VALIDATION"
 
 
 def test_production_rejects_plaintext_admin_password() -> None:
@@ -577,10 +622,10 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
         active = active_after_trade
         with ledger.engine.begin() as connection:
             connection.execute(
-                update(shadow_deployments)
+                update(virtual_accounts)
                 .where(
-                    shadow_deployments.c.shadow_deployment_id
-                    == active["shadow_deployment_id"]
+                    virtual_accounts.c.virtual_account_id
+                    == active["virtual_account_id"]
                 )
                 .values(cash_balance=Decimal("30000"))
             )

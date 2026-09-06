@@ -25,6 +25,7 @@ from agentic_quant.domain import (
 from agentic_quant.ids import uuid7
 from agentic_quant.ledger import EventLedger
 from agentic_quant.migrations import upgrade_database
+from agentic_quant.production_bootstrap import bootstrap_production
 from agentic_quant.risk import (
     RestrictionRegistry,
     RiskPolicy,
@@ -188,6 +189,24 @@ def test_production_boots_paused_and_never_auto_migrates() -> None:
             auto_migrate=False,
             auth_required=False,
         )
+
+
+def test_production_bootstrap_rejects_local_database(settings: Settings) -> None:
+    production = settings.model_copy(
+        update={
+            "app_env": AppEnvironment.PRODUCTION,
+            "auto_migrate": False,
+            "auth_required": True,
+            "admin_username": "admin",
+            "admin_password_hash": SecretStr("test-hash"),
+            "session_secret": SecretStr("x" * 64),
+            "global_new_exposure_paused": True,
+            "redis_url": "redis://redis:6379/0",
+            "deployment_environment_id": "prod-test",
+        }
+    )
+    with pytest.raises(ValueError, match="requires PostgreSQL"):
+        bootstrap_production(production)
 
 
 def test_production_worker_restart_pauses_but_api_restart_preserves_control(

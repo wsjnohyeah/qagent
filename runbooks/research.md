@@ -175,7 +175,8 @@ curl -fsS \
   cancellations, and intrabar path simulation remain open.
 - Delisted-security acquisition, borrow, options fills, taxes, dynamic market impact, and
   capacity analysis are not implemented.
-- The LLM research orchestrator and predictive ML models are intentionally not connected
-  until the validation surface can reject their candidates independently.
+- The LLM research and predictive ML tools are connected through the persistent coordinator,
+  but paid stages default off. Generated strategies remain research-only until exact
+  validation and separate administrator-confirmed adoption.
 - Production-scale statistical acceptance remains open. Local CPCV/PBO/DSR output validates
   computation and fail-closed behavior, not alpha or eligibility for deployment.

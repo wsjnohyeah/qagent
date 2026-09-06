@@ -27,6 +27,11 @@ outbox, but collection and paid research schedules are still operator-defined. G
 internally consistent as isolated candidate accounting; a shared main-account/sleeve model
 needs an explicit allocation policy before it can be implemented safely.
 
+> Superseded by ADR 0022: the next iteration implemented the shared virtual master account,
+> atomic plan reservations, and the persistent research coordinator. Paid stages still
+> require explicit environment enablement and USD-budget capacity; adoption remains human-
+> confirmed. This paragraph is retained as the historical state at the reviewed commit.
+
 Implementation verification is not strategy-performance evidence. Bounded fixtures establish
 software behavior only; statistical eligibility still requires adequate untouched data and
 forward observation.

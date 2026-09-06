@@ -14,7 +14,8 @@ portfolio events.
    `static_strategy`, and binds the exact strategy ID, timeframe, feature version, backtest
    engine version, and cost model used by the runtime.
 3. The administrator confirms `strategy.adopt`.
-4. The administrator confirms `shadow.start` for one symbol and virtual cash amount.
+4. The administrator confirms `shadow.start` for one symbol. Its validated capital must
+   match the shared virtual master account.
 5. The shadow pipeline and global new-exposure control are enabled.
 
 No override can convert an insufficient/rejected validation report into an adoption.
@@ -37,6 +38,12 @@ No override can convert an insufficient/rejected validation report into an adopt
   shadow risk profile, and becomes a `TradePlan` only on approval. Account floor, daily loss,
   concurrent risk, restriction, data health, liquidity, duplicate intent, expiry, reward/risk,
   and position sizing are evaluated before any virtual order is recorded.
+- Every deployment is an attribution sleeve under one `SHARED_MASTER` virtual account.
+  Approved plans atomically reserve account cash and risk; fills/cancellations release the
+  reservation, and realized P&L settles once into the master account. Strategies therefore
+  cannot each spend a duplicate copy of the same capital.
+- Account limits are immutable revisions changed through `account.risk.update`. A new risk
+  revision changes the execution contract, so old validation certificates fail closed.
 - Virtual fills model commission, half-spread, slippage, fixed impact, and maximum bar-volume
   participation through the deterministic event-driven portfolio engine. Entry sizing uses
   only the completed decision bar's volume; the future execution bar's final volume is never
@@ -50,6 +57,7 @@ Use the Shadow page or:
 
 ```text
 GET /v1/shadow/deployments
+GET /v1/shadow/account
 GET /v1/shadow/deployments/{id}
 GET /v1/shadow/events?deployment_id={id}
 GET /v1/shadow/runs

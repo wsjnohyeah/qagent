@@ -27,6 +27,8 @@ from agentic_quant.auth import (
 from agentic_quant.code_changes import CodeChangeStore
 from agentic_quant.config import AppEnvironment, Settings, TradingMode
 from agentic_quant.control_plane import SystemObjectStore
+from agentic_quant.coordinator import AutonomousCoordinator
+from agentic_quant.coordinator_runtime import ResearchCoordinatorHandler
 from agentic_quant.document_ingestion import (
     DocumentIngestionService,
     FundamentalsIngestionService,
@@ -35,6 +37,7 @@ from agentic_quant.document_store import DocumentStore
 from agentic_quant.data_quality import MarketDataQualityService
 from agentic_quant.domain import BacktestCostModel, LLMProviderName, LLMWorkload
 from agentic_quant.event_bus import NullEventPublisher, RedisStreamPublisher
+from agentic_quant.environment import EnvironmentRegistry
 from agentic_quant.intelligence import (
     EvidenceBoundResearchAnalyst,
     IntelligenceStore,
@@ -266,8 +269,8 @@ def create_app(
     process_role: str = "api",
 ) -> FastAPI:
     app_settings = settings or Settings()
-    if process_role not in {"api", "worker"}:
-        raise ValueError("process_role must be api or worker")
+    if process_role not in {"api", "worker", "coordinator"}:
+        raise ValueError("process_role must be api, worker, or coordinator")
     if (
         app_settings.app_env == AppEnvironment.PRODUCTION
         and not app_settings.auth_required
@@ -286,7 +289,7 @@ def create_app(
         ledger,
         calendar_name=app_settings.market_calendar,
     )
-    workflow_job_store = WorkflowJobStore(ledger.engine)
+    workflow_job_store = WorkflowJobStore(ledger.engine, ledger)
     risk_policy = RiskPolicy.from_yaml(app_settings.risk_policy_path)
     restrictions = RestrictionRegistry.from_yaml(
         app_settings.restricted_securities_path
@@ -444,8 +447,13 @@ def create_app(
             and process_role == "worker"
         ):
             actions.enforce_production_worker_boot_pause()
+        EnvironmentRegistry(ledger.engine).register(
+            environment=app_settings.app_env,
+            environment_id=app_settings.deployment_environment_id,
+        )
         if inspect(ledger.engine).has_table("system_lists"):
             objects.ensure_defaults()
+        shadow.initialize_virtual_account()
         archive = build_raw_archive(app_settings)
         publisher = (
             RedisStreamPublisher(app_settings.redis_url, app_settings.redis_stream_name)
@@ -475,7 +483,28 @@ def create_app(
         application.state.actions = actions
         application.state.steward = steward
         application.state.code_changes = code_changes
+        coordinator = AutonomousCoordinator(
+            workflow_job_store,
+            handler=ResearchCoordinatorHandler(
+                settings=app_settings,
+                ledger=ledger,
+                objects=objects,
+                market=application.state.market_store,
+                research=research_store,
+                ml=ml_store,
+                ml_policy=ml_policy,
+                evidence=evidence_retriever,
+                analyst=research_analyst,
+                generator=strategy_generator,
+                shadow=shadow,
+                restrictions=restrictions,
+                archive=archive,
+                publisher=publisher,
+            ),
+        )
+        application.state.coordinator = coordinator
         stop_shadow = asyncio.Event()
+        stop_coordinator = asyncio.Event()
 
         async def shadow_loop() -> None:
             failure_streak = 0
@@ -551,12 +580,82 @@ def create_app(
             else None
         )
         application.state.shadow_task = shadow_task
+
+        async def coordinator_loop() -> None:
+            failure_streak = 0
+            while not stop_coordinator.is_set():
+                delay = app_settings.coordinator_poll_seconds
+                try:
+                    if not actions.pipeline_enabled("coordinator"):
+                        actions.record_pipeline_heartbeat(
+                            pipeline="coordinator",
+                            status="PAUSED",
+                            detail="Autonomous coordinator is disabled by control plane",
+                        )
+                    else:
+                        universe = objects.get_list("trading-universe")
+                        symbols = tuple(universe["members"]) if universe else ()
+                        if not symbols:
+                            actions.record_pipeline_heartbeat(
+                                pipeline="coordinator",
+                                status="WAITING",
+                                detail="Trading universe is empty",
+                            )
+                        else:
+                            actions.record_pipeline_heartbeat(
+                                pipeline="coordinator",
+                                status="RUNNING",
+                                detail=(
+                                    f"Starting governed cycle for {len(symbols)} symbols"
+                                ),
+                            )
+                            result = await coordinator.run_once(
+                                symbols=symbols,
+                                as_of=datetime.now(UTC),
+                            )
+                            actions.record_pipeline_heartbeat(
+                                pipeline="coordinator",
+                                status="IDLE",
+                                detail=(
+                                    f"cycle={result['job_group_id']} "
+                                    f"processed={result['processed_this_run']} "
+                                    f"waiting={result['business_waiting_count']}"
+                                ),
+                            )
+                    failure_streak = 0
+                except Exception as exc:
+                    failure_streak += 1
+                    delay = min(
+                        app_settings.coordinator_poll_seconds,
+                        max(5, 2 ** min(failure_streak, 8)),
+                    )
+                    actions.record_pipeline_heartbeat(
+                        pipeline="coordinator",
+                        status="FAILED",
+                        detail=(
+                            f"attempt={failure_streak}; {type(exc).__name__}: {exc}"
+                        ),
+                    )
+                try:
+                    await asyncio.wait_for(stop_coordinator.wait(), timeout=delay)
+                except TimeoutError:
+                    continue
+
+        coordinator_task = (
+            asyncio.create_task(coordinator_loop(), name="research-coordinator")
+            if app_settings.autonomous_coordinator_enabled
+            else None
+        )
+        application.state.coordinator_task = coordinator_task
         try:
             yield
         finally:
             stop_shadow.set()
+            stop_coordinator.set()
             if shadow_task is not None:
                 await shadow_task
+            if coordinator_task is not None:
+                await coordinator_task
             await llm_gateway.aclose()
             ledger.engine.dispose()
 
@@ -726,7 +825,7 @@ def create_app(
             "live_trading_enabled": False,
             "new_exposure_paused": runtime_is_paused(),
             "database": "healthy" if ledger.health() else "unhealthy",
-            "phase": "6.1-observable-system-steward-control-center",
+            "phase": "pre-cloud-1-4-implemented-phase7-next",
             "data_operating_scope": app_settings.data_operating_scope,
             "development_max_backfill_days": (
                 app_settings.development_max_backfill_days
@@ -739,6 +838,12 @@ def create_app(
                 else None
             ),
             "phase_1b_open_session_validation": "completed",
+            "autonomous_coordinator_enabled": (
+                app_settings.autonomous_coordinator_enabled
+            ),
+            "coordinator_paid_research_enabled": (
+                app_settings.coordinator_paid_research_enabled
+            ),
             "llm_routing_version": llm_status["routing_version"],
             "llm_route_source": llm_status["route_source"],
             "llm_budget_policy": llm_budget_manager.effective_policy_version(),
@@ -780,11 +885,15 @@ def create_app(
 
     @application.get("/v1/control/summary")
     def control_summary() -> dict[str, Any]:
+        account = shadow.virtual_account()
+        account["sleeve_count"] = len(account.pop("sleeves", []))
         return {
             "counts": objects.object_summary(),
             "lists": objects.lists(),
             "data_catalog": objects.data_catalog(),
             "shadow": shadow.health_summary(),
+            "virtual_account": account,
+            "coordinator": application.state.coordinator.status(limit=80),
             "recent_activity": objects.activity(limit=25),
             "pending_actions": [
                 item
@@ -900,6 +1009,10 @@ def create_app(
         limit: int = Query(default=200, ge=1, le=1_000),
     ) -> list[dict[str, Any]]:
         return shadow.deployments(limit=limit)
+
+    @application.get("/v1/shadow/account")
+    def shadow_virtual_account() -> dict[str, Any]:
+        return shadow.virtual_account()
 
     @application.get("/v1/shadow/deployments/{deployment_id}")
     def shadow_deployment(deployment_id: str) -> dict[str, Any]:
@@ -1131,6 +1244,11 @@ def create_app(
             raise HTTPException(status_code=404, detail="workflow job not found")
         return value
 
+    @application.get("/v1/coordinator/status")
+    def coordinator_status() -> dict[str, Any]:
+        value: dict[str, Any] = application.state.coordinator.status()
+        return value
+
     @application.get("/v1/catalysts")
     def catalysts(limit: int = Query(default=50, ge=1, le=500)) -> list[dict[str, Any]]:
         return document_store.recent_catalysts(limit=limit)
@@ -1177,7 +1295,7 @@ def create_app(
                 promotion_policy=load_promotion_gate_policy(
                     app_settings.research_promotion_policy_path
                 ),
-                risk_policy=risk_policy,
+                risk_policy=shadow.effective_risk_policy(),
                 restrictions=restrictions,
             ).run(
                 symbol=payload.symbol.upper(),

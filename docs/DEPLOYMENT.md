@@ -38,6 +38,7 @@ Create `/opt/agentic-quant/.env.production` on the VPS with permissions `0600`. 
 ```dotenv
 APP_IMAGE=ghcr.io/OWNER/REPO:COMMIT_SHA
 APP_ENV=production
+DEPLOYMENT_ENVIRONMENT_ID=prod-us-west-1-primary
 TRADING_MODE=shadow
 LIVE_TRADING_ENABLED=false
 GLOBAL_NEW_EXPOSURE_PAUSED=true
@@ -48,6 +49,11 @@ SESSION_SECRET=AT_LEAST_32_RANDOM_CHARACTERS
 SESSION_MAX_AGE_DAYS=90
 SHADOW_RUNTIME_ENABLED=true
 SHADOW_POLL_SECONDS=30
+AUTONOMOUS_COORDINATOR_ENABLED=true
+COORDINATOR_POLL_SECONDS=3600
+COORDINATOR_INITIAL_LOOKBACK_DAYS=1826
+# Leave false until routes and USD budgets are reviewed after bootstrap.
+COORDINATOR_PAID_RESEARCH_ENABLED=false
 AUTO_MIGRATE=false
 POSTGRES_DB=quant
 POSTGRES_USER=quant
@@ -109,11 +115,17 @@ curl -fsS http://127.0.0.1:8000/health/ready
 The API is loopback-only. Add a TLS reverse proxy only after verifying login, session-cookie,
 CSRF, and logout behavior through that proxy. Do not expose ports 5432 or 6379.
 
-The guarded deploy script starts PostgreSQL, waits for readiness, applies Alembic migrations
-as a one-shot task, and only then replaces the API and dedicated shadow worker. The API does
-not own the production scheduler. Deployment fails if either API readiness or the worker's
-persistent heartbeat is unhealthy. `AUTO_MIGRATE` remains false in both long-running
-services.
+The guarded deploy script starts PostgreSQL, waits for readiness, applies Alembic migrations,
+and runs `python -m agentic_quant.production_bootstrap` as one-shot tasks. Bootstrap registers
+the immutable production environment ID, creates governed lists and the shared virtual
+account idempotently, and forces new exposure paused. It then replaces the API, shadow worker,
+and separate research-coordinator worker so CPU-heavy training cannot delay shadow ticks. The
+API does not own production schedulers. Deployment fails if API readiness or either worker
+heartbeat is unhealthy. `AUTO_MIGRATE` remains false in long-running services.
+
+Never copy the development SQLite database or local object-store directory into production.
+The cloud coordinator backfills and derives its own data, feature, model, validation, and
+shadow evidence. Git transports code, configuration, migrations, and documentation only.
 
 ## Post-deploy verification
 
@@ -122,6 +134,9 @@ Verify and record:
 - Exact Git commit and image digest.
 - `/health/live` and `/health/ready` responses.
 - `APP_ENV=production`, `TRADING_MODE=shadow|paper`, live disabled, exposure paused.
+- The bootstrap output says `ready_paused` and the stored environment ID matches this stack.
+- `GET /v1/coordinator/status` is readable and the coordinator heartbeat is present when
+  enabled. `WAITING_PAID_RESEARCH_ENABLEMENT` is expected until paid automation is approved.
 - PostgreSQL and Redis health.
 - Restart behavior after one controlled API restart.
 - Backup output and a restore test before durable operation.

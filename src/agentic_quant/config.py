@@ -40,7 +40,12 @@ class Settings(BaseSettings):
     session_max_age_days: int = Field(default=90, ge=1, le=365)
     shadow_runtime_enabled: bool = True
     shadow_poll_seconds: int = Field(default=30, ge=5, le=3_600)
+    autonomous_coordinator_enabled: bool = False
+    coordinator_paid_research_enabled: bool = False
+    coordinator_poll_seconds: int = Field(default=3_600, ge=60, le=86_400)
+    coordinator_initial_lookback_days: int = Field(default=1_826, ge=30, le=3_650)
     auto_migrate: bool = True
+    deployment_environment_id: str = "local-development"
     database_url: str = "sqlite+pysqlite:///./work/agentic_quant.db"
     redis_url: str | None = None
     redis_stream_name: str = "market-events"

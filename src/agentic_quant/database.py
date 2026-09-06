@@ -1193,10 +1193,108 @@ strategy_adoptions = Table(
     ),
 )
 
+virtual_accounts = Table(
+    "virtual_accounts",
+    metadata,
+    Column("virtual_account_id", String(36), primary_key=True),
+    Column("slug", String(80), nullable=False, unique=True),
+    Column("name", String(120), nullable=False),
+    Column("account_type", String(32), nullable=False),
+    Column("currency", String(8), nullable=False),
+    Column("status", String(24), nullable=False, index=True),
+    Column("initial_cash", Numeric(24, 8), nullable=False),
+    Column("cash_balance", Numeric(24, 8), nullable=False),
+    Column("realized_pnl", Numeric(24, 8), nullable=False),
+    Column("reserved_cash", Numeric(24, 8), nullable=False),
+    Column("reserved_risk_usd", Numeric(24, 8), nullable=False),
+    Column("base_policy_version", String(80), nullable=False),
+    Column("risk_revision", Integer, nullable=False),
+    Column("initial_risk_fraction", Numeric(12, 8), nullable=False),
+    Column("maximum_trade_risk_usd", Numeric(24, 8), nullable=False),
+    Column("maximum_concurrent_risk_usd", Numeric(24, 8), nullable=False),
+    Column("daily_loss_stop_usd", Numeric(24, 8), nullable=False),
+    Column("account_floor_usd", Numeric(24, 8), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False, index=True),
+)
+
+virtual_account_risk_revisions = Table(
+    "virtual_account_risk_revisions",
+    metadata,
+    Column("risk_revision_id", String(36), primary_key=True),
+    Column(
+        "virtual_account_id",
+        String(36),
+        ForeignKey("virtual_accounts.virtual_account_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("revision_number", Integer, nullable=False),
+    Column("initial_risk_fraction", Numeric(12, 8), nullable=False),
+    Column("maximum_trade_risk_usd", Numeric(24, 8), nullable=False),
+    Column("maximum_concurrent_risk_usd", Numeric(24, 8), nullable=False),
+    Column("daily_loss_stop_usd", Numeric(24, 8), nullable=False),
+    Column("account_floor_usd", Numeric(24, 8), nullable=False),
+    Column("reason", Text, nullable=False),
+    Column("created_by", String(80), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint(
+        "virtual_account_id",
+        "revision_number",
+        name="uq_virtual_account_risk_revisions_number",
+    ),
+)
+
+strategy_sleeves = Table(
+    "strategy_sleeves",
+    metadata,
+    Column("strategy_sleeve_id", String(36), primary_key=True),
+    Column(
+        "virtual_account_id",
+        String(36),
+        ForeignKey("virtual_accounts.virtual_account_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "strategy_spec_id",
+        String(36),
+        ForeignKey("strategy_specs.strategy_spec_id"),
+        nullable=False,
+        index=True,
+    ),
+    Column("symbol", String(24), nullable=False, index=True),
+    Column("status", String(24), nullable=False, index=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint(
+        "virtual_account_id",
+        "strategy_spec_id",
+        "symbol",
+        name="uq_strategy_sleeves_account_strategy_symbol",
+    ),
+)
+
 shadow_deployments = Table(
     "shadow_deployments",
     metadata,
     Column("shadow_deployment_id", String(36), primary_key=True),
+    Column(
+        "virtual_account_id",
+        String(36),
+        ForeignKey("virtual_accounts.virtual_account_id"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "strategy_sleeve_id",
+        String(36),
+        ForeignKey("strategy_sleeves.strategy_sleeve_id"),
+        # Existing deployments are repaired to a deterministic sleeve lazily after
+        # migration 0027. Every newly-created deployment supplies this value.
+        nullable=True,
+        index=True,
+    ),
     Column(
         "strategy_spec_id",
         String(36),
@@ -1371,6 +1469,8 @@ shadow_trade_plans = Table(
     Column("symbol", String(24), nullable=False, index=True),
     Column("direction", String(16), nullable=False),
     Column("quantity", Integer, nullable=False),
+    Column("reserved_cash", Numeric(24, 8), nullable=False),
+    Column("reserved_risk_usd", Numeric(24, 8), nullable=False),
     Column("limit_price", Numeric(20, 8), nullable=False),
     Column("invalidation", Numeric(20, 8), nullable=False),
     Column("targets_json", JSON, nullable=False),

@@ -13,6 +13,7 @@ from agentic_quant.data_quality import (
     MarketDataQualityService,
     inspect_market_bars,
 )
+from agentic_quant.coordinator import AutonomousCoordinator, COORDINATOR_STAGES
 from agentic_quant.database import event_outbox, workflow_jobs
 from agentic_quant.domain import (
     BacktestCostModel,
@@ -225,6 +226,49 @@ def test_partitioned_backfill_resumes_without_repeating_completed_work(
         "workflow_jobs": 3,
         "failed_workflow_jobs": 0,
     }
+
+
+def test_autonomous_coordinator_resumes_failed_stage_without_repeating_parents(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    calls: list[str] = []
+    failed_once = False
+
+    async def handler(job, dependencies):  # type: ignore[no-untyped-def]
+        nonlocal failed_once
+        stage = str(job.payload["stage"])
+        calls.append(stage)
+        if stage == "train_ml" and not failed_once:
+            failed_once = True
+            raise RuntimeError("transient trainer failure")
+        prior = dict(dependencies[-1].result) if dependencies else {}
+        return {**prior, "outcome": "COMPLETED", "last_stage": stage}
+
+    coordinator = AutonomousCoordinator(
+        WorkflowJobStore(ledger.engine),
+        handler=handler,
+        worker_id="test-coordinator",
+    )
+    cutoff = datetime(2026, 9, 5, 22, tzinfo=UTC)
+    first = asyncio.run(
+        coordinator.run_once(symbols=("AAPL",), as_of=cutoff)
+    )
+    assert first["status_counts"] == {
+        "PENDING": 5,
+        "RUNNING": 0,
+        "COMPLETED": 2,
+        "FAILED": 1,
+    }
+    second = asyncio.run(
+        coordinator.run_once(symbols=("AAPL",), as_of=cutoff)
+    )
+    assert second["completed"] is True
+    assert calls.count("collect_market_data") == 1
+    assert calls.count("materialize_features") == 1
+    assert calls.count("train_ml") == 2
+    assert calls[-1] == COORDINATOR_STAGES[-1]
 
 
 def test_fresh_running_partition_is_not_stolen_by_another_invoker(

@@ -8,6 +8,22 @@ if [ ! -f .env.production ]; then
   echo "Refusing deployment: .env.production is missing. See docs/DEPLOYMENT.md."
   exit 1
 fi
+if ! grep -Eq '^APP_ENV=production$' .env.production; then
+  echo "Refusing deployment: APP_ENV must be production."
+  exit 1
+fi
+if ! grep -Eq '^AUTO_MIGRATE=false$' .env.production; then
+  echo "Refusing deployment: AUTO_MIGRATE must be false."
+  exit 1
+fi
+if ! grep -Eq '^DATABASE_URL=postgresql\+psycopg://' .env.production; then
+  echo "Refusing deployment: DATABASE_URL must use PostgreSQL/psycopg."
+  exit 1
+fi
+if ! grep -Eq '^REDIS_URL=redis://' .env.production; then
+  echo "Refusing deployment: REDIS_URL is missing or unsupported."
+  exit 1
+fi
 if ! grep -Eq '^TRADING_MODE=(shadow|paper)$' .env.production; then
   echo "Refusing deployment: TRADING_MODE must be shadow or paper."
   exit 1
@@ -18,6 +34,10 @@ if ! grep -Eq '^LIVE_TRADING_ENABLED=false$' .env.production; then
 fi
 if ! grep -Eq '^AUTH_REQUIRED=true$' .env.production; then
   echo "Refusing deployment: AUTH_REQUIRED must be true."
+  exit 1
+fi
+if ! grep -Eq '^DEPLOYMENT_ENVIRONMENT_ID=.+$' .env.production; then
+  echo "Refusing deployment: DEPLOYMENT_ENVIRONMENT_ID is missing."
   exit 1
 fi
 if ! grep -Eq '^ADMIN_USERNAME=.+$' .env.production; then
@@ -54,6 +74,8 @@ done
 
 docker compose --env-file .env.production -f compose.production.yml run --rm --no-deps api \
   alembic upgrade head
+docker compose --env-file .env.production -f compose.production.yml run --rm --no-deps api \
+  python -m agentic_quant.production_bootstrap
 docker compose --env-file .env.production -f compose.production.yml up -d --remove-orphans
 docker compose --env-file .env.production -f compose.production.yml ps
 
@@ -77,4 +99,14 @@ until docker compose --env-file .env.production -f compose.production.yml exec -
   fi
   sleep 2
 done
-echo "API and worker health gates passed. New exposure remains paused."
+attempt=0
+until docker compose --env-file .env.production -f compose.production.yml exec -T coordinator \
+  python -m agentic_quant.worker --healthcheck --pipeline coordinator >/dev/null 2>&1; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -ge 30 ]; then
+    docker compose --env-file .env.production -f compose.production.yml logs --tail=200 coordinator
+    exit 1
+  fi
+  sleep 2
+done
+echo "API, shadow worker, and coordinator health gates passed. New exposure remains paused."

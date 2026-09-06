@@ -1,6 +1,6 @@
 # Agentic Quant Trading System
 
-A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains implemented and locally verified foundations through **Phase 6.1**: safety controls, read-only market data, event/document ingestion, point-in-time research, evidence-bound LLM analysis, ML/registry and constrained strategy-generation tooling, an authenticated System Steward, drill-down object explorers, and a persistent broker-free shadow runtime. Implementation completeness is not the same as passing statistical or production-operational exit criteria; see `docs/REVIEW_REMEDIATION_2026-09-06.md`.
+A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains implemented and locally verified foundations through **Phase 6.1**, plus the pre-cloud shared-account, autonomous-coordinator, recovery, and production-bootstrap work: safety controls, read-only market data, event/document ingestion, point-in-time research, evidence-bound LLM analysis, ML/registry and constrained strategy-generation tooling, an authenticated System Steward, drill-down object explorers, and a persistent broker-free shadow runtime. Implementation completeness is not the same as passing statistical or production-operational exit criteria; see `docs/REVIEW_REMEDIATION_2026-09-06.md`.
 
 > Live-money execution is not implemented. `live` is not a valid mode, and setting `LIVE_TRADING_ENABLED=true` makes startup fail.
 
@@ -111,6 +111,17 @@ P&L. A plan must be durable before a later bar can create a fill; missed runtime
 backfilled as forward trades. It contains no broker client or order-submission path. Bounded
 local data validates the workflow; production can run the same partitionable contracts over
 longer history.
+
+All shadow strategy/symbol deployments are sleeves of one shared virtual master account.
+Open plans atomically reserve account cash and concurrent risk, and completion releases the
+reservation and settles P&L once. The default `$130` per-trade and `$780` concurrent risk are
+an editable, versioned starting policy—not hard-coded claims about optimal sizing. A confirmed
+risk revision invalidates prior execution certificates until exact validation is rerun.
+
+The autonomous coordinator persists an hourly, per-symbol eight-stage DAG from market-data
+collection through feature/ML/LLM research, constrained generation, exact validation, and
+human-gated shadow readiness. It resumes failed jobs without repeating completed parents.
+Paid LLM stages default off, and the coordinator cannot promote, adopt, or submit orders.
 
 ## Commands
 
@@ -410,6 +421,8 @@ requests create scoped sessions with no web shell; an external trusted coding wo
 produce a diff and passing test record before a separate commit approval can be granted.
 
 See `runbooks/control_center.md`, `runbooks/shadow_runtime.md`, ADR 0017, and ADR 0018.
+Coordinator operation is documented in `runbooks/autonomous_coordinator.md`; shared-account
+and environment-isolation decisions are recorded in ADR 0022.
 
 ## Repository map
 
@@ -440,6 +453,7 @@ AGENTS.md                mandatory operating rules for coding/deployment agents
 - `GET /v1/data-quality/{report_id}`
 - `GET /v1/workflow-jobs`
 - `GET /v1/workflow-jobs/{job_id}`
+- `GET /v1/coordinator/status`
 - `GET /v1/documents/search`
 - `GET /v1/catalysts`
 - `GET /v1/research/experiments`
@@ -483,6 +497,7 @@ AGENTS.md                mandatory operating rules for coding/deployment agents
 - `GET|POST /v1/actions` plus `POST /v1/actions/{id}/confirm`
 - `POST /v1/steward/ask` and persistent conversation history
 - `GET /v1/shadow/deployments`, `/v1/shadow/events`, `/v1/shadow/runs`
+- `GET /v1/shadow/account`
 - `GET /v1/shadow/decisions`, `/v1/shadow/reports`, `/v1/shadow/alerts`
 - `GET /v1/runtime/controls` and confirmation-gated pipeline controls
 - `GET /v1/code-changes` and tested-candidate intake
@@ -503,6 +518,11 @@ in `docs/DEPLOYMENT.md`.
 
 ## GitHub and cloud path
 
+Current delivery order: the four pre-cloud hardening tasks are implemented locally; Phase 7
+Alpaca paper integration is next and will also be locally tested before cloud deployment.
+Cloud bootstrap, production-scale backfill, statistical promotion evidence, and continuous
+shadow observation follow on the remote data plane.
+
 The source repository is [wsjnohyeah/qagent](https://github.com/wsjnohyeah/qagent), with
 local `main` tracking `origin/main`.
 
@@ -517,4 +537,6 @@ feature branch -> pull request -> CI -> merge main
 The cloud agent must follow `docs/DEPLOYMENT.md`. It must not invent missing credentials,
 expose PostgreSQL/Redis publicly, or bypass TLS/authentication. Cloud deployment has not yet
 been attempted because the VPS, domain/TLS approach, production secret channel, backup, and
-monitoring choices are still unresolved.
+monitoring choices are still unresolved. Once those inputs exist,
+`infra/deploy/deploy_vps.sh` performs migration, idempotent environment/bootstrap checks,
+service startup, and health gates while keeping new exposure paused.

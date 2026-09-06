@@ -56,7 +56,7 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert ready.json()["live_trading_enabled"] is False
         system_status = client.get("/v1/system/status").json()
         assert system_status["phase"] == (
-            "6.1-observable-system-steward-control-center"
+            "pre-cloud-1-4-implemented-phase7-next"
         )
         assert system_status["data_operating_scope"] == "bounded_correctness_samples"
         assert system_status["development_max_backfill_days"] == 120
