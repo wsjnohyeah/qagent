@@ -2,8 +2,9 @@
 
 ## Current
 
-- Implemented foundations through the corrected Phase 6.1 baseline plus the four pre-cloud
-  hardening milestones pass bounded-development validation, including
+- Implemented foundations through the corrected Phase 6.1 baseline, the four pre-cloud
+  hardening milestones, and the Phase 7 Alpaca Paper boundary pass bounded-development
+  validation, including
   Phase 1B open-session checks, corrected point-in-time research/ML contracts, constrained
   ML + LLM strategy generation, and the authenticated Control Center/System Steward/shadow
   decision lineage. Phase 5 statistical promotion and Phase 6 continuous-operation exit
@@ -13,6 +14,7 @@
 - The Control API, single-admin object-centric web console, persistent System Steward,
   append-only event ledger, deterministic risk engine, and shadow runtime exist.
 - `live` is not a valid trading mode; `LIVE_TRADING_ENABLED=true` fails configuration validation.
+  Paper submission is separately disabled by default and hard-pinned to Alpaca's Paper host.
 - Local lint, strict type checking, the full test suite, API readiness, the authenticated HTTP
   vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
@@ -20,6 +22,8 @@
 - `context.md` is the required master record for architecture, discussions, iterations, commit contents, and post-commit global state.
 - Alembic migrations now own the ledger and normalized market-data schema.
 - The read-only Alpaca adapter supports SIP historical one-minute bars, OPRA option-chain snapshots, and SIP WebSocket authentication/stream parsing.
+- The Alpaca Paper account endpoint passed a real read-only probe: account active, USD,
+  trading/account blocks false, and zero positions. No order endpoint was called.
 - A real AAPL backfill stored 391 unique minute bars; replay inserted zero duplicates. A bounded OPRA request stored 10 unique option snapshots; replay inserted zero duplicates.
 - Raw Alpaca responses are content-addressed in MinIO, normalized rows are stored in PostgreSQL, and new-record events are published to Redis Streams.
 - The live collector has bounded reconnects and XNYS-calendar-aware intraday gap detection with automatic REST repair.
@@ -36,7 +40,7 @@
 - Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
   experiment runs, backtest trades, corporate actions, historical universe membership,
   feature parity checks, and walk-forward reports are stored through Alembic revision
-  `20260906_0027`, including exact validation contracts, shadow risk lineage, fenced workflow
+  `20260906_0028`, including exact validation contracts, shadow risk lineage, fenced workflow
   attempts, generation-attempt audit, runtime leases, and the event outbox.
 - The Phase 3 runner provides buy-and-hold, long/cash momentum, and long/cash
   mean-reversion baselines with next-bar execution, commission, slippage, metrics, hashes,
@@ -83,8 +87,7 @@
   review → modeled virtual order/fill lineage, cash, and P&L. Actual observation, approval,
   and persistence timestamps are separate from the market-data cutoff; a plan must exist
   before its market open. The next open rechecks reward/risk and quantity, and missed/late
-  bars never become forward fills. Research-only buy-and-hold cannot be shadow-adopted. No
-  broker adapter exists.
+  bars never become forward fills. Research-only buy-and-hold cannot be shadow-adopted.
 - All shadow deployments are attribution sleeves of one shared virtual master account. Open
   plans atomically reserve its cash and concurrent risk; fills/cancellations settle once.
   Account risk is an administrator-confirmed immutable revision, and changing it invalidates
@@ -92,6 +95,12 @@
 - Active deployments recheck the exact execution contract on every tick. Engine, cost, risk,
   feature, or restriction changes move stale deployments to `REVALIDATION_REQUIRED` and
   cancel reserved plans without resetting account history.
+- The Phase 7 Alpaca Paper adapter consumes only newly created plans from separately
+  confirmed Paper enrollments. It persists a deterministic client-order intent before I/O,
+  recovers unknown submissions by client ID, submits price-capped GTC brackets, reconciles
+  account/position/order state, expires unfilled entries, and permits confirmed cancellation.
+  Account identity, buying power, floor/daily-loss, trade/concurrent risk, unmanaged positions,
+  pipeline state, and global pause all fail closed. The live host is rejected in settings.
 - A persistent hourly coordinator owns the market-data → feature → ML → forecast → Research
   LLM → constrained strategy → exact-validation → shadow-readiness DAG. It resumes fenced
   jobs after failure, records `WAITING_*` business gates, defaults paid research off, and
@@ -108,8 +117,8 @@
   were synchronized at `3b3926e` before this implementation iteration.
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases.
-- The prior corrected baseline passed 106 tests; the current review-remediated pre-cloud
-  implementation passes 118 tests, strict typing across 56 source files, authenticated local
+- The prior corrected baseline passed 106 tests; the Phase 7 implementation passes 121 tests,
+  strict typing across 58 source files, authenticated local
   and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, schema migration checks, zero
   PostgreSQL schema drift, and the repository secret scan. Paid providers were not called
   during this remediation.
@@ -153,10 +162,11 @@
 
 ## Next
 
-1. Implement and locally test Phase 7 Alpaca paper order submission/reconciliation behind a
-   separate broker adapter, global pause, idempotency, and explicit administrator gates.
-2. Select cloud/VPS, domain/TLS, backup/monitoring, and secret-delivery inputs; then run the
+1. Select cloud/VPS, domain/TLS, backup/monitoring, and secret-delivery inputs; then run the
    existing one-command bootstrap on a fresh production data plane.
+2. Run the read-only Alpaca Paper account probe in the intended environment, review and
+   confirm one exact enrollment, then let the administrator decide when to send the first
+   Paper order. Build verification itself sends no order.
 3. Run production-scale backfill, enable paid coordinator stages only after budget review,
    and collect Phase 5 statistical plus continuous-shadow evidence.
 4. Continue interactive Phase 6.1 UI review with real operator navigation and refine labels;
@@ -169,9 +179,8 @@
 
 - Cloud deployment needs the VPS/provider, domain/TLS plan, backup/monitoring choices, and
   secret delivery mechanism. The GitHub repository is configured.
-- Paper submission is not implemented yet. The shared account now reconciles percentage and
-  dollar limits; implementing the broker adapter remains the next local milestone and sending
-  any paper order remains confirmation-gated.
+- Sending the first Paper order remains an explicit operator decision. The adapter is built,
+  but no fixture test or deployment health check authorizes an external order.
 
 ## Decisions
 
@@ -214,3 +223,5 @@
 - ADR 0023: separate static and selector validation semantics, require actual-time persisted
   plans and next-open risk review, quarantine stale execution contracts, and reconcile legacy
   ingestion IDs without rewriting immutable events.
+- ADR 0024: isolate Alpaca Paper behind an exact host, durable idempotent intents, account and
+  risk reconciliation, and per-deployment administrator confirmation; retain no live path.

@@ -17,10 +17,16 @@ from agentic_quant.migrations import prepare_database
 async def run_shadow_worker(settings: Settings) -> None:
     """Run configured persistent schedulers without exposing an HTTP listener."""
     if not (
-        settings.shadow_runtime_enabled or settings.autonomous_coordinator_enabled
+        settings.shadow_runtime_enabled
+        or settings.paper_trading_enabled
+        or settings.autonomous_coordinator_enabled
     ):
         raise RuntimeError("Worker requires at least one enabled runtime")
-    role = "worker" if settings.shadow_runtime_enabled else "coordinator"
+    role = (
+        "worker"
+        if settings.shadow_runtime_enabled or settings.paper_trading_enabled
+        else "coordinator"
+    )
     application = create_app(settings, process_role=role)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -31,6 +37,7 @@ async def run_shadow_worker(settings: Settings) -> None:
             task
             for task in (
                 application.state.shadow_task,
+                application.state.paper_task,
                 application.state.coordinator_task,
             )
             if task is not None
@@ -70,6 +77,8 @@ def worker_is_healthy(settings: Settings, *, pipeline: str = "shadow") -> bool:
         poll_seconds = (
             settings.coordinator_poll_seconds
             if pipeline == "coordinator"
+            else settings.paper_poll_seconds
+            if pipeline == "paper"
             else settings.shadow_poll_seconds
         )
         maximum_age = timedelta(seconds=max(30, poll_seconds * 3))
@@ -83,7 +92,7 @@ def main() -> None:
     parser.add_argument("--healthcheck", action="store_true")
     parser.add_argument(
         "--pipeline",
-        choices=("shadow", "coordinator"),
+        choices=("shadow", "paper", "coordinator"),
         default="shadow",
     )
     args = parser.parse_args()

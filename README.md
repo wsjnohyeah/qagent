@@ -1,6 +1,6 @@
 # Agentic Quant Trading System
 
-A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains implemented and locally verified foundations through **Phase 6.1**, plus the pre-cloud shared-account, autonomous-coordinator, recovery, and production-bootstrap work: safety controls, read-only market data, event/document ingestion, point-in-time research, evidence-bound LLM analysis, ML/registry and constrained strategy-generation tooling, an authenticated System Steward, drill-down object explorers, and a persistent broker-free shadow runtime. Implementation completeness is not the same as passing statistical or production-operational exit criteria; see `docs/REVIEW_REMEDIATION_2026-09-06.md`.
+A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains implemented and locally verified foundations through **Phase 7**: safety controls, read-only market data, event/document ingestion, point-in-time research, evidence-bound LLM analysis, ML/registry and constrained strategy generation, an authenticated System Steward, a persistent broker-free shadow runtime, a shared account/coordinator, and a confirmation-gated Alpaca Paper adapter with durable reconciliation. Implementation completeness is not the same as passing statistical or production-operational exit criteria; see `docs/REVIEW_REMEDIATION_2026-09-06.md`.
 
 > Live-money execution is not implemented. `live` is not a valid mode, and setting `LIVE_TRADING_ENABLED=true` makes startup fail.
 
@@ -172,6 +172,9 @@ SESSION_SECRET=generated-64-character-value
 SESSION_MAX_AGE_DAYS=90
 SHADOW_RUNTIME_ENABLED=true
 SHADOW_POLL_SECONDS=30
+PAPER_TRADING_ENABLED=false
+PAPER_POLL_SECONDS=30
+ALPACA_PAPER_BASE_URL=https://paper-api.alpaca.markets
 LLM_OPENAI_API_KEY=
 LLM_META_API_KEY=
 LLM_ROUTING_PATH=./configs/model_routing.yaml
@@ -186,8 +189,8 @@ this distinction does not relax point-in-time, safety, or audit invariants.
 
 Production requires `AUTH_REQUIRED=true`, `ADMIN_PASSWORD_HASH` instead of plaintext,
 `GLOBAL_NEW_EXPOSURE_PAUSED=true`, and `AUTO_MIGRATE=false` at settings validation, not only
-in Compose. The red pause operation is distinct from liquidation; this build has no
-liquidation or live broker endpoint.
+in Compose. The red pause operation is distinct from liquidation. Paper reconciliation and
+confirmed cancellation remain available while paused; no live-money endpoint exists.
 
 Risk values are versioned in `configs/risk_policy.yaml`. Restricted securities are effective-dated in `configs/restricted_securities.yaml`. Changes require tests and review.
 
@@ -437,6 +440,34 @@ open-price execution review are recorded in ADR 0023. The independent review of
 `3b3926e` and its current disposition are recorded in
 `docs/REVIEW_REMEDIATION_3B3926E_2026-09-06.md`.
 
+## Phase 7: Alpaca Paper execution
+
+Phase 7 is a separate broker boundary, not a renamed Shadow ledger. It mirrors only a
+human-confirmed Paper enrollment attached to an active, exact-contract Shadow deployment.
+Only plans created after enrollment are eligible. The worker creates a durable local intent
+before network I/O, derives a stable Alpaca `client_order_id`, looks up that ID before every
+retry, and records each observed broker lifecycle change.
+
+The first release supports long US-equity, whole-share, price-capped GTC bracket orders. The
+entry limit prevents a gap from paying more than the validated entry bound; stop and target
+remain attached. Unfilled entries are cancelled after plan expiry. New submissions also
+recheck paper buying power, account floor/daily loss, per-trade and concurrent dollar risk,
+broker account identity, and unmanaged positions. Existing orders continue reconciling while
+the global new-exposure switch is paused.
+
+Submission is off by default. Staged setup is:
+
+1. Keep `TRADING_MODE=shadow`, confirm an eligible Strategy and Shadow deployment, and use
+   the Paper page's read-only connection test.
+2. Confirm the exact deployment's `paper.enroll` preview. Historical plans remain excluded.
+3. Set `TRADING_MODE=paper` and `PAPER_TRADING_ENABLED=true` only in the intended worker
+   environment, restart, inspect account identity and pipeline heartbeat, then separately
+   confirm the global resume action.
+
+The broker base URL is hard-pinned to `https://paper-api.alpaca.markets`; configuration that
+enables Paper against the live Alpaca host fails startup. There is no `live` trading mode and
+`LIVE_TRADING_ENABLED=true` always fails. See `runbooks/paper_trading.md` and ADR 0024.
+
 ## Repository map
 
 ```text
@@ -500,8 +531,7 @@ AGENTS.md                mandatory operating rules for coding/deployment agents
 - `POST /v1/documents/alpaca-news/backfill` — development only
 - `POST /v1/documents/sec/filings` — development only
 - `POST /v1/documents/sec/company-facts` — development only
-- `POST /v1/commands/pause` and `/resume` — create confirmation-gated runtime actions;
-  resume is shadow-only
+- `POST /v1/commands/pause` and `/resume` — create confirmation-gated Shadow/Paper runtime actions
 - `POST /v1/auth/login`, `GET /v1/auth/session`, `POST /v1/auth/logout`
 - `GET /v1/control/summary`, `/v1/lists`, `/v1/explorer/*`, `/v1/strategies`
 - `GET /v1/explorer/datasets/{provider}/{data_type}` and `/v1/explorer/market-bars`
@@ -512,6 +542,9 @@ AGENTS.md                mandatory operating rules for coding/deployment agents
 - `GET /v1/shadow/deployments`, `/v1/shadow/events`, `/v1/shadow/runs`
 - `GET /v1/shadow/account`
 - `GET /v1/shadow/decisions`, `/v1/shadow/reports`, `/v1/shadow/alerts`
+- `GET /v1/paper/status`, `/v1/paper/account`, `/v1/paper/positions`
+- `GET /v1/paper/enrollments`, `/v1/paper/orders`, `/v1/paper/events`, `/v1/paper/runs`
+- `POST /v1/paper/probe` — authenticated, read-only Alpaca Paper connectivity check
 - `GET /v1/runtime/controls` and confirmation-gated pipeline controls
 - `GET /v1/code-changes` and tested-candidate intake
 
@@ -523,7 +556,7 @@ in `docs/DEPLOYMENT.md`.
 
 1. Read `AGENTS.md`, this README, `context.md`, `PROJECT_STATE.md`, and relevant ADRs.
 2. Inspect the worktree and preserve unrelated user changes.
-3. Keep work inside the current phase; do not add broker execution before its safety gates.
+3. Preserve the Paper/live separation and never weaken confirmation, pause, risk, or endpoint gates.
 4. Add or update invariant and replay tests with every behavior change.
 5. Run `make check`, `make doctor`, and `./scripts/check_no_secrets.sh`.
 6. Update `context.md` for every material iteration and commit; update `PROJECT_STATE.md` and add an ADR when applicable.
@@ -531,10 +564,11 @@ in `docs/DEPLOYMENT.md`.
 
 ## GitHub and cloud path
 
-Current delivery order: the four pre-cloud hardening tasks are implemented locally; Phase 7
-Alpaca paper integration is next and will also be locally tested before cloud deployment.
-Cloud bootstrap, production-scale backfill, statistical promotion evidence, and continuous
-shadow observation follow on the remote data plane.
+Current delivery order: the four pre-cloud hardening tasks and Phase 7 Alpaca Paper adapter
+are implemented and fixture-tested locally. Cloud bootstrap, a read-only production Paper
+account probe, production-scale backfill, statistical promotion evidence, and continuous
+shadow/paper observation follow on the remote data plane. No Paper order has been sent as
+part of local build verification.
 
 The source repository is [wsjnohyeah/qagent](https://github.com/wsjnohyeah/qagent), with
 local `main` tracking `origin/main`.

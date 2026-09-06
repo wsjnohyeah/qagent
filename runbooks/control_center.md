@@ -3,7 +3,7 @@
 ## Operating contract
 
 Phase 6 exposes one administrator and one user-facing System Steward. Internal data, list,
-strategy, shadow, model, pipeline, and code-change services are tools behind that identity;
+strategy, Shadow, Paper, model, pipeline, and code-change services are tools behind that identity;
 they are not separate agents the operator must manage.
 
 Only `/`, `/health/live`, `/health/ready`, `/v1/auth/login`, and `/v1/auth/session` are public.
@@ -83,7 +83,8 @@ after 15 minutes. Execution requires a separate request containing `CONFIRM <las
 The claim is single-use; a repeated confirmation is rejected.
 
 This protocol covers list revisions, global pause/resume, pipeline controls, model routing,
-strategy adoption/retirement, shadow deployments/ticks, and code-change sessions. A failed
+strategy adoption/retirement, Shadow deployments/ticks, Paper enrollment/ticks/cancellation,
+and code-change sessions. A failed
 handler is retained as `FAILED` with a bounded error code. Strategy deletion means retirement,
 not record removal.
 
@@ -106,7 +107,7 @@ per request. Use Command/Control+Enter to send.
 
 Each request supplies a bounded, freshly queried snapshot of counts, lists, dataset coverage,
 strategies, validations, research analyses, models, ingestions, quality reports, workflow jobs,
-shadow deployments, pipeline controls, and pending actions. Current page context is separate
+Shadow deployments, Paper account/order status, pipeline controls, and pending actions. Current page context is separate
 from the direct user request. The LLM must return exact citation IDs; unknown citations are
 dropped. Stored/user text is explicitly untrusted.
 
@@ -131,7 +132,8 @@ all-passing tests becomes `READY_FOR_APPROVAL`; a second action can mark it
 
 ## Incident actions
 
-1. Use the top-bar pause control and confirm it to stop new shadow exposure.
+1. Use the top-bar pause control and confirm it to stop new Shadow and Paper exposure. Existing
+   Paper orders still reconcile and must be cancelled separately when appropriate.
 2. Pause a specific pipeline from the Pipelines page if its inputs are suspect.
 3. Revoke all sessions with `POST /v1/auth/revoke-all` after credential compromise, then
    rotate the password/hash and session secret.

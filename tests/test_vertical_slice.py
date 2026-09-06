@@ -56,9 +56,8 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert ready.status_code == 200
         assert ready.json()["live_trading_enabled"] is False
         system_status = client.get("/v1/system/status").json()
-        assert system_status["phase"] == (
-            "pre-cloud-1-4-implemented-phase7-next"
-        )
+        assert system_status["phase"] == "phase7-paper-integration"
+        assert system_status["paper_trading_enabled"] is False
         assert system_status["data_operating_scope"] == "bounded_correctness_samples"
         assert system_status["development_max_backfill_days"] == 120
         assert system_status["development_max_intraday_backfill_days"] == 7
@@ -68,6 +67,13 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert system_status["ml_policy"] == "ml_policy@0.1.0"
         assert system_status["openai_configured"] is False
         assert system_status["meta_model_configured"] is False
+        paper = client.get("/v1/paper/status").json()
+        assert paper["provider"] == "alpaca_paper"
+        assert paper["submission_ready"] is False
+        assert paper["live_money_possible"] is False
+        constraints = client.get("/v1/control/summary").json()["constraints"]
+        assert constraints["paper_broker_order_path_present"] is True
+        assert constraints["live_broker_order_path_present"] is False
         demo = client.post("/v1/demo/run")
         assert demo.status_code == 200
         correlation_id = demo.json()["correlation_id"]

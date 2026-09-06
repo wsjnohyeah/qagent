@@ -32,6 +32,22 @@ if ! grep -Eq '^LIVE_TRADING_ENABLED=false$' .env.production; then
   echo "Refusing deployment: LIVE_TRADING_ENABLED must be false."
   exit 1
 fi
+if grep -Eq '^PAPER_TRADING_ENABLED=true$' .env.production; then
+  if ! grep -Eq '^TRADING_MODE=paper$' .env.production; then
+    echo "Refusing deployment: enabled Paper trading requires TRADING_MODE=paper."
+    exit 1
+  fi
+  if ! grep -Eq '^ALPACA_PAPER_BASE_URL=https://paper-api\.alpaca\.markets/?$' \
+    .env.production; then
+    echo "Refusing deployment: Alpaca Paper endpoint is missing or not exact."
+    exit 1
+  fi
+  if ! grep -Eq '^ALPACA_API_KEY=.+$' .env.production || \
+    ! grep -Eq '^ALPACA_API_SECRET=.+$' .env.production; then
+    echo "Refusing deployment: enabled Paper trading requires Alpaca credentials."
+    exit 1
+  fi
+fi
 if ! grep -Eq '^AUTH_REQUIRED=true$' .env.production; then
   echo "Refusing deployment: AUTH_REQUIRED must be true."
   exit 1
@@ -99,6 +115,18 @@ until docker compose --env-file .env.production -f compose.production.yml exec -
   fi
   sleep 2
 done
+if grep -Eq '^PAPER_TRADING_ENABLED=true$' .env.production; then
+  attempt=0
+  until docker compose --env-file .env.production -f compose.production.yml exec -T worker \
+    python -m agentic_quant.worker --healthcheck --pipeline paper >/dev/null 2>&1; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge 30 ]; then
+      docker compose --env-file .env.production -f compose.production.yml logs --tail=200 worker
+      exit 1
+    fi
+    sleep 2
+  done
+fi
 attempt=0
 until docker compose --env-file .env.production -f compose.production.yml exec -T coordinator \
   python -m agentic_quant.worker --healthcheck --pipeline coordinator >/dev/null 2>&1; do

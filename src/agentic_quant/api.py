@@ -68,6 +68,7 @@ from agentic_quant.ml import (
     load_ml_policy,
 )
 from agentic_quant.option_ingestion import OptionDataIngestionService
+from agentic_quant.paper import BrokerFactory, PaperTradingRuntime
 from agentic_quant.pipeline import run_synthetic_vertical_slice
 from agentic_quant.providers.alpaca import (
     AlpacaConfigurationError,
@@ -75,6 +76,7 @@ from agentic_quant.providers.alpaca import (
     AlpacaResponseError,
 )
 from agentic_quant.providers.alpaca_stream import AlpacaStockStream, AlpacaStreamError
+from agentic_quant.providers.alpaca_paper import AlpacaPaperTradingProvider
 from agentic_quant.providers.base import (
     CorporateFactsRequest,
     DocumentFetchRequest,
@@ -268,6 +270,8 @@ def create_app(
     *,
     process_role: str = "api",
     shadow_now_provider: Callable[[], datetime] | None = None,
+    paper_now_provider: Callable[[], datetime] | None = None,
+    paper_broker_factory: BrokerFactory | None = None,
 ) -> FastAPI:
     app_settings = settings or Settings()
     if process_role not in {"api", "worker", "coordinator"}:
@@ -334,6 +338,31 @@ def create_app(
         restrictions=restrictions,
         calendar_name=app_settings.market_calendar,
         now_provider=shadow_now_provider,
+    )
+    resolved_paper_factory = paper_broker_factory
+    if (
+        resolved_paper_factory is None
+        and app_settings.alpaca_api_key is not None
+        and app_settings.alpaca_api_secret is not None
+    ):
+        paper_api_key = app_settings.alpaca_api_key.get_secret_value()
+        paper_api_secret = app_settings.alpaca_api_secret.get_secret_value()
+
+        def configured_paper_factory() -> AlpacaPaperTradingProvider:
+            return AlpacaPaperTradingProvider(
+                api_key=paper_api_key,
+                api_secret=paper_api_secret,
+                base_url=app_settings.alpaca_paper_base_url,
+            )
+
+        resolved_paper_factory = configured_paper_factory
+    paper = PaperTradingRuntime(
+        ledger.engine,
+        shadow,
+        broker_factory=resolved_paper_factory,
+        enabled=app_settings.paper_trading_enabled,
+        trading_mode=app_settings.trading_mode.value,
+        now_provider=paper_now_provider,
     )
     application: FastAPI
 
@@ -407,6 +436,7 @@ def create_app(
         ledger.engine,
         objects,
         shadow,
+        paper,
         code_changes,
         runtime_callback=set_runtime_paused,
         runtime_paused_callback=runtime_is_paused,
@@ -422,6 +452,8 @@ def create_app(
             "environment": app_settings.app_env.value,
             "trading_mode": app_settings.trading_mode.value,
             "live_trading_enabled": False,
+            "paper_trading_enabled": app_settings.paper_trading_enabled,
+            "paper": paper.status(),
             "new_exposure_paused": runtime_is_paused(),
             "data_operating_scope": app_settings.data_operating_scope,
             "llm_routing": llm_gateway.status(),
@@ -482,6 +514,7 @@ def create_app(
         application.state.auth = auth
         application.state.objects = objects
         application.state.shadow = shadow
+        application.state.paper = paper
         application.state.actions = actions
         application.state.steward = steward
         application.state.code_changes = code_changes
@@ -507,6 +540,7 @@ def create_app(
         application.state.coordinator = coordinator
         stop_shadow = asyncio.Event()
         stop_coordinator = asyncio.Event()
+        stop_paper = asyncio.Event()
 
         async def shadow_loop() -> None:
             failure_streak = 0
@@ -583,6 +617,69 @@ def create_app(
         )
         application.state.shadow_task = shadow_task
 
+        async def paper_loop() -> None:
+            failure_streak = 0
+            while not stop_paper.is_set():
+                delay = app_settings.paper_poll_seconds
+                try:
+                    if not actions.pipeline_enabled("paper"):
+                        actions.record_pipeline_heartbeat(
+                            pipeline="paper",
+                            status="PAUSED",
+                            detail="Paper pipeline control is disabled",
+                        )
+                    else:
+                        result = await paper.tick(
+                            trigger="scheduler",
+                            new_exposure_paused=runtime_is_paused(),
+                        )
+                        actions.record_pipeline_heartbeat(
+                            pipeline="paper",
+                            status=(
+                                "WAITING"
+                                if runtime_is_paused()
+                                else "IDLE"
+                            ),
+                            detail=(
+                                f"submitted={result['orders_submitted']} "
+                                f"reconciled={result['orders_reconciled']} "
+                                f"paused={result['new_exposure_paused']}"
+                            ),
+                        )
+                    failure_streak = 0
+                except Exception as exc:
+                    failure_streak += 1
+                    delay = min(
+                        app_settings.paper_poll_seconds,
+                        max(1, 2 ** min(failure_streak - 1, 8)),
+                    )
+                    try:
+                        actions.record_pipeline_heartbeat(
+                            pipeline="paper",
+                            status="FAILED",
+                            detail=(
+                                f"attempt={failure_streak}; "
+                                f"{type(exc).__name__}: {exc}"
+                            ),
+                        )
+                    except Exception:
+                        pass
+                    if failure_streak >= 5:
+                        raise RuntimeError(
+                            "Paper runtime stopped after five consecutive failures"
+                        ) from exc
+                try:
+                    await asyncio.wait_for(stop_paper.wait(), timeout=delay)
+                except TimeoutError:
+                    continue
+
+        paper_task = (
+            asyncio.create_task(paper_loop(), name="paper-runtime")
+            if app_settings.paper_trading_enabled and process_role != "coordinator"
+            else None
+        )
+        application.state.paper_task = paper_task
+
         async def coordinator_loop() -> None:
             failure_streak = 0
             while not stop_coordinator.is_set():
@@ -654,10 +751,13 @@ def create_app(
         finally:
             stop_shadow.set()
             stop_coordinator.set()
+            stop_paper.set()
             if shadow_task is not None:
                 await shadow_task
             if coordinator_task is not None:
                 await coordinator_task
+            if paper_task is not None:
+                await paper_task
             await llm_gateway.aclose()
             ledger.engine.dispose()
 
@@ -825,9 +925,11 @@ def create_app(
             "environment": app_settings.app_env,
             "trading_mode": app_settings.trading_mode,
             "live_trading_enabled": False,
+            "paper_trading_enabled": app_settings.paper_trading_enabled,
+            "paper_submission_ready": paper.status()["submission_ready"],
             "new_exposure_paused": runtime_is_paused(),
             "database": "healthy" if ledger.health() else "unhealthy",
-            "phase": "pre-cloud-1-4-implemented-phase7-next",
+            "phase": "phase7-paper-integration",
             "data_operating_scope": app_settings.data_operating_scope,
             "development_max_backfill_days": (
                 app_settings.development_max_backfill_days
@@ -872,6 +974,7 @@ def create_app(
             **workflow_job_store.health_summary(),
             **objects.health_summary(),
             **shadow.health_summary(),
+            "paper": paper.status(),
             **auth.health_summary(),
             **ledger.outbox_health(),
             "raw_archive": "healthy" if application.state.archive.health() else "unhealthy",
@@ -894,6 +997,7 @@ def create_app(
             "lists": objects.lists(),
             "data_catalog": objects.data_catalog(),
             "shadow": shadow.health_summary(),
+            "paper": paper.status(),
             "virtual_account": account,
             "coordinator": application.state.coordinator.status(limit=80),
             "recent_activity": objects.activity(limit=25),
@@ -905,7 +1009,9 @@ def create_app(
             "pipeline_controls": actions.pipeline_controls(),
             "constraints": {
                 "live_trading_enabled": False,
-                "broker_order_path_present": False,
+                "paper_broker_order_path_present": True,
+                "paper_submission_enabled": app_settings.paper_trading_enabled,
+                "live_broker_order_path_present": False,
                 "sensitive_actions_require_confirmation": True,
             },
         }
@@ -1060,6 +1166,51 @@ def create_app(
             deployment_id=deployment_id,
             limit=limit,
         )
+
+    @application.get("/v1/paper/status")
+    def paper_status() -> dict[str, Any]:
+        return paper.status()
+
+    @application.post("/v1/paper/probe")
+    async def paper_probe() -> dict[str, Any]:
+        try:
+            return await paper.probe()
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @application.get("/v1/paper/enrollments")
+    def paper_enrollment_list(
+        limit: int = Query(default=200, ge=1, le=2_000),
+    ) -> list[dict[str, Any]]:
+        return paper.enrollments(limit=limit)
+
+    @application.get("/v1/paper/orders")
+    def paper_order_list(
+        limit: int = Query(default=200, ge=1, le=2_000),
+    ) -> list[dict[str, Any]]:
+        return paper.orders(limit=limit)
+
+    @application.get("/v1/paper/events")
+    def paper_event_list(
+        limit: int = Query(default=500, ge=1, le=5_000),
+    ) -> list[dict[str, Any]]:
+        return paper.events(limit=limit)
+
+    @application.get("/v1/paper/runs")
+    def paper_run_list(
+        limit: int = Query(default=100, ge=1, le=1_000),
+    ) -> list[dict[str, Any]]:
+        return paper.runs(limit=limit)
+
+    @application.get("/v1/paper/account")
+    def paper_account() -> dict[str, Any] | None:
+        return paper.latest_account()
+
+    @application.get("/v1/paper/positions")
+    def paper_positions() -> list[dict[str, Any]]:
+        return paper.latest_positions()
 
     @application.get("/v1/threads/{object_type}/{object_id}")
     def object_thread(object_type: str, object_id: str) -> dict[str, Any]:
@@ -1954,10 +2105,13 @@ def create_app(
 
     @application.post("/v1/commands/resume")
     def resume(command: OperatorCommand, request: Request) -> dict[str, Any]:
-        if app_settings.trading_mode != TradingMode.SHADOW:
+        if app_settings.trading_mode not in {
+            TradingMode.SHADOW,
+            TradingMode.PAPER,
+        }:
             raise HTTPException(
                 status_code=403,
-                detail="New exposure can resume only in shadow mode",
+                detail="New exposure can resume only in shadow or paper mode",
             )
         return actions.propose(
             action_type="runtime.resume",

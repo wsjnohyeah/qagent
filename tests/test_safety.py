@@ -298,6 +298,26 @@ def test_pause_fails_closed(settings: Settings) -> None:
     assert "GLOBAL_NEW_EXPOSURE_PAUSED" in result.reason_codes
 
 
+def test_paper_mode_cannot_target_the_live_alpaca_host() -> None:
+    with pytest.raises(ValidationError, match="TRADING_MODE=paper"):
+        Settings(
+            _env_file=None,
+            trading_mode=TradingMode.SHADOW,
+            paper_trading_enabled=True,
+            alpaca_api_key=SecretStr("paper-key"),
+            alpaca_api_secret=SecretStr("paper-secret"),
+        )
+    with pytest.raises(ValidationError, match="hard-pinned"):
+        Settings(
+            _env_file=None,
+            trading_mode=TradingMode.PAPER,
+            paper_trading_enabled=True,
+            alpaca_api_key=SecretStr("paper-key"),
+            alpaca_api_secret=SecretStr("paper-secret"),
+            alpaca_paper_base_url="https://api.alpaca.markets",
+        )
+
+
 @pytest.mark.parametrize(
     ("updates", "reason_code"),
     [

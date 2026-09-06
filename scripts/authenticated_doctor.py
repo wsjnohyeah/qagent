@@ -38,7 +38,9 @@ def main() -> None:
         assert system.json()["live_trading_enabled"] is False
         summary = client.get("/v1/control/summary")
         summary.raise_for_status()
-        assert summary.json()["constraints"]["broker_order_path_present"] is False
+        constraints = summary.json()["constraints"]
+        assert constraints["paper_broker_order_path_present"] is True
+        assert constraints["live_broker_order_path_present"] is False
         demo = client.post("/v1/demo/run", headers=headers)
         demo.raise_for_status()
         payload = demo.json()

@@ -103,7 +103,7 @@ class SystemSteward:
                 prompt_version="system_steward@0.3.0",
                 instructions=(
                     "You are the single System Steward for an auditable quantitative "
-                    "research and shadow-trading system. Reply in the user's language. "
+                    "research, shadow, and paper-trading system. Reply in the user's language. "
                     "Write the answer as readable GitHub-flavored Markdown inside the "
                     "JSON answer string. Prefer concise headings and bullet lists; use "
                     "Markdown tables when comparing structured facts, and fenced code "

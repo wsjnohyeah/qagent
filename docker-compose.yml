@@ -10,8 +10,9 @@ services:
       - .env
     environment:
       APP_ENV: development
-      TRADING_MODE: shadow
+      TRADING_MODE: "${TRADING_MODE:-shadow}"
       LIVE_TRADING_ENABLED: "false"
+      PAPER_TRADING_ENABLED: "${PAPER_TRADING_ENABLED:-false}"
       GLOBAL_NEW_EXPOSURE_PAUSED: "false"
       DATABASE_URL: postgresql+psycopg://quant:quant_dev_only@postgres:5432/quant
       REDIS_URL: redis://redis:6379/0

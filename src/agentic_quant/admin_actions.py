@@ -14,6 +14,7 @@ from agentic_quant.database import admin_action_requests, runtime_controls
 from agentic_quant.domain import EventEnvelope
 from agentic_quant.ids import uuid7
 from agentic_quant.ledger import EventLedger
+from agentic_quant.paper import PaperTradingRuntime
 from agentic_quant.shadow import ShadowRuntime
 
 
@@ -36,6 +37,12 @@ ALLOWED_ACTIONS = {
     "shadow.resume",
     "shadow.retire",
     "shadow.tick",
+    "paper.enroll",
+    "paper.pause",
+    "paper.resume",
+    "paper.retire",
+    "paper.tick",
+    "paper.cancel_order",
     "account.risk.update",
     "code_change.open",
     "code_change.approve_commit",
@@ -48,6 +55,7 @@ class AdminActionService:
         engine: Engine,
         objects: SystemObjectStore,
         shadow: ShadowRuntime,
+        paper: PaperTradingRuntime,
         code_changes: CodeChangeStore,
         *,
         runtime_callback: Callable[[bool], None],
@@ -65,6 +73,7 @@ class AdminActionService:
         self.engine = engine
         self.objects = objects
         self.shadow = shadow
+        self.paper = paper
         self.code_changes = code_changes
         self.runtime_callback = runtime_callback
         self.runtime_paused_callback = runtime_paused_callback
@@ -337,6 +346,20 @@ class AdminActionService:
                 )
             except KeyError as exc:
                 raise ValueError("strategy_spec_id and symbol are required") from exc
+        if action_type == "paper.enroll":
+            return self.paper.enrollment_preview(target_id)
+        if action_type in {"paper.pause", "paper.resume", "paper.retire"}:
+            enrollment = self.paper.enrollment(target_id)
+            return {
+                "summary": f"{action_type.split('.')[1].title()} paper enrollment",
+                "paper_enrollment_id": target_id,
+                "current_status": enrollment["status"],
+                "symbol": enrollment["symbol"],
+                "live_broker_effect": action_type != "paper.pause",
+                "live_money_possible": False,
+            }
+        if action_type == "paper.cancel_order":
+            return self.paper.order_preview(target_id)
         if action_type in {"pipeline.pause", "pipeline.resume"}:
             self.pipeline_enabled(target_id)
         if action_type == "llm.routes.update":
@@ -386,6 +409,7 @@ class AdminActionService:
             "shadow.resume": "Resume this virtual deployment",
             "shadow.retire": "Permanently retire this virtual deployment",
             "shadow.tick": "Process newly available stored bars once",
+            "paper.tick": "Reconcile Alpaca paper state and submit eligible new plans",
             "account.risk.update": (
                 "Activate a new shared virtual-account risk revision"
             ),
@@ -509,6 +533,33 @@ class AdminActionService:
                 trigger=f"admin:{confirmed_by}",
                 new_exposure_paused=self.runtime_paused_callback(),
             )
+        if action_type == "paper.enroll":
+            return self.paper.enroll(
+                deployment_id=target_id,
+                reason=reason,
+                created_by=confirmed_by,
+            )
+        if action_type in {"paper.pause", "paper.resume", "paper.retire"}:
+            states = {
+                "paper.pause": "PAUSED",
+                "paper.resume": "ACTIVE",
+                "paper.retire": "RETIRED",
+            }
+            return self.paper.set_enrollment_status(
+                enrollment_id=target_id,
+                status=states[action_type],
+                reason=reason,
+                updated_by=confirmed_by,
+            )
+        if action_type == "paper.tick":
+            if not self.pipeline_enabled("paper"):
+                raise ValueError("Paper pipeline is paused")
+            return await self.paper.tick(
+                trigger=f"admin:{confirmed_by}",
+                new_exposure_paused=self.runtime_paused_callback(),
+            )
+        if action_type == "paper.cancel_order":
+            return await self.paper.cancel_order(target_id)
         if action_type == "code_change.open":
             return self.code_changes.open(
                 request=str(parameters["request"]),
@@ -550,6 +601,7 @@ class AdminActionService:
             "ml": True,
             "llm": True,
             "shadow": True,
+            "paper": True,
         }
         with self.engine.connect() as connection:
             rows = connection.execute(

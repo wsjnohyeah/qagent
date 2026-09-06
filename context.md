@@ -4,12 +4,12 @@ Last updated: 2026-09-06 PDT
 
 Context format: v1
 
-Current phase: implementation foundations through Phase 6.1 plus the four pre-cloud
-hardening milestones and the `3b3926e` correctness-review remediation are locally
-implemented; Phase 7 paper integration is next, before cloud deployment, while
-statistical/elapsed production evidence remains open
+Current phase: implementation foundations through Phase 7 are locally implemented, including
+the four pre-cloud hardening milestones, `3b3926e` correctness remediation, and a disabled-by-
+default Alpaca Paper submission/reconciliation boundary; the first external Paper order,
+cloud deployment, and statistical/elapsed production evidence remain open
 
-Current documented baseline: C031 — `Explain strategy lineage and harden evidence contracts`
+Current documented baseline: C032 — `Build guarded Alpaca paper execution`
 
 ## Purpose and authority
 
@@ -49,7 +49,8 @@ A Git commit cannot contain its own content-derived hash without changing that h
 - Alpaca News, SEC EDGAR, and an approved-host IR feed have passed live read-only ingestion.
   The social aggregate adapter is implemented but disabled by default. The LLM transport and
   routing layer has passed bounded live OpenAI and Meta probes. ML forecast tooling is now
-  connected to the research evidence graph; no broker execution adapter is connected.
+  connected to the research evidence graph. A separate Alpaca Paper broker adapter is now
+  implemented but disabled by default; no live-money adapter or mode exists.
 - Phase 3A persists immutable evidence packets, feature snapshots, strategy specifications,
   experiment runs, and backtest trades. Three deterministic baselines run with next-bar
   execution and nonzero commission/slippage; their output is infrastructure evidence only.
@@ -125,12 +126,23 @@ A Git commit cannot contain its own content-derived hash without changing that h
   now an attribution sleeve under one
   `SHARED_MASTER` virtual account; open plans atomically reserve shared cash and concurrent
   risk and settle P&L once. It processes each stored bar idempotently. The literal multi-session buy-
-  and-hold benchmark is research-only. No broker order path exists.
+  and-hold benchmark is research-only. A separately confirmed Phase 7 enrollment may mirror
+  only newly created approved plans to Alpaca Paper; Shadow itself makes no broker call.
+- Phase 7 persists Paper enrollments, deterministic client-order intents, broker lifecycle
+  events, account/position snapshots, and runtime runs through Alembic revision
+  `20260906_0028`. The only broker host is exactly `paper-api.alpaca.markets`. Submission is
+  disabled by default and needs Paper mode, a separate administrator-confirmed deployment
+  enrollment, an enabled pipeline, and a confirmed global resume.
+- The first Paper contract is long, whole-share, price-capped GTC bracket execution. It
+  queries Alpaca by stable client ID before every retry, cancels unfilled entries after plan
+  expiry, and blocks new exposure on account identity mismatch, broker blocks, insufficient
+  buying power, account floor/daily loss, per-trade/concurrent risk, stale exact contracts,
+  or unmanaged broker positions. Pause does not stop reconciliation or confirmed cancel.
 - Code modification is represented by scoped change sessions. The web process exposes no
   shell; a trusted external coding worker must produce a diff and passing test record before
   a separate local-commit approval. Push and deployment remain external actions.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; this iteration starts from
-  synchronized commit `c221891`. No cloud host is configured yet.
+  synchronized commit `c396833`. No cloud host is configured yet.
 - The independent `06b6853` fix verification is mapped item-by-item in
   `docs/REVIEW_REMEDIATION_2026-09-05.md`. The deterministic F01–F11 counterexamples are
   followed by the corrections from the `56bb979` review in
@@ -161,8 +173,8 @@ A Git commit cannot contain its own content-derived hash without changing that h
   Corporate-action accounting tracks the held share count through ordered splits and
   dividends. Ingestion resolves natural-key conflicts to the actual persisted business ID,
   so replay of pre-stable-ID data cannot emit a second logical event or a dangling reference.
-- Production Compose separates the authenticated API, shadow scheduler, and research
-  coordinator into dedicated processes so research CPU/provider latency cannot delay shadow.
+- Production Compose separates the authenticated API, Shadow/Paper execution worker, and
+  research coordinator so research CPU/provider latency cannot delay broker reconciliation.
   SQL runtime controls and worker heartbeats are shared across processes; workflow jobs use
   dependency-aware attempt tokens and expiry-fenced completion, portfolio ticks use a global
   SQL execution lease, and normalized ingestion reconciles stable business events into a
@@ -225,8 +237,8 @@ Development service ports bind only to loopback. The local Compose credentials a
 
 - `make check`: passed.
 - Flake8: passed.
-- Strict mypy: passed for 56 source files.
-- Pytest: 118 passed for the review-remediated pre-cloud implementation.
+- Strict mypy: passed for 58 source files.
+- Pytest: 121 passed for the Phase 7 implementation.
 - `make doctor`: passed against the local-lite SQLite profile.
 - `make docker-doctor`: passed against the PostgreSQL-backed Compose profile.
 - PostgreSQL query: passed; the first container replay stored six lineage events.
@@ -239,6 +251,8 @@ Development service ports bind only to loopback. The local Compose credentials a
 - C031 local release gate passed 118 tests, Flake8, strict mypy across 56 source files,
   authenticated local doctor, repository secret scan, Docker rebuild/doctor, and PostgreSQL
   Alembic zero-drift. The rebuilt page served all new Strategy/Shadow/Coordinator labels.
+- C032 targeted and full local checks pass 121 tests plus Flake8 and strict mypy across 58
+  source files. Docker/PostgreSQL drift and GitHub CI are rerun before handoff.
 - The current local PostgreSQL Strategy registry contains nine historical deterministic
   baseline versions and no hybrid ML + LLM strategy yet. The revised UI now states this
   explicitly instead of implying missing lineage; a hybrid lineage will appear only after a
@@ -247,6 +261,8 @@ Development service ports bind only to loopback. The local Compose credentials a
   returned only the valid `SYSTEM:summary` citation, proposed no action, persisted both
   messages, and logged out successfully.
 - Alpaca entitlements: SIP historical REST, OPRA option snapshot REST, and SIP WebSocket authentication passed.
+- Alpaca Paper read-only probe: exact Paper host authenticated successfully; account status
+  active, USD, broker/account blocks false, and zero positions. No order mutation was called.
 - Real historical test: 391 AAPL one-minute bars inserted, zero duplicates after identical replay.
 - Real options test: 10 AAPL option snapshots inserted from one bounded page, zero duplicates after replay.
 - Phase 1B live evidence: on 2026-09-04 a bounded SPY SIP connection persisted 4 trades and
@@ -261,7 +277,7 @@ Development service ports bind only to loopback. The local Compose credentials a
 - Phase 2 fixtures verify primary/secondary source distinction, correction-version retention, SEC filing and XBRL normalization, IR feed parsing, and cross-document catalyst deduplication.
 - Alpaca REST results are now normalized to the internal half-open `[start, end)` contract;
   `market_data_quality@0.2.0` rejects out-of-window rows and live gap seeds use only 1Min bars.
-- Alembic migrations through `20260906_0027` own the Phase 3D/4/5/6.1 schema, including exact
+- Alembic migrations through `20260906_0028` own the Phase 3D/4/5/6/7 schema, including exact
   validation contracts, shadow decision lineage, fenced workflow/runtime leases, the event
   outbox, and strategy-generation attempt audit.
 - `make research-smoke`: passed with 100 deterministic daily bars, three immutable baseline
@@ -747,13 +763,15 @@ year or more of data.
 | Production bootstrap | `src/agentic_quant/production_bootstrap.py`, `infra/deploy/deploy_vps.sh` | environment identity, defaults, forced pause, migration/startup health gates |
 | Event ledger | `src/agentic_quant/ledger.py` | append-only SQL event storage and lineage queries |
 | Vertical slice | `src/agentic_quant/pipeline.py` | synthetic catalyst through shadow-order record |
-| Control API | `src/agentic_quant/api.py` | authenticated object APIs, stewardship, confirmation actions, health, research, models, and shadow operations |
-| Control page | `src/agentic_quant/static/index.html` | default full-page Markdown System Steward, object explorer, forum timelines, pipeline/model/shadow administration |
+| Control API | `src/agentic_quant/api.py` | authenticated object APIs, stewardship, confirmation actions, health, research, models, Shadow, and Paper operations |
+| Control page | `src/agentic_quant/static/index.html` | default full-page Markdown System Steward plus object, pipeline, model, Shadow, and Paper administration |
 | Administrator auth | `src/agentic_quant/auth.py` | single-admin login rate limit, hashed sessions, CSRF cookies, revoke/audit |
 | System objects | `src/agentic_quant/control_plane.py` | versioned lists, data catalog/raw explorer, strategy summaries, discussion threads |
 | Admin actions | `src/agentic_quant/admin_actions.py` | allowlist, immutable preview, expiry, exact confirmation, execution audit |
 | System Steward | `src/agentic_quant/steward.py` | current-state snapshot, exact citations, persistent conversations, action proposals |
 | Shadow runtime | `src/agentic_quant/shadow.py` | adopted-strategy deployments, idempotent virtual events, modeled cash/P&L |
+| Paper runtime | `src/agentic_quant/paper.py` | enrollment gates, durable order intents, account/risk checks, and broker reconciliation |
+| Alpaca Paper adapter | `src/agentic_quant/providers/alpaca_paper.py` | paper-host-only account, position, idempotent bracket order, and cancellation calls |
 | Code sessions | `src/agentic_quant/code_changes.py` | scoped no-shell request/diff/test/commit-approval state machine |
 | Risk configuration | `configs/risk_policy.yaml` | versioned conservative limits |
 | Restriction configuration | `configs/restricted_securities.yaml` | effective-dated denylist containing META |
@@ -786,7 +804,7 @@ year or more of data.
 | ML training/registry | `src/agentic_quant/ml.py`, `configs/ml_policy.yaml` | PIT labels, logistic/stump walk-forward, calibration, drift, JSON registry, forecasts |
 | Strategy generator | `src/agentic_quant/strategy_generation.py` | evidence/forecast-bound LLM generation, adversarial critique, constrained research DSL |
 | Runtime worker | `src/agentic_quant/worker.py` | supervised shadow and autonomous research schedulers with persistent heartbeats |
-| Schema migrations | `migrations/` | Alembic schema history through shared-account revision `20260906_0027` |
+| Schema migrations | `migrations/` | Alembic schema history through Paper revision `20260906_0028` |
 
 ## Current executable risk baseline
 
@@ -1447,6 +1465,20 @@ The Compose stack is currently intended to remain running for local inspection. 
 - Search-trial correction is conservatively scoped to the whole symbol/timeframe contract
   until explicit research campaigns are introduced. This may reject too much evidence but
   cannot make an over-searched strategy look safer.
+
+### D039 — Phase 7 is an enrolled Paper mirror with no live path
+
+- Date: 2026-09-06 PDT.
+- The user asked to implement Paper trading after the pre-cloud/review work. This authorizes
+  the local feature and fixture validation, not an unconfirmed external order.
+- Decision: keep Shadow as the broker-free source of frozen, risk-approved plans and add a
+  separate Paper enrollment per exact deployment. Enrollment, global resume, manual ticks,
+  and cancellation retain the existing two-step administrator confirmation contract.
+- Every plan has one persistent client order identity. The Alpaca adapter is hard-pinned to
+  the Paper host, checks that identity before retry, and has no live-host configuration.
+- Price-capped long GTC brackets are the first supported contract. Broker account/risk state
+  is independently checked because Paper equity, buying power, positions, and fills can
+  diverge from the virtual Shadow ledger. ADR 0024 is the formal record.
 
 ## Iteration and commit ledger
 
@@ -2438,10 +2470,10 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 Ordered near-term work:
 
-1. Implement and locally validate Phase 7 Alpaca paper submission/reconciliation after the
-   four pre-cloud milestones, with no live-money path and explicit confirmation gates.
-2. Select the VPS/cloud provider, domain/TLS, backup/monitoring, and secret-delivery inputs;
+1. Select the VPS/cloud provider, domain/TLS, backup/monitoring, and secret-delivery inputs;
    then execute the guarded bootstrap against a fresh production data plane.
+2. Run a read-only Alpaca Paper probe in the intended environment, review one exact
+   enrollment, and let the administrator explicitly decide when to permit the first order.
 3. Run production long-horizon backfill, enable paid coordinator stages only after route/USD-
    budget review, and collect Phase 5 statistical plus continuous-shadow evidence.
 4. Continue interactive UI review and add account/coordinator affordances where operator use
@@ -2461,14 +2493,14 @@ Ordered near-term work:
 - Notification channels beyond the dashboard.
 - Whether credit spreads enter the first paper release.
 
-None of these blocks local implementation or fixture testing. Public exposure, paper
-submission, and cloud deployment remain gated until their corresponding decisions are made.
-The user explicitly reordered Phase 7 paper implementation to occur locally after these four
-hardening milestones and before cloud deployment.
+None of these blocks local implementation or fixture testing. Public exposure, the first
+external Paper order, and cloud deployment remain gated until their corresponding decisions
+are made. Phase 7 code is now implemented in the user-requested pre-cloud position; no Paper
+order was used as a build test.
 
 ### C030 — `Build shared account and autonomous bootstrap`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `c221891`.
 - Date: 2026-09-06 PDT.
 - User intent: move Phase 7 immediately after the four pre-cloud tasks, then complete those
   tasks autonomously: shared master-account/sleeves, research coordination, local recovery
@@ -2502,14 +2534,14 @@ hardening milestones and before cloud deployment.
   - The production Compose file renders with an explicit environment-file override, the VPS
     deploy script passes shell syntax validation, and the Control Center JavaScript parses in
     the macOS JavaScript runtime.
-  - GitHub CI is verified after push; until then it remains the only pending validation item.
+  - GitHub CI passed on `c221891`.
 - Expected global state after commit:
   - The four pre-cloud implementation tasks are complete locally. Phase 7 paper adapter is
     next; real cloud provisioning still needs user-selected infrastructure inputs.
 
 ### C031 — `Explain strategy lineage and harden evidence contracts`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `c396833`.
 - Date: 2026-09-06 PDT.
 - User intent: make each Strategy page understandable without reading raw JSON, show exactly
   how ML and LLMs participated, reflect the new coordinator/shared-account functions in the
@@ -2548,12 +2580,54 @@ hardening milestones and before cloud deployment.
     request against the rebuilt local API returned all nine stored strategies with explicit
     `DETERMINISTIC_BASELINE` origins; the served page contained the new lineage, execution-
     review, and strategy-reading UI.
-  - GitHub CI is verified after push; until then it is the only pending validation item.
+  - GitHub CI passed on `c396833`.
 - Expected global state after commit:
   - All seven concrete findings in the independent `3b3926e` review have code-level
     mitigations and regression coverage. The Control Center explains existing baseline versus
     hybrid strategies and exposes the new autonomous/shared-account state. Phase 7 paper
     integration remains the next implementation milestone.
+
+### C032 — `Build guarded Alpaca paper execution`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-06 PDT.
+- User intent: implement Paper trading after completing the pre-cloud and review work.
+- Scope:
+  - Added an Alpaca adapter whose endpoint is permanently restricted to
+    `paper-api.alpaca.markets`, plus account/position inspection, client-ID lookup, price-capped
+    GTC bracket submission, and cancellation.
+  - Added durable Paper enrollment, order intent/event, account/position snapshot, and runtime
+    run tables under Alembic revision `20260906_0028`.
+  - Added a persistent Paper worker that mirrors only post-enrollment approved Shadow plans,
+    queries before retry, reconciles existing orders even while paused, cancels unfilled
+    expired entries, and quarantines account/contract mismatches.
+  - Added independent broker-account gates for buying power, account floor/daily loss,
+    per-trade/concurrent risk, and unmanaged positions. Paper and live-money flags remain
+    separate; live remains technically absent and prohibited.
+  - Added two-step administrator actions, authenticated Paper APIs, a dedicated Control Center
+    page, production configuration/deploy gates, runbook, and ADR 0024.
+- Architecture/decision impact:
+  - Shadow remains broker-free and owns deterministic plan construction. Paper is a separate
+    external observation/execution layer, not a relabeling of virtual P&L.
+  - One exact plan maps to one durable local intent and one stable broker client ID. Unknown
+    network outcomes cannot create a fresh identity.
+  - Building and probing the integration does not authorize an order. Enrollment and global
+    resume are separate human decisions; fixture validation sends no external order.
+- Validation:
+  - Flake8 and strict mypy across 58 source files pass; all 121 tests pass locally, including
+    live-host rejection, provider idempotency, one-plan/one-order replay, pause behavior,
+    cancellation, migration, API, and browser contract coverage.
+  - A real read-only Alpaca Paper probe returned an active USD account with no broker/account
+    block and zero positions. It did not call the order endpoint.
+  - `make release-check` passed: Flake8, strict mypy across 58 source files, all 121 tests,
+    authenticated local doctor, secret scan, Docker rebuild/doctor, and PostgreSQL Alembic
+    zero-drift. The browser JavaScript parses, the served page contains the Paper controls,
+    and a fresh SQLite database passed upgrade/downgrade/re-upgrade with zero drift.
+  - GitHub CI is verified after push; until then it is the only pending validation item.
+- Expected global state after commit:
+  - Phase 7 Paper code is ready for guarded deployment and a read-only account probe. No Paper
+    order or live-money operation has occurred. Cloud infrastructure inputs and real elapsed
+    Paper/statistical evidence remain open.
 
 ## Template for future commit entries
 

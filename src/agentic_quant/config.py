@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     session_max_age_days: int = Field(default=90, ge=1, le=365)
     shadow_runtime_enabled: bool = True
     shadow_poll_seconds: int = Field(default=30, ge=5, le=3_600)
+    paper_trading_enabled: bool = False
+    paper_poll_seconds: int = Field(default=30, ge=5, le=3_600)
     autonomous_coordinator_enabled: bool = False
     coordinator_paid_research_enabled: bool = False
     coordinator_poll_seconds: int = Field(default=3_600, ge=60, le=86_400)
@@ -60,6 +62,7 @@ class Settings(BaseSettings):
     alpaca_api_key: SecretStr | None = None
     alpaca_api_secret: SecretStr | None = None
     alpaca_data_base_url: str = "https://data.alpaca.markets"
+    alpaca_paper_base_url: str = "https://paper-api.alpaca.markets"
     alpaca_stock_stream_base_url: str = "wss://stream.data.alpaca.markets/v2"
     alpaca_stock_feed: str = "sip"
     alpaca_option_feed: str = "opra"
@@ -86,6 +89,22 @@ class Settings(BaseSettings):
     def live_execution_is_impossible(self) -> Settings:
         if self.live_trading_enabled:
             raise ValueError("Live trading is prohibited; LIVE_TRADING_ENABLED must remain false")
+        if self.paper_trading_enabled:
+            if self.trading_mode != TradingMode.PAPER:
+                raise ValueError(
+                    "PAPER_TRADING_ENABLED=true requires TRADING_MODE=paper"
+                )
+            if self.alpaca_paper_base_url.rstrip("/") != (
+                "https://paper-api.alpaca.markets"
+            ):
+                raise ValueError(
+                    "Paper trading is hard-pinned to "
+                    "https://paper-api.alpaca.markets"
+                )
+            if not self.alpaca_api_key or not self.alpaca_api_secret:
+                raise ValueError(
+                    "Paper trading requires ALPACA_API_KEY and ALPACA_API_SECRET"
+                )
         if self.app_env == AppEnvironment.PRODUCTION:
             if not self.global_new_exposure_paused:
                 raise ValueError("Production must start with new exposure paused")

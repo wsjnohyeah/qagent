@@ -49,6 +49,10 @@ SESSION_SECRET=AT_LEAST_32_RANDOM_CHARACTERS
 SESSION_MAX_AGE_DAYS=90
 SHADOW_RUNTIME_ENABLED=true
 SHADOW_POLL_SECONDS=30
+# Keep false for the first deployment. Paper activation is a later reviewed step.
+PAPER_TRADING_ENABLED=false
+PAPER_POLL_SECONDS=30
+ALPACA_PAPER_BASE_URL=https://paper-api.alpaca.markets
 AUTONOMOUS_COORDINATOR_ENABLED=true
 COORDINATOR_POLL_SECONDS=3600
 COORDINATOR_INITIAL_LOOKBACK_DAYS=1826
@@ -71,7 +75,11 @@ backups, or deliberately configure an external S3-compatible object store before
 backfill cap does not apply, but long jobs must run through authenticated, observable worker
 operations rather than unauthenticated public API endpoints.
 
-Provider keys are added only when their integration phase is approved. Redact them from logs and health responses.
+Provider keys are added only when their integration phase is approved. Redact them from logs
+and health responses. When Paper is enabled, `TRADING_MODE` must be `paper`, the Paper URL must
+remain exact, and the dedicated worker must report a healthy `paper` heartbeat. A fresh
+production data plane has no Paper enrollment, so activation cannot submit until the
+administrator separately confirms one in Control Center and resumes new exposure.
 
 Generate the production hash interactively without putting the password in shell history:
 
@@ -137,6 +145,9 @@ Verify and record:
 - The bootstrap output says `ready_paused` and the stored environment ID matches this stack.
 - `GET /v1/coordinator/status` is readable and the coordinator heartbeat is present when
   enabled. `WAITING_PAID_RESEARCH_ENABLEMENT` is expected until paid automation is approved.
+- Before enabling Paper, `POST /v1/paper/probe` succeeds read-only and the returned account
+  identity, cash/equity, and positions match the dedicated Alpaca Paper account. No order is
+  submitted as a deployment health check.
 - PostgreSQL and Redis health.
 - Restart behavior after one controlled API restart.
 - Backup output and a restore test before durable operation.

@@ -62,7 +62,9 @@ No override can convert an insufficient/rejected validation report into an adopt
   only the completed decision bar's volume; the future execution bar's final volume is never
   used to size the opening order.
 - Deployment/bar/event uniqueness and `last_processed_bar_time` make reruns idempotent.
-- Cash and realized P&L are virtual. There is no broker SDK, account endpoint, or order submit.
+- Cash and realized P&L are virtual. This runtime has no broker SDK or submission call. The
+  separate Phase 7 Paper runtime may mirror a newly approved plan only after an additional
+  enrollment confirmation; it never converts Shadow history into broker history.
 
 ## Inspection
 
@@ -92,6 +94,7 @@ point-in-time, confirmation, or no-broker invariants.
 
 The completed-bar simulator is a forward-workflow validation harness, not an exchange clock:
 the next bar is already complete when its open/close are replayed. True order-time market
-interaction, reconciliation, and partial execution belong to Phase 7 paper trading. Phase 6's
+interaction and reconciliation belong to the separate Phase 7 Paper runtime; partial-fill
+modeling remains limited. Phase 6's
 continuous-operation observation period still requires elapsed runtime after deployment; it
 cannot be replaced by a bounded local test.
