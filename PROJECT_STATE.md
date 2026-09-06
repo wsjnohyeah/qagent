@@ -84,6 +84,8 @@
   signal/feature timestamps also reject.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; local and remote `main`
   were synchronized at `a3447ec` before this review iteration.
+- GitHub Actions uses the current Node 24-based `actions/checkout@v7` and
+  `astral-sh/setup-uv@v10` runners.
 - Current reviewed baseline passes 89 tests, authenticated local and PostgreSQL/MinIO/Redis
   doctors, JavaScript parsing, a fresh migration roundtrip, zero PostgreSQL schema drift, and
   one bounded live Meta System Steward snapshot/citation call.

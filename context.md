@@ -7,7 +7,7 @@ Context format: v1
 Current phase: implementation foundations through Phase 6 are locally verified; Phase 5
 statistical promotion and Phase 6 production/runtime exit criteria remain open
 
-Current documented baseline: C025 — `Reconcile design handoff safety gaps`
+Current documented baseline: C026 — `Update CI actions to Node 24 runtimes`
 
 ## Purpose and authority
 
@@ -121,6 +121,8 @@ A Git commit cannot contain its own content-derived hash without changing that h
 - Local repository root: `/Users/ethanhqc/Documents/Codex/2026-09-03/files-mentioned-by-the-user-readme`
 - Default branch: `main`
 - GitHub remote: `https://github.com/wsjnohyeah/qagent.git`
+- CI uses `actions/checkout@v7` and `astral-sh/setup-uv@v10`, avoiding the deprecated Node
+  20 action runtime warning.
 - First commit: `5374c1b Bootstrap safety-first Phase 0 environment`
 - Local runtime artifacts and secrets are excluded through `.gitignore`.
 - CI is defined for lint, strict typing, tests, a secret-pattern scan, and Docker image build.
@@ -2110,6 +2112,24 @@ The Compose stack is currently intended to remain running for local inspection. 
     or live-money path.
   - The repository and handoff docs agree on what is implemented, what is empirically
     unproven, and what still blocks production or paper execution.
+
+### C026 — `Update CI actions to Node 24 runtimes`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-05 PDT.
+- User intent: finish the design-review revision with a clean repository-side verification.
+- Scope:
+  - Updated `actions/checkout` from v4 to v7 and `astral-sh/setup-uv` from v6 to v10 after
+    GitHub reported that both prior actions relied on deprecated Node 20 runtimes.
+- Architecture/decision impact:
+  - None; this is CI runner maintenance using the current official major releases.
+- Validation:
+  - The preceding C025 GitHub CI run passed every code/test/build step and exposed only the
+    Node 20 deprecation warning.
+  - The C026 GitHub CI run is verified after push.
+- Expected global state after commit:
+  - CI retains the same locked Python 3.12/uv test and Docker build workflow without the
+    deprecated action-runtime warning.
 
 ## Open work
 
