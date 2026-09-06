@@ -231,6 +231,17 @@ class DocumentStore:
             version_inserted=version_inserted,
         )
 
+    def fact_id_for_fingerprint(self, fact_fingerprint: str) -> str:
+        with self.engine.connect() as connection:
+            value = connection.execute(
+                select(corporate_facts.c.fact_id).where(
+                    corporate_facts.c.fact_fingerprint == fact_fingerprint
+                )
+            ).scalar_one_or_none()
+        if value is None:
+            raise ValueError("Corporate fact was not persisted")
+        return str(value)
+
     def resolve_catalyst(
         self,
         document: SourceDocument,

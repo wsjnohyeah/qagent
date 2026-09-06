@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
+import uuid
 
-from sqlalchemy import and_, create_engine, func, insert, or_, select, text, update
+from sqlalchemy import and_, create_engine, func, or_, select, text, update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import IntegrityError
 
 from agentic_quant.domain import EventEnvelope
 from agentic_quant.database import event_outbox, ledger_events, metadata
@@ -28,12 +30,38 @@ class EventLedger:
             return bool(connection.execute(text("SELECT 1")).scalar_one() == 1)
 
     def append(self, event: EventEnvelope) -> bool:
-        record = event.model_dump()
-        try:
-            with self.engine.begin() as connection:
-                connection.execute(insert(ledger_events).values(**record))
+        return bool(self.append_batch((event,)))
+
+    def append_batch(self, events: tuple[EventEnvelope, ...]) -> tuple[str, ...]:
+        """Atomically ensure all event intents before any network delivery.
+
+        Existing ledger rows are reconciled with a missing outbox row, so replaying
+        normalized business data repairs interruptions between business insertion and
+        event creation. The returned IDs are newly enqueued outbox rows only.
+        """
+        if not events:
+            return ()
+        unique_events = tuple(
+            {event.event_id: event for event in events}.values()
+        )
+        dialect_insert: Any
+        if self.engine.dialect.name == "postgresql":
+            dialect_insert = postgresql_insert
+        elif self.engine.dialect.name == "sqlite":
+            dialect_insert = sqlite_insert
+        else:
+            raise RuntimeError(f"Unsupported SQL dialect: {self.engine.dialect.name}")
+        enqueued: list[str] = []
+        with self.engine.begin() as connection:
+            for event in unique_events:
                 connection.execute(
-                    insert(event_outbox).values(
+                    dialect_insert(ledger_events)
+                    .values(**event.model_dump())
+                    .on_conflict_do_nothing(index_elements=["event_id"])
+                )
+                inserted = connection.execute(
+                    dialect_insert(event_outbox)
+                    .values(
                         event_id=event.event_id,
                         event_type=event.event_type,
                         envelope_json=event.model_dump_json(),
@@ -47,10 +75,43 @@ class EventLedger:
                         updated_at=event.emitted_at,
                         published_at=None,
                     )
-                )
-        except IntegrityError:
-            return False
-        return True
+                    .on_conflict_do_nothing(index_elements=["event_id"])
+                    .returning(event_outbox.c.event_id)
+                ).scalar_one_or_none()
+                if inserted is not None:
+                    enqueued.append(str(inserted))
+        return tuple(enqueued)
+
+    @staticmethod
+    def stable_event_id(event_type: str, business_key: str) -> str:
+        return str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"qagent:{event_type}:{business_key}",
+            )
+        )
+
+    def deliver_batch(
+        self,
+        events: tuple[EventEnvelope, ...],
+        publisher: Any,
+        *,
+        enqueued_event_ids: tuple[str, ...],
+    ) -> None:
+        """Attempt every newly enqueued delivery before surfacing a failure."""
+        pending = set(enqueued_event_ids)
+        first_error: Exception | None = None
+        for event in events:
+            if event.event_id not in pending:
+                continue
+            pending.remove(event.event_id)
+            try:
+                self.deliver(event, publisher)
+            except Exception as exc:  # durable outbox already exists
+                if first_error is None:
+                    first_error = exc
+        if first_error is not None:
+            raise first_error
 
     def deliver(self, event: EventEnvelope, publisher: Any) -> str | None:
         """Attempt immediate delivery for an event already committed to the outbox."""

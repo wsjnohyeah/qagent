@@ -11,6 +11,7 @@ from typing import Any
 from agentic_quant.backtest_engine import EventDrivenPortfolio
 from agentic_quant.data_quality import MarketDataQualityService
 from agentic_quant.domain import (
+    AccountState,
     BacktestCostModel,
     BacktestMetrics,
     BacktestPortfolioEvent,
@@ -18,24 +19,37 @@ from agentic_quant.domain import (
     BacktestTrade,
     CorporateAction,
     CorporateActionType,
+    Direction,
     EventEnvelope,
     ExperimentRun,
     ExperimentStatus,
+    FeatureSnapshot,
     FeatureParityCheck,
     PointInTimeFeatureSnapshot,
+    RiskEvaluationContext,
     SignalAction,
+    SignalCandidate,
     StockBar,
     StrategySpec,
+    Verdict,
 )
 from agentic_quant.ids import uuid7
 from agentic_quant.ledger import EventLedger
 from agentic_quant.market_calendar import MarketSessionClock
 from agentic_quant.reference_data import ReferenceDataStore
 from agentic_quant.research_store import ResearchStore, _canonical_hash
+from agentic_quant.risk import (
+    RestrictionRegistry,
+    RiskPolicy,
+    baseline_long_exit,
+    baseline_long_geometry,
+    evaluate_candidate,
+)
+from agentic_quant.config import TradingMode
 
 
 FEATURE_SET_VERSION = "price_event_pit@0.3.0"
-BACKTEST_ENGINE_VERSION = "event_driven_portfolio@0.2.0"
+BACKTEST_ENGINE_VERSION = "event_driven_portfolio@0.3.0"
 SUPPORTED_STRATEGIES = ("buy_and_hold", "momentum", "mean_reversion")
 _MINIMUM_HISTORY = 21
 _ZERO = Decimal("0")
@@ -336,6 +350,8 @@ class ResearchBacktester:
         ledger: EventLedger | None = None,
         *,
         calendar_name: str = "XNYS",
+        risk_policy: RiskPolicy | None = None,
+        restrictions: RestrictionRegistry | None = None,
     ) -> None:
         self.store = store
         self.ledger = ledger
@@ -346,6 +362,13 @@ class ResearchBacktester:
             store.engine,
             ledger,
             calendar_name=calendar_name,
+        )
+        config_root = Path(__file__).resolve().parents[2] / "configs"
+        self.risk_policy = risk_policy or RiskPolicy.from_yaml(
+            config_root / "risk_policy.yaml"
+        )
+        self.restrictions = restrictions or RestrictionRegistry.from_yaml(
+            config_root / "restricted_securities.yaml"
         )
 
     def run(
@@ -372,7 +395,7 @@ class ResearchBacktester:
             timeframe=spec.timeframe,
             as_of_end=as_of_end,
         )
-        self.data_quality.require_bars(
+        quality_report = self.data_quality.require_bars(
             bars,
             symbol=symbol,
             timeframe=spec.timeframe,
@@ -451,6 +474,7 @@ class ResearchBacktester:
                 initial_equity=initial_equity,
                 costs=costs,
                 actions=portfolio_actions,
+                market_data_healthy=quality_report.status.value == "PASSED",
             )
         metrics = self._metrics(
             initial_equity=initial_equity,
@@ -506,6 +530,7 @@ class ResearchBacktester:
             experiment=experiment,
             strategy_spec=stored_spec,
             trades=trades,
+            equity_curve=equity_curve,
             portfolio_events=portfolio_events,
         )
         self.store.record_backtest(result)
@@ -535,6 +560,7 @@ class ResearchBacktester:
         initial_equity: Decimal,
         costs: BacktestCostModel,
         actions: tuple[CorporateAction, ...],
+        market_data_healthy: bool,
     ) -> tuple[
         tuple[BacktestTrade, ...],
         tuple[Decimal, ...],
@@ -549,6 +575,8 @@ class ResearchBacktester:
         curve = [initial_equity]
         trades: list[BacktestTrade] = []
         action_index = 0
+        day_start_cash = initial_equity
+        current_day = None
         for index, snapshot in zip(decision_indices, snapshots, strict=True):
             execution_bar = bars[index + 1]
             should_trade = self._should_trade(spec, snapshot)
@@ -565,6 +593,69 @@ class ResearchBacktester:
             )
             entered = False
             if should_trade:
+                day = entry_time.astimezone(UTC).date()
+                if day != current_day:
+                    current_day = day
+                    day_start_cash = portfolio.cash
+                invalidation, target = baseline_long_geometry(
+                    bars[index].close,
+                    self.risk_policy,
+                )
+                candidate = SignalCandidate(
+                    candidate_id=uuid7(),
+                    symbol=symbol,
+                    direction=Direction.LONG,
+                    setup_type=f"baseline_backtest:{spec.strategy_type}",
+                    strategy_version=spec.version,
+                    as_of=snapshot.as_of,
+                    feature_snapshot_id=snapshot.feature_snapshot_id,
+                    catalyst_id="NOT_APPLICABLE_BASELINE",
+                    planned_entry=bars[index].close,
+                    invalidation=invalidation,
+                    targets=(target,),
+                    expires_at=execution_bar.available_from,
+                )
+                decision = evaluate_candidate(
+                    candidate=candidate,
+                    features=FeatureSnapshot(
+                        feature_snapshot_id=snapshot.feature_snapshot_id,
+                        as_of=snapshot.as_of,
+                        relative_volume=Decimal(
+                            str(snapshot.values.get("volume_ratio_20") or "0")
+                        ),
+                        vwap_confirmed=False,
+                        opening_range_confirmed=False,
+                        sector_compatible=False,
+                        quote_age_seconds=0,
+                    ),
+                    account=AccountState(
+                        equity=portfolio.cash,
+                        daily_pnl=portfolio.cash - day_start_cash,
+                        concurrent_planned_risk=_ZERO,
+                    ),
+                    mode=TradingMode.BACKTEST,
+                    policy=self.risk_policy,
+                    restrictions=self.restrictions,
+                    context=RiskEvaluationContext(
+                        catalyst_required=False,
+                        catalyst_verified=False,
+                        restriction_status_known=True,
+                        liquidity_confirmed=bars[index].volume > 0,
+                        market_data_healthy=market_data_healthy,
+                        macro_calendar_status_known=False,
+                        duplicate_order_detected=False,
+                        evaluation_profile="baseline_shadow",
+                    ),
+                    evaluated_at=entry_time,
+                    new_exposure_paused=False,
+                )
+                if decision.verdict != Verdict.APPROVE:
+                    portfolio.mark(
+                        event_time=self._bar_close_time(execution_bar),
+                        raw_price=execution_bar.close,
+                    )
+                    curve.append(portfolio.cash)
+                    continue
                 entered = portfolio.enter_long(
                     signal_as_of=snapshot.as_of,
                     entry_time=entry_time,
@@ -573,6 +664,7 @@ class ResearchBacktester:
                     # The latest completed decision bar is the newest knowable input.
                     available_volume=bars[index].volume,
                     feature_snapshot_id=snapshot.feature_snapshot_id,
+                    quantity_limit=decision.max_quantity,
                 )
             exit_time = self._bar_close_time(execution_bar)
             action_index = self._apply_actions_until(
@@ -582,11 +674,19 @@ class ResearchBacktester:
                 cutoff=exit_time,
             )
             if entered:
+                exit_price, exit_reason = baseline_long_exit(
+                    open_price=execution_bar.open,
+                    high_price=execution_bar.high,
+                    low_price=execution_bar.low,
+                    close_price=execution_bar.close,
+                    invalidation=invalidation,
+                    target=target,
+                )
                 trade = portfolio.exit_long(
                     exit_time=exit_time,
-                    raw_price=execution_bar.close,
+                    raw_price=exit_price,
                     available_volume=execution_bar.volume,
-                    exit_reason="session_close",
+                    exit_reason=exit_reason,
                 )
                 if trade is not None:
                     trades.append(trade)

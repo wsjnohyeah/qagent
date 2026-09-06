@@ -4,7 +4,9 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
+from fastapi.testclient import TestClient
 
+from agentic_quant.api import create_app
 from agentic_quant.domain import BacktestCostModel, StockBar
 from agentic_quant.ids import uuid7
 from agentic_quant.ledger import EventLedger
@@ -12,13 +14,31 @@ from agentic_quant.market_calendar import MarketSessionClock
 from agentic_quant.market_store import MarketDataStore
 from agentic_quant.migrations import upgrade_database
 from agentic_quant.research_store import ResearchStore
+from agentic_quant.research import default_strategy_spec, research_code_sha256
 from agentic_quant.validation import (
     PromotionGatePolicy,
     WalkForwardValidator,
     assess_research_gate,
+    continuous_oos_equity_and_drawdown,
     combinatorial_purged_diagnostics,
     deflated_sharpe_diagnostics,
 )
+
+
+def test_continuous_oos_drawdown_keeps_intrafold_loss_and_cross_fold_peak() -> None:
+    path, drawdown = continuous_oos_equity_and_drawdown(
+        (
+            (Decimal("100"), Decimal("50"), Decimal("110")),
+            (Decimal("100"), Decimal("90")),
+        )
+    )
+    assert path == (
+        Decimal("1"),
+        Decimal("0.5"),
+        Decimal("1.1"),
+        Decimal("0.99"),
+    )
+    assert drawdown == Decimal("-0.5")
 
 
 def _regime_bars(count: int = 60) -> tuple[StockBar, ...]:
@@ -141,6 +161,42 @@ def test_walk_forward_validation_rejects_overlapping_test_windows(
             step_bars=4,
             embargo_bars=1,
         )
+
+
+def test_api_validates_the_exact_generated_strategy_spec_id(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    _, store, _, bars = _validator(settings)
+    spec = store.record_strategy_spec(
+        default_strategy_spec(
+            "momentum",
+            timeframe="1Day",
+            code_sha256=research_code_sha256(),
+        )
+    )
+    with TestClient(create_app(settings)) as client:
+        response = client.post(
+            "/v1/research/validations",
+            json={
+                "strategy_spec_id": spec.strategy_spec_id,
+                "symbol": "AAPL",
+                "timeframe": "1Day",
+                "as_of_start": bars[20].available_from.isoformat(),
+                "as_of_end": bars[-1].available_from.isoformat(),
+                "train_bars": 22,
+                "test_bars": 5,
+                "step_bars": 5,
+                "embargo_bars": 1,
+                "initial_equity": "100000",
+            },
+        )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["validation_subject"] == "static_strategy"
+    assert payload["validated_strategy_spec_ids"] == {
+        "momentum": spec.strategy_spec_id
+    }
+    assert payload["gate_assessment"]["status"] == "INSUFFICIENT_EVIDENCE"
 
 
 def test_pbo_and_deflated_sharpe_diagnostics_are_bounded_and_deterministic() -> None:

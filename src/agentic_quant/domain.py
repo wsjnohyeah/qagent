@@ -623,6 +623,7 @@ class BacktestResult(FrozenModel):
     experiment: ExperimentRun
     strategy_spec: StrategySpec
     trades: tuple[BacktestTrade, ...]
+    equity_curve: tuple[Decimal, ...] = Field(min_length=1)
     portfolio_events: tuple[BacktestPortfolioEvent, ...] = ()
 
 
@@ -721,6 +722,7 @@ class WorkflowJob(FrozenModel):
     max_attempts: int = Field(ge=1)
     dependency_job_ids: tuple[str, ...] = ()
     lease_owner: str | None = None
+    lease_token: str | None = None
     lease_expires_at: datetime | None = None
     cursor: dict[str, Any]
     result: dict[str, Any]

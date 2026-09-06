@@ -4,7 +4,7 @@ from datetime import UTC, timedelta
 from decimal import Decimal
 
 from agentic_quant.domain import StockBar
-from agentic_quant.ids import uuid7
+from agentic_quant.ids import stable_uuid
 from agentic_quant.providers.base import StockBarsPage, StockBarsRequest
 
 
@@ -46,7 +46,14 @@ class SyntheticMarketDataProvider:
             raw_payload=payload,
             bars=(
                 StockBar(
-                    bar_id=uuid7(),
+                    bar_id=stable_uuid(
+                        "bar",
+                        self.name,
+                        "test",
+                        request.symbol.upper(),
+                        request.timeframe,
+                        event_time,
+                    ),
                     symbol=request.symbol.upper(),
                     timeframe=request.timeframe,
                     event_time=event_time,

@@ -5,6 +5,7 @@ import math
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,6 +15,7 @@ from agentic_quant.document_store import DocumentStore
 from agentic_quant.domain import (
     EvidencePacket,
     EvidenceReference,
+    CorporateActionType,
     MLModelStatus,
     PointInTimeFeatureSnapshot,
     ResearchAnalysisRecord,
@@ -279,6 +281,44 @@ def test_ml_labels_follow_executable_bars_and_ignore_sparse_snapshot_spacing(
     )
     assert sparse[0].label_available_from == bars[1].available_from
     assert sparse[1].label_available_from == bars[4].available_from
+
+
+def test_ml_label_does_not_apply_split_that_precedes_next_open(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    research = ResearchStore(EventLedger(settings.database_url).engine)
+    snapshots = _seed_snapshots(research, count=24)
+    bars = research.load_bars(
+        symbol="AAPL",
+        timeframe="1Day",
+        as_of_end=snapshots[-1].as_of,
+    )
+    builder = MLDatasetBuilder(research)
+
+    class PreEntrySplitStore:
+        @staticmethod
+        def corporate_actions_effective_between(**_kwargs):  # type: ignore[no-untyped-def]
+            return (
+                SimpleNamespace(
+                    action_type=CorporateActionType.SPLIT,
+                    split_ratio=Decimal("2"),
+                    cash_amount=None,
+                    effective_at=bars[1].event_time - timedelta(hours=1),
+                ),
+            )
+
+    builder.reference_data = PreEntrySplitStore()  # type: ignore[assignment]
+    examples = builder.build(
+        symbol="AAPL",
+        timeframe="1Day",
+        as_of_end=snapshots[-1].as_of,
+        horizon_bars=1,
+        policy=load_ml_policy(ROOT / "configs/ml_policy.yaml"),
+    )
+    assert examples[0].forward_return == pytest.approx(
+        float(bars[1].close / bars[1].open - Decimal("1"))
+    )
 
 
 def test_ml_oos_partitions_purge_label_overlap(

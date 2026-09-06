@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import hashlib
 import json
 import uuid
@@ -93,6 +95,7 @@ class WorkflowJobStore:
                     status=WorkflowJobStatus.PENDING.value,
                     error_code="worker_restarted",
                     lease_owner=None,
+                    lease_token=None,
                     lease_expires_at=None,
                     updated_at=now,
                 )
@@ -105,12 +108,13 @@ class WorkflowJobStore:
         *,
         worker_id: str = "inline-worker",
         lease_for: timedelta = timedelta(hours=1),
-    ) -> bool:
+    ) -> str | None:
         if not worker_id.strip():
             raise ValueError("worker_id is required")
         if lease_for <= timedelta(0):
             raise ValueError("lease_for must be positive")
         now = datetime.now(UTC)
+        lease_token = uuid7()
         with self.engine.begin() as connection:
             row = connection.execute(
                 select(workflow_jobs).where(
@@ -118,7 +122,7 @@ class WorkflowJobStore:
                 )
             ).one_or_none()
             if row is None:
-                return False
+                return None
             dependency_ids = tuple(row.dependency_job_ids_json or ())
             if dependency_ids:
                 completed_dependencies = int(
@@ -133,7 +137,7 @@ class WorkflowJobStore:
                     ).scalar_one()
                 )
                 if completed_dependencies != len(set(dependency_ids)):
-                    return False
+                    return None
             result = connection.execute(
                 update(workflow_jobs)
                 .where(
@@ -150,6 +154,7 @@ class WorkflowJobStore:
                     status=WorkflowJobStatus.RUNNING.value,
                     attempt_count=workflow_jobs.c.attempt_count + 1,
                     lease_owner=worker_id.strip(),
+                    lease_token=lease_token,
                     lease_expires_at=now + lease_for,
                     started_at=now,
                     updated_at=now,
@@ -160,13 +165,14 @@ class WorkflowJobStore:
             claimed = bool(result.rowcount)
         if claimed:
             self._emit(workflow_job_id, "workflow.job.started.v1")
-        return claimed
+        return lease_token if claimed else None
 
     def heartbeat(
         self,
         workflow_job_id: str,
         *,
-        worker_id: str = "inline-worker",
+        worker_id: str,
+        lease_token: str,
         lease_for: timedelta = timedelta(hours=1),
         cursor: dict[str, Any] | None = None,
     ) -> bool:
@@ -186,6 +192,8 @@ class WorkflowJobStore:
                     (workflow_jobs.c.workflow_job_id == workflow_job_id)
                     & (workflow_jobs.c.status == WorkflowJobStatus.RUNNING.value)
                     & (workflow_jobs.c.lease_owner == worker_id)
+                    & (workflow_jobs.c.lease_token == lease_token)
+                    & (workflow_jobs.c.lease_expires_at > now)
                 )
                 .values(**values)
             )
@@ -196,7 +204,8 @@ class WorkflowJobStore:
         workflow_job_id: str,
         *,
         result: dict[str, Any],
-        worker_id: str = "inline-worker",
+        worker_id: str,
+        lease_token: str,
     ) -> None:
         now = datetime.now(UTC)
         with self.engine.begin() as connection:
@@ -206,6 +215,8 @@ class WorkflowJobStore:
                     (workflow_jobs.c.workflow_job_id == workflow_job_id)
                     & (workflow_jobs.c.status == WorkflowJobStatus.RUNNING.value)
                     & (workflow_jobs.c.lease_owner == worker_id)
+                    & (workflow_jobs.c.lease_token == lease_token)
+                    & (workflow_jobs.c.lease_expires_at > now)
                 )
                 .values(
                     status=WorkflowJobStatus.COMPLETED.value,
@@ -213,6 +224,7 @@ class WorkflowJobStore:
                     cursor_json={"completed": True},
                     error_code=None,
                     lease_owner=None,
+                    lease_token=None,
                     lease_expires_at=None,
                     updated_at=now,
                     completed_at=now,
@@ -231,8 +243,10 @@ class WorkflowJobStore:
         workflow_job_id: str,
         *,
         error_code: str,
-        worker_id: str = "inline-worker",
+        worker_id: str,
+        lease_token: str,
     ) -> None:
+        now = datetime.now(UTC)
         with self.engine.begin() as connection:
             updated = connection.execute(
                 update(workflow_jobs)
@@ -240,13 +254,16 @@ class WorkflowJobStore:
                     (workflow_jobs.c.workflow_job_id == workflow_job_id)
                     & (workflow_jobs.c.status == WorkflowJobStatus.RUNNING.value)
                     & (workflow_jobs.c.lease_owner == worker_id)
+                    & (workflow_jobs.c.lease_token == lease_token)
+                    & (workflow_jobs.c.lease_expires_at > now)
                 )
                 .values(
                     status=WorkflowJobStatus.FAILED.value,
                     error_code=error_code[:120],
                     lease_owner=None,
+                    lease_token=None,
                     lease_expires_at=None,
-                    updated_at=datetime.now(UTC),
+                    updated_at=now,
                 )
             )
         if int(updated.rowcount or 0) != 1:
@@ -261,6 +278,18 @@ class WorkflowJobStore:
         statement = (
             select(workflow_jobs)
             .where(workflow_jobs.c.job_group_id == job_group_id)
+            .order_by(workflow_jobs.c.partition_key.asc())
+        )
+        with self.engine.connect() as connection:
+            rows = connection.execute(statement).all()
+        return tuple(self._from_row(dict(row._mapping)) for row in rows)
+
+    def jobs_by_ids(self, workflow_job_ids: tuple[str, ...]) -> tuple[WorkflowJob, ...]:
+        if not workflow_job_ids:
+            return ()
+        statement = (
+            select(workflow_jobs)
+            .where(workflow_jobs.c.workflow_job_id.in_(workflow_job_ids))
             .order_by(workflow_jobs.c.partition_key.asc())
         )
         with self.engine.connect() as connection:
@@ -373,10 +402,15 @@ class ResumableMarketBackfill:
         if max_attempts < 1:
             raise ValueError("max_attempts must be positive")
         request_material = request.model_dump(mode="json")
-        request_sha256 = _canonical_hash(
-            {**request_material, "partition_days": partition_days}
+        dataset_contract = {
+            key: value
+            for key, value in request_material.items()
+            if key not in {"start", "end"}
+        }
+        dataset_contract["partition_days"] = partition_days
+        job_group_id = str(
+            uuid.uuid5(uuid.NAMESPACE_URL, _canonical_hash(dataset_contract))
         )
-        job_group_id = str(uuid.uuid5(uuid.NAMESPACE_URL, request_sha256))
         jobs = []
         partition_start = request.start
         now = datetime.now(UTC)
@@ -414,7 +448,9 @@ class ResumableMarketBackfill:
             partition_start = partition_end
         planned = tuple(jobs)
         self.jobs.ensure_jobs(planned)
-        return job_group_id, self.jobs.jobs(job_group_id=job_group_id)
+        return job_group_id, self.jobs.jobs_by_ids(
+            tuple(job.workflow_job_id for job in planned)
+        )
 
     async def run(
         self,
@@ -424,7 +460,7 @@ class ResumableMarketBackfill:
         max_attempts: int = 3,
         max_partitions: int | None = None,
     ) -> dict[str, Any]:
-        job_group_id, _ = self.plan(
+        job_group_id, planned = self.plan(
             request,
             partition_days=partition_days,
             max_attempts=max_attempts,
@@ -432,31 +468,60 @@ class ResumableMarketBackfill:
         self.jobs.requeue_stale(job_group_id=job_group_id)
         worker_id = f"backfill-{uuid7()}"
         processed = 0
-        for job in self.jobs.jobs(job_group_id=job_group_id):
+        for job in planned:
             if job.status == WorkflowJobStatus.COMPLETED:
                 continue
             if max_partitions is not None and processed >= max_partitions:
                 break
-            if not self.jobs.claim(job.workflow_job_id, worker_id=worker_id):
+            lease_token = self.jobs.claim(
+                job.workflow_job_id,
+                worker_id=worker_id,
+                lease_for=timedelta(minutes=2),
+            )
+            if lease_token is None:
                 continue
+            heartbeat = asyncio.create_task(
+                self._renew_lease(
+                    workflow_job_id=job.workflow_job_id,
+                    worker_id=worker_id,
+                    lease_token=lease_token,
+                )
+            )
             try:
                 summary = await self.service.ingest_stock_bars(
                     StockBarsRequest.model_validate(job.payload)
                 )
             except Exception as exc:
+                heartbeat.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await heartbeat
                 self.jobs.fail(
                     job.workflow_job_id,
                     error_code=type(exc).__name__,
                     worker_id=worker_id,
+                    lease_token=lease_token,
                 )
                 raise
+            heartbeat.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await heartbeat
+            if not self.jobs.heartbeat(
+                job.workflow_job_id,
+                worker_id=worker_id,
+                lease_token=lease_token,
+                lease_for=timedelta(minutes=2),
+            ):
+                raise RuntimeError("Backfill workflow lease was lost before completion")
             self.jobs.complete(
                 job.workflow_job_id,
                 result=summary.model_dump(mode="json"),
                 worker_id=worker_id,
+                lease_token=lease_token,
             )
             processed += 1
-        jobs = self.jobs.jobs(job_group_id=job_group_id)
+        jobs = self.jobs.jobs_by_ids(
+            tuple(job.workflow_job_id for job in planned)
+        )
         status_counts = {
             status.value: sum(job.status == status for job in jobs)
             for status in WorkflowJobStatus
@@ -468,3 +533,22 @@ class ResumableMarketBackfill:
             "status_counts": status_counts,
             "completed": status_counts[WorkflowJobStatus.COMPLETED.value] == len(jobs),
         }
+
+    async def _renew_lease(
+        self,
+        *,
+        workflow_job_id: str,
+        worker_id: str,
+        lease_token: str,
+    ) -> None:
+        while True:
+            await asyncio.sleep(30)
+            renewed = await asyncio.to_thread(
+                self.jobs.heartbeat,
+                workflow_job_id,
+                worker_id=worker_id,
+                lease_token=lease_token,
+                lease_for=timedelta(minutes=2),
+            )
+            if not renewed:
+                raise RuntimeError("Backfill workflow lease ownership was lost")

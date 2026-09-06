@@ -1,13 +1,13 @@
 # Master Project Context
 
-Last updated: 2026-09-05 PDT
+Last updated: 2026-09-06 PDT
 
 Context format: v1
 
 Current phase: implementation foundations through Phase 6.1 are locally verified; Phase 5
 statistical promotion and Phase 6 elapsed continuous-operation evidence remain open
 
-Current documented baseline: C028 — `Complete Phase 6.1 review remediation`
+Current documented baseline: C029 — `Harden forward shadow and recovery contracts`
 
 ## Purpose and authority
 
@@ -82,7 +82,8 @@ A Git commit cannot contain its own content-derived hash without changing that h
 - A constrained generation loop combines an exact point-in-time feature snapshot, linked ML
   forecast, and evidence-bound analysis with an adversarial LLM critique. It can compile only
   allowlisted momentum/mean-reversion parameters into an immutable research-only spec and
-  has no code, sizing, adoption, risk, or order authority.
+  has no code, sizing, adoption, risk, or order authority. Every accepted, rejected, or failed
+  generation attempt is separately audited; unsupported DSL fields fail instead of disappearing.
 - Phase 6 authenticates one administrator with a revocable server-side cookie session and
   CSRF protection. All non-health system interaction is locked when authentication is enabled;
   production requires an Argon2 password hash.
@@ -107,8 +108,9 @@ A Git commit cannot contain its own content-derived hash without changing that h
 - The broker-free shadow runtime admits only the exact static strategy and execution contract
   covered by a gate-eligible report and separate human confirmations. Every attempted
   exposure persists candidate → deterministic risk decision → approved plan → virtual order/
-  fill lineage, including account context and known decision-bar liquidity. It maintains
-  virtual cash/P&L and processes each stored bar idempotently. The literal multi-session buy-
+  fill lineage, including account context and known decision-bar liquidity. A plan is durable
+  before a later bar can fill it; missed worker-time bars are recorded and never fabricated as
+  forward fills. It maintains isolated candidate-account cash/P&L and processes each stored bar idempotently. The literal multi-session buy-
   and-hold benchmark is research-only. No broker order path exists.
 - Code modification is represented by scoped change sessions. The web process exposes no
   shell; a trusted external coding worker must produce a diff and passing test record before
@@ -117,8 +119,9 @@ A Git commit cannot contain its own content-derived hash without changing that h
   synchronized commit `06b6853`. No cloud host is configured yet.
 - The independent `06b6853` fix verification is mapped item-by-item in
   `docs/REVIEW_REMEDIATION_2026-09-05.md`. The deterministic F01–F11 counterexamples are
-  repaired; production-only observation, TLS, backup/restore, and monitoring evidence are
-  still reported as gates rather than simulated locally.
+  followed by the corrections from the `56bb979` review in
+  `docs/REVIEW_REMEDIATION_2026-09-06.md`; production-only observation, TLS, backup/restore,
+  and monitoring evidence are still reported as gates rather than simulated locally.
 - Tactical risk calls now require a typed external context covering catalyst applicability,
   known restriction status, liquidity, market-data health, macro-calendar knowledge, nearest
   major macro event, event-strategy approval, and duplicate intent. Unknown or unsafe facts
@@ -128,8 +131,9 @@ A Git commit cannot contain its own content-derived hash without changing that h
   manually confirmed tick from bypassing the scheduler kill switch.
 - Production Compose separates the authenticated API from the persistent shadow scheduler.
   SQL runtime controls and worker heartbeats are shared across processes; workflow jobs use
-  dependency-aware leases and owner-only completion, and ledger delivery uses a transactional
-  SQL outbox with stable IDs, retry leases, and a visible dead-letter state.
+  dependency-aware attempt tokens and expiry-fenced completion, portfolio ticks use a global
+  SQL execution lease, and normalized ingestion reconciles stable business events into a
+  transactional SQL outbox before network delivery.
 - `/health/ready` now fails with HTTP 503 when any required dependency reports false.
 
 ### Repository state
@@ -186,7 +190,7 @@ Development service ports bind only to loopback. The local Compose credentials a
 - `make check`: passed.
 - Flake8: passed.
 - Strict mypy: passed for 51 source files.
-- Pytest: 96 passed after the independent review remediation.
+- Pytest: 106 passed after the second independent review remediation.
 - `make doctor`: passed against the local-lite SQLite profile.
 - `make docker-doctor`: passed against the PostgreSQL-backed Compose profile.
 - PostgreSQL query: passed; the first container replay stored six lineage events.
@@ -194,8 +198,8 @@ Development service ports bind only to loopback. The local Compose credentials a
 - MinIO live health endpoint: passed.
 - API `/health/ready`: ready, database healthy, risk/restriction versions loaded, live trading false.
 - Container vertical slice: risk verdict `APPROVE`; order state `RECORDED_NOT_SUBMITTED`.
-- Phase 6.1 validation: 96 tests pass; JavaScript parses; authenticated SQLite and PostgreSQL
-  doctors pass; PostgreSQL Alembic reports no schema drift at `20260905_0025`.
+- Phase 6.1 validation: 106 tests pass locally; final JavaScript, doctor, secret, Docker,
+  PostgreSQL migration-drift, and CI checks are recorded in C029 after completion.
 - A live Meta `muse-spark-1.3` System Steward request read the bounded system snapshot,
   returned only the valid `SYSTEM:summary` citation, proposed no action, persisted both
   messages, and logged out successfully.
@@ -214,8 +218,9 @@ Development service ports bind only to loopback. The local Compose credentials a
 - Phase 2 fixtures verify primary/secondary source distinction, correction-version retention, SEC filing and XBRL normalization, IR feed parsing, and cross-document catalyst deduplication.
 - Alpaca REST results are now normalized to the internal half-open `[start, end)` contract;
   `market_data_quality@0.2.0` rejects out-of-window rows and live gap seeds use only 1Min bars.
-- Alembic migrations through `20260905_0025` own the Phase 3D/4/5/6.1 schema, including exact
-  validation contracts, shadow decision lineage, workflow leases, and the event outbox.
+- Alembic migrations through `20260906_0026` own the Phase 3D/4/5/6.1 schema, including exact
+  validation contracts, shadow decision lineage, fenced workflow/runtime leases, the event
+  outbox, and strategy-generation attempt audit.
 - `make research-smoke`: passed with 100 deterministic daily bars, three immutable baseline
   experiments, nonzero cost modeling, matching offline/online feature hashes, and ordered
   event-driven portfolio ledgers. Stored counts accumulate safely in the persistent ignored
@@ -725,8 +730,8 @@ year or more of data.
 | Research intelligence | `src/agentic_quant/intelligence.py` | point-in-time retrieval, structured analyst, citation checks, abstention, Decision Inspector graph |
 | ML training/registry | `src/agentic_quant/ml.py`, `configs/ml_policy.yaml` | PIT labels, logistic/stump walk-forward, calibration, drift, JSON registry, forecasts |
 | Strategy generator | `src/agentic_quant/strategy_generation.py` | evidence/forecast-bound LLM generation, adversarial critique, constrained research DSL |
-| Runtime worker | `src/agentic_quant/worker.py` | dedicated production shadow scheduler and persistent SQL heartbeat |
-| Schema migrations | `migrations/` | Alembic schema history through Phase 6.1 (`20260905_0025`) |
+| Runtime worker | `src/agentic_quant/worker.py` | supervised production shadow scheduler, persistent heartbeat, SQL execution lease |
+| Schema migrations | `migrations/` | Alembic schema history through Phase 6.1 (`20260906_0026`) |
 
 ## Current executable risk baseline
 
@@ -748,7 +753,9 @@ The Phase 0 configuration uses the lower conservative inherited caps where appli
 
 These are baseline configuration values, not authorization for paper submission. The inherited percentage and later dollar limits still require reconciliation before a paper broker adapter may submit orders.
 
-The active policy is `risk_policy@0.2.0`. A caller must provide `RiskEvaluationContext`; the
+The active policy is `risk_policy@0.3.0`. It versions the baseline 2% invalidation and 2R
+target used by both replay and shadow, including conservative stop-first resolution when one
+bar crosses both levels. A caller must provide `RiskEvaluationContext`; the
 gate rejects unknown restriction or macro-calendar state, unverified required catalysts,
 unconfirmed liquidity, unhealthy market data, duplicate intent, and applicable macro
 blackouts. It also rejects mismatched feature IDs and future signal/feature timestamps. The
@@ -789,8 +796,10 @@ Implemented endpoints:
 - `GET /v1/research/experiments`
 - `GET /v1/research/experiments/{experiment_run_id}/events`
 - `GET /v1/research/validations`
+- `POST /v1/research/validations`; development-only validation of one exact immutable spec ID
 - `GET /v1/research/validations/{validation_report_id}`
 - `POST /v1/research/strategy-candidates`; constrained, critique-required, research-only
+- `GET /v1/research/strategy-generation-attempts`
 - `GET /v1/llm/routes`
 - `GET /v1/llm/budget`
 - `PUT /v1/llm/budget`; proposes a confirmation-gated complete workload-limit revision
@@ -1330,6 +1339,25 @@ The Compose stack is currently intended to remain running for local inspection. 
   elapsed continuous-shadow observation period, or VPS-specific TLS/backup/restore proof.
   Those remain explicit gates, not hidden implementation claims. ADR 0020 and
   `docs/REVIEW_REMEDIATION_2026-09-05.md` record the boundary.
+
+### D036 — Validation and shadow share one forward execution contract
+
+- Date: 2026-09-06 PDT.
+- A second independent review of `56bb979` demonstrated that the earlier closure language
+  was too broad: sizing, exit geometry, drawdown, restart, outbox, lease, generation identity,
+  and backfill-range counterexamples remained.
+- Decision: `risk_policy@0.3.0` owns baseline stop/target geometry; validation binds policy,
+  restrictions, capital, costs, features, and engine version. The shadow runtime persists an
+  open plan from one completed bar and can fill it only when a later bar arrives. A SQL lease
+  fences the account boundary across API and worker processes.
+- Decision: all normalized events for a batch become durable before delivery, workflow writes
+  require an unexpired attempt token, and generated executable identity is separate from an
+  append-only attempt ledger. Single-candidate PBO is insufficient evidence, not a zero-risk
+  statistic.
+- Scope boundary: Phase 6 candidate accounts remain explicitly isolated. A shared main-
+  account allocation model and a collection/paid-research coordinator require separate
+  product policies; neither is implied by the shadow worker. ADR 0021 and
+  `docs/REVIEW_REMEDIATION_2026-09-06.md` record the corrected boundary.
 
 ## Iteration and commit ledger
 
@@ -2273,22 +2301,63 @@ The Compose stack is currently intended to remain running for local inspection. 
   - All deterministic F01–F11 review counterexamples are repaired and Phase 6.1's locally
     implementable UI/runtime deliverables are present without a broker path.
   - Phase 5 statistical promotion still requires adequate production-scale evidence. Phase 6
-    continuous-operation/recovery evidence, and VPS TLS/backup/monitoring gates, still require
-    real elapsed time or infrastructure input before Phase 7 can start.
+  continuous-operation/recovery evidence, and VPS TLS/backup/monitoring gates, still require
+  real elapsed time or infrastructure input before Phase 7 can start.
+
+### C029 — `Harden forward shadow and recovery contracts`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-06 PDT.
+- User intent: read and judge the independent review of `56bb979`, implement warranted
+  corrections, verify them locally, and push the result.
+- Scope:
+  - Unified supported backtest/shadow risk sizing and bracket exits under
+    `risk_policy@0.3.0`; certificates now bind risk, restrictions, capital, costs, features,
+    engine, and execution profile.
+  - Made broker-free shadow genuinely forward: a decision/plan is stored first, only a later
+    bar can fill it, downtime bars are skipped, and account safety is rechecked at execution.
+  - Corrected pre-entry corporate-action labels and continuous selected-OOS drawdown; made
+    single-candidate PBO an evidence shortfall and removed unrelated historical candidate
+    counts from admission.
+  - Added deterministic batch event reconciliation, supervised worker retry/failure behavior,
+    production-worker boot pause semantics, SQL portfolio execution ownership, attempt-token
+    workflow fencing with renewal, and stable range-extension partition IDs.
+  - Added append-only generation-attempt audit, strict generated DSL schemas, idempotent
+    executable specs, and exact-spec validation through both CLI and API.
+  - Added Alembic revision `20260906_0026`, ADR 0021, regression tests, and the second
+    itemized remediation record.
+- Architecture/decision impact:
+  - Phase 6 is no longer described as completed-bar pseudo-forward replay. Supported shadow
+    decisions precede their possible fills and are fenced to one execution owner.
+  - Candidate capital remains isolated per deployment; collection/research schedules remain
+    operator-defined until their cadence, source, and paid-call policies are approved.
+- Validation:
+  - `make release-check` passed: Flake8, strict mypy across 51 source files, all 106 tests,
+    authenticated local doctor, secret scan, Docker rebuild/doctor, and PostgreSQL Alembic
+    zero-drift check.
+  - A fresh SQLite database upgraded base-to-`20260906_0026`, downgraded to `0025`,
+    re-upgraded to head, and reported no migration drift.
+  - Git diff checks and a final secret scan passed. The existing JavaScript asset was not
+    changed in this iteration.
+- Expected global state after commit:
+  - Review findings C01–C10 and product gap G04 have executable fixes and adverse tests.
+    G02 is closed for broker-free forward timing. G01 full autonomous collection/research
+    scheduling and G03 shared-main-account allocation remain explicit future design work.
+  - Phase 7 remains absent: no broker order submission or live-money execution exists.
 
 ## Open work
 
 Ordered near-term work:
 
-1. Run the agreed continuous shadow observation period and prove replay equivalence.
+1. Run the agreed continuous shadow observation period and prove research/shadow equivalence.
 2. Continue interactive Phase 6.1 UI review and refinement with the user.
 3. Size remote backfill concurrency and identify equity/options sources with suitable historical
    coverage, retention, and licensing; do not require those large downloads for local tests.
 4. Add a governed point-in-time macro-event calendar source for tactical intraday strategies.
 5. Extend replay with multi-bar partial fills, cancellation, symbol changes, delistings, and
    later capacity calibration on production-scale data.
-6. Add operator-driven dead-letter replay, provider lag, sequence-gap, reconciliation, and
-   dedicated collection/research schedules on top of the new outbox/lease foundation.
+6. Add operator-driven dead-letter replay, provider lag, sequence-gap monitoring, and
+   dedicated collection/research schedules on top of the reconciled outbox/lease foundation.
 7. Build a labeled corpus and measure cross-provider catalyst dedup precision/recall.
 8. Validate the guarded TLS/cloud pipeline from the existing GitHub repository on a selected VPS;
    add backup/restore, monitoring, and notification integrations.

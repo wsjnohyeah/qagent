@@ -20,10 +20,15 @@ from agentic_quant.domain import (
 from agentic_quant.ids import uuid7
 
 
+_ONE = Decimal("1")
+
+
 class RiskPolicy(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     version: str
+    baseline_stop_fraction: Decimal = Field(gt=0, lt=1)
+    baseline_target_r_multiple: Decimal = Field(gt=0)
     minimum_reward_risk: Decimal = Field(gt=0)
     minimum_relative_volume: Decimal = Field(ge=0)
     maximum_quote_age_seconds: int = Field(ge=0)
@@ -46,6 +51,41 @@ class RiskPolicy(BaseModel):
         if self.maximum_trade_risk_usd > self.maximum_concurrent_risk_usd:
             raise ValueError("Per-trade risk cannot exceed concurrent portfolio risk")
         return self
+
+
+BASELINE_EXECUTION_PROFILE_VERSION = "next_open_bracket_one_bar@0.1.0"
+
+
+def baseline_long_geometry(
+    reference_price: Decimal,
+    policy: RiskPolicy,
+) -> tuple[Decimal, Decimal]:
+    invalidation = reference_price * (_ONE - policy.baseline_stop_fraction)
+    target = reference_price + (
+        reference_price - invalidation
+    ) * policy.baseline_target_r_multiple
+    return invalidation, target
+
+
+def baseline_long_exit(
+    *,
+    open_price: Decimal,
+    high_price: Decimal,
+    low_price: Decimal,
+    close_price: Decimal,
+    invalidation: Decimal,
+    target: Decimal,
+) -> tuple[Decimal, str]:
+    """Resolve a one-bar bracket conservatively when intrabar order is unknown."""
+    if open_price <= invalidation:
+        return open_price, "gap_through_stop"
+    if open_price >= target:
+        return open_price, "gap_through_target"
+    if low_price <= invalidation:
+        return invalidation, "protective_stop"
+    if high_price >= target:
+        return target, "profit_target"
+    return close_price, "session_close"
 
 
 class Restriction(BaseModel):

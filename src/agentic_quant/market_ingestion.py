@@ -80,13 +80,19 @@ class MarketDataIngestionService:
                 raw_object_id = self.store.register_raw_object(archived)
                 inserted_ids = self.store.insert_bars(page.bars, raw_object_id)
                 records_inserted += len(inserted_ids)
-                for bar in page.bars:
-                    if bar.bar_id not in inserted_ids:
-                        continue
-                    self._record_bar_event(
+                events = tuple(
+                    self._bar_event(
                         bar.model_copy(update={"raw_object_id": raw_object_id}),
                         run_id=run_id,
                     )
+                    for bar in page.bars
+                )
+                enqueued = self.ledger.append_batch(events)
+                self.ledger.deliver_batch(
+                    events,
+                    self.publisher,
+                    enqueued_event_ids=enqueued,
+                )
                 page_token = page.next_page_token
                 if page_token is None:
                     break
@@ -138,9 +144,13 @@ class MarketDataIngestionService:
             status="COMPLETED",
         )
 
-    def _record_bar_event(self, bar: StockBar, *, run_id: str) -> None:
-        event = EventEnvelope(
-            event_id=uuid7(),
+    def _bar_event(self, bar: StockBar, *, run_id: str) -> EventEnvelope:
+        business_key = (
+            f"{bar.symbol}:{bar.timeframe}:{bar.event_time.isoformat()}:"
+            f"{bar.source}:{bar.feed}"
+        )
+        return EventEnvelope(
+            event_id=self.ledger.stable_event_id("market.bar.closed.v1", business_key),
             event_type="market.bar.closed.v1",
             event_time=bar.event_time,
             emitted_at=datetime.now(UTC),
@@ -148,11 +158,6 @@ class MarketDataIngestionService:
             correlation_id=run_id,
             payload={
                 **bar.model_dump(mode="json"),
-                "dedup_key": (
-                    f"{bar.symbol}:{bar.timeframe}:{bar.event_time.isoformat()}:"
-                    f"{bar.source}:{bar.feed}"
-                ),
+                "dedup_key": business_key,
             },
         )
-        if self.ledger.append(event):
-            self.ledger.deliver(event, self.publisher)

@@ -7,7 +7,6 @@ from pydantic import BaseModel, ConfigDict
 
 from agentic_quant.archive import RawArchive
 from agentic_quant.domain import EventEnvelope, StockBar, StockQuote, StockTrade
-from agentic_quant.ids import uuid7
 from agentic_quant.ledger import EventLedger
 from agentic_quant.market_calendar import MarketDataGap, MarketGapDetector
 from agentic_quant.market_store import MarketDataStore
@@ -91,12 +90,25 @@ class LiveMarketDataService:
         inserted_trade_ids = self.store.insert_trades(trades, raw_object_id)
         inserted_quote_ids = self.store.insert_quotes(quotes, raw_object_id)
         inserted_ids = set(inserted_bar_ids + inserted_trade_ids + inserted_quote_ids)
-        for item in normalized:
-            internal_id, event_type = self._identity_and_event_type(item)
-            if internal_id in inserted_ids:
-                self._record_event(item, event_type=event_type)
-        for gap in gaps:
-            self._record_gap_event(gap, raw_object_id=raw_object_id)
+        events = tuple(
+            [
+                self._record_event(
+                    item,
+                    event_type=self._identity_and_event_type(item)[1],
+                )
+                for item in normalized
+            ]
+            + [
+                self._record_gap_event(gap, raw_object_id=raw_object_id)
+                for gap in gaps
+            ]
+        )
+        enqueued = self.ledger.append_batch(events)
+        self.ledger.deliver_batch(
+            events,
+            self.publisher,
+            enqueued_event_ids=enqueued,
+        )
         return LiveFrameSummary(
             messages_received=len(messages),
             records_inserted=len(inserted_ids),
@@ -112,28 +124,51 @@ class LiveMarketDataService:
             return item.trade_id, "market.trade.received.v1"
         return item.quote_id, "market.quote.received.v1"
 
-    def _record_event(self, item: StockBar | StockTrade | StockQuote, *, event_type: str) -> None:
-        event = EventEnvelope(
-            event_id=uuid7(),
+    def _record_event(
+        self,
+        item: StockBar | StockTrade | StockQuote,
+        *,
+        event_type: str,
+    ) -> EventEnvelope:
+        if isinstance(item, StockBar):
+            business_key = (
+                f"{item.symbol}:{item.timeframe}:{item.event_time.isoformat()}:"
+                f"{item.source}:{item.feed}"
+            )
+        elif isinstance(item, StockTrade):
+            business_key = (
+                f"{item.source}:{item.feed}:{item.symbol}:{item.provider_trade_id}"
+            )
+        else:
+            business_key = f"{item.source}:{item.feed}:{item.quote_fingerprint}"
+        return EventEnvelope(
+            event_id=self.ledger.stable_event_id(event_type, business_key),
             event_type=event_type,
             event_time=item.event_time,
             emitted_at=datetime.now(UTC),
             producer="market-collector",
             correlation_id=item.raw_object_id,
-            payload=item.model_dump(mode="json"),
+            payload={**item.model_dump(mode="json"), "dedup_key": business_key},
         )
-        if self.ledger.append(event):
-            self.ledger.deliver(event, self.publisher)
 
-    def _record_gap_event(self, gap: MarketDataGap, *, raw_object_id: str) -> None:
-        event = EventEnvelope(
-            event_id=uuid7(),
+    def _record_gap_event(
+        self,
+        gap: MarketDataGap,
+        *,
+        raw_object_id: str,
+    ) -> EventEnvelope:
+        business_key = (
+            f"{gap.symbol}:{gap.missing_from.isoformat()}:{gap.missing_to.isoformat()}"
+        )
+        return EventEnvelope(
+            event_id=self.ledger.stable_event_id(
+                "market.data.gap_detected.v1",
+                business_key,
+            ),
             event_type="market.data.gap_detected.v1",
             event_time=gap.missing_to,
             emitted_at=datetime.now(UTC),
             producer="market-collector",
             correlation_id=raw_object_id,
-            payload=gap.model_dump(mode="json"),
+            payload={**gap.model_dump(mode="json"), "dedup_key": business_key},
         )
-        if self.ledger.append(event):
-            self.ledger.deliver(event, self.publisher)

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+import time
 
 from fastapi.testclient import TestClient
+import pytest
 from pydantic import SecretStr
 from sqlalchemy import insert, select, update
 
@@ -25,10 +27,16 @@ from agentic_quant.migrations import upgrade_database
 from agentic_quant.research import (
     BACKTEST_ENGINE_VERSION,
     FEATURE_SET_VERSION,
+    ResearchBacktester,
     default_strategy_spec,
     research_code_sha256,
 )
 from agentic_quant.research_store import ResearchStore, _canonical_hash
+from agentic_quant.risk import (
+    BASELINE_EXECUTION_PROFILE_VERSION,
+    RestrictionRegistry,
+    RiskPolicy,
+)
 
 
 def test_admin_session_is_required_and_csrf_protects_writes(
@@ -247,8 +255,6 @@ def test_workload_budget_update_requires_confirmation(settings: Settings) -> Non
 
 def test_production_rejects_plaintext_admin_password() -> None:
     from pydantic import ValidationError
-    import pytest
-
     with pytest.raises(ValidationError, match="ADMIN_PASSWORD_HASH"):
         Settings(
             _env_file=None,
@@ -279,6 +285,34 @@ def test_session_expiry_value_is_timezone_aware(settings: Settings) -> None:
     assert expires.tzinfo == UTC
 
 
+def test_shadow_runtime_recovers_after_transient_outbox_failure(
+    settings: Settings,
+    monkeypatch,
+) -> None:
+    calls = 0
+    original = EventLedger.publish_pending
+
+    def flaky_publish_pending(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("temporary database interruption")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(EventLedger, "publish_pending", flaky_publish_pending)
+    runtime_settings = settings.model_copy(
+        update={
+            "shadow_runtime_enabled": True,
+            "shadow_poll_seconds": 5,
+            "global_new_exposure_paused": True,
+        }
+    )
+    with TestClient(create_app(runtime_settings)) as client:
+        time.sleep(1.5)
+        assert calls >= 2
+        assert client.app.state.shadow_task.done() is False
+
+
 def test_shadow_runtime_processes_stored_bars_without_a_broker(
     settings: Settings,
 ) -> None:
@@ -287,7 +321,7 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
     research = ResearchStore(ledger.engine)
     market = MarketDataStore(ledger.engine)
     clock = MarketSessionClock("XNYS")
-    sessions = clock.calendar.sessions_in_range("2025-01-02", "2025-04-30")[:32]
+    sessions = clock.calendar.sessions_in_range("2025-01-02", "2025-04-30")[:33]
     bars: list[StockBar] = []
     price = Decimal("100")
     for index, session in enumerate(sessions):
@@ -314,7 +348,7 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
             )
         )
         price = close
-    market.insert_bars(tuple(bars[:-2]), raw_object_id="TEST_RAW")
+    market.insert_bars(tuple(bars[:-3]), raw_object_id="TEST_RAW")
     spec = research.record_strategy_spec(
         default_strategy_spec(
             "momentum",
@@ -329,6 +363,14 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
         "feature_set_version": FEATURE_SET_VERSION,
         "backtest_engine_version": BACKTEST_ENGINE_VERSION,
         "cost_model": BacktestCostModel().model_dump(mode="json"),
+        "risk_policy": RiskPolicy.from_yaml(
+            settings.risk_policy_path
+        ).model_dump(mode="json"),
+        "restriction_registry_version": RestrictionRegistry.from_yaml(
+            settings.restricted_securities_path
+        ).version,
+        "initial_equity": "100000",
+        "execution_profile": BASELINE_EXECUTION_PROFILE_VERSION,
     }
     with ledger.engine.begin() as connection:
         connection.execute(
@@ -379,6 +421,16 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
         )
         assert untested.status_code == 422
         assert "exact strategy" in untested.json()["detail"]
+        current_policy = client.app.state.shadow.risk_policy
+        client.app.state.shadow.risk_policy = current_policy.model_copy(
+            update={"maximum_trade_risk_usd": Decimal("129")}
+        )
+        with pytest.raises(ValueError, match="execution contract"):
+            client.app.state.shadow.adoption_preview(
+                strategy_spec_id=spec.strategy_spec_id,
+                validation_report_id=report_id,
+            )
+        client.app.state.shadow.risk_policy = current_policy
         adoption = client.post(
             "/v1/actions",
             json={
@@ -411,7 +463,7 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
             f"/v1/actions/{deployment['action_request_id']}/confirm",
             json={"confirmation_phrase": deployment["confirmation_phrase"]},
         ).status_code == 200
-        market.insert_bars((bars[-2],), raw_object_id="TEST_RAW")
+        market.insert_bars((bars[-3],), raw_object_id="TEST_RAW")
         pause = client.post(
             "/v1/commands/pause",
             json={"reason": "Verify the global pause blocks manual shadow ticks"},
@@ -460,6 +512,30 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
             json={"confirmation_phrase": tick["confirmation_phrase"]},
         )
         assert completed.status_code == 200
+        planned_events = client.get("/v1/shadow/events").json()
+        assert {event["event_type"] for event in planned_events} >= {
+            "SIGNAL_CANDIDATE",
+            "RISK_DECISION",
+            "TRADE_PLAN",
+        }
+        assert not any(
+            event["event_type"] == "VIRTUAL_FILL" for event in planned_events
+        )
+        market.insert_bars((bars[-2],), raw_object_id="TEST_RAW")
+        forward_tick = client.post(
+            "/v1/actions",
+            json={
+                "action_type": "shadow.tick",
+                "target_type": "runtime",
+                "target_id": "shadow",
+                "parameters": {},
+                "reason": "A later completed bar may execute the persisted plan",
+            },
+        ).json()
+        assert client.post(
+            f"/v1/actions/{forward_tick['action_request_id']}/confirm",
+            json={"confirmation_phrase": forward_tick["confirmation_phrase"]},
+        ).status_code == 200
         events = client.get("/v1/shadow/events").json()
         assert events
         assert all(event["payload_json"]["virtual_only"] is True for event in events)
@@ -473,7 +549,32 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
         decisions = client.get("/v1/shadow/decisions").json()
         assert decisions[0]["verdict"] == "APPROVE"
 
-        active = client.get("/v1/shadow/deployments").json()[0]
+        replay = ResearchBacktester(
+            research,
+            ledger,
+            risk_policy=RiskPolicy.from_yaml(settings.risk_policy_path),
+            restrictions=RestrictionRegistry.from_yaml(
+                settings.restricted_securities_path
+            ),
+        ).run(
+            spec=spec,
+            symbol="AAPL",
+            as_of_start=bars[-3].available_from,
+            as_of_end=bars[-2].available_from,
+            code_git_sha="test-git-sha",
+            initial_equity=Decimal("100000"),
+            cost_model=BacktestCostModel(),
+        )
+        entry_fill = next(
+            event for event in events if event["event_type"] == "VIRTUAL_FILL"
+        )
+        active_after_trade = client.get("/v1/shadow/deployments").json()[0]
+        assert int(Decimal(str(entry_fill["position_quantity"]))) == replay.trades[0].quantity
+        assert Decimal(str(active_after_trade["cash_balance"])) == (
+            Decimal("100000") + replay.trades[0].net_pnl
+        ).quantize(Decimal("0.00000001"))
+
+        active = active_after_trade
         with ledger.engine.begin() as connection:
             connection.execute(
                 update(shadow_deployments)
@@ -507,8 +608,8 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
         assert "ACCOUNT_FLOOR_REACHED" in rejected["reason_codes_json"]
         assert rejected["trade_plan_id"] is None
         reports = client.get("/v1/shadow/reports?period=daily").json()
-        assert sum(item["candidate_count"] for item in reports) == 2
-        assert sum(item["approved_count"] for item in reports) == 1
+        assert sum(item["candidate_count"] for item in reports) == 3
+        assert sum(item["approved_count"] for item in reports) == 2
         assert sum(item["rejected_count"] for item in reports) == 1
         assert sum(item["round_trip_count"] for item in reports) == 1
         alerts = client.get("/v1/shadow/alerts").json()

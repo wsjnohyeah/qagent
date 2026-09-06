@@ -96,6 +96,7 @@ class DocumentIngestionService:
                     provider_received_at=page.provider_received_at,
                 )
                 raw_object_id = self.market_store.register_raw_object(archived)
+                page_events: list[EventEnvelope] = []
                 for document in page.documents:
                     normalized = document.model_copy(
                         update={"raw_object_id": raw_object_id}
@@ -106,8 +107,9 @@ class DocumentIngestionService:
                     stored_document = normalized.model_copy(
                         update={"document_id": write.document_id}
                     )
-                    if write.version_inserted:
+                    page_events.append(
                         self._record_document_event(stored_document, run_id=run_id)
+                    )
                     if not stored_document.symbols:
                         continue
                     catalyst = self.document_store.resolve_catalyst(
@@ -116,12 +118,20 @@ class DocumentIngestionService:
                     )
                     catalysts_inserted += int(catalyst.inserted)
                     catalyst_links_inserted += int(catalyst.document_linked)
-                    if catalyst.inserted:
+                    page_events.append(
                         self._record_catalyst_event(
                             stored_document,
                             catalyst_id=catalyst.catalyst_id,
                             run_id=run_id,
                         )
+                    )
+                events = tuple(page_events)
+                enqueued = self.ledger.append_batch(events)
+                self.ledger.deliver_batch(
+                    events,
+                    self.publisher,
+                    enqueued_event_ids=enqueued,
+                )
                 page_token = page.next_page_token
                 if page_token is None:
                     break
@@ -163,9 +173,19 @@ class DocumentIngestionService:
             status="COMPLETED",
         )
 
-    def _record_document_event(self, document: SourceDocument, *, run_id: str) -> None:
-        event = EventEnvelope(
-            event_id=uuid7(),
+    def _record_document_event(
+        self,
+        document: SourceDocument,
+        *,
+        run_id: str,
+    ) -> EventEnvelope:
+        business_key = (
+            f"{document.provider}:{document.provider_document_id}:"
+            f"{document.updated_at or document.published_at}:"
+            f"{document.title}"
+        )
+        return EventEnvelope(
+            event_id=self.ledger.stable_event_id("document.ingested.v1", business_key),
             event_type="document.ingested.v1",
             event_time=document.published_at,
             emitted_at=datetime.now(UTC),
@@ -189,7 +209,6 @@ class DocumentIngestionService:
                 "raw_object_id": document.raw_object_id,
             },
         )
-        self._publish(event)
 
     def _record_catalyst_event(
         self,
@@ -197,9 +216,12 @@ class DocumentIngestionService:
         *,
         catalyst_id: str,
         run_id: str,
-    ) -> None:
-        event = EventEnvelope(
-            event_id=uuid7(),
+    ) -> EventEnvelope:
+        return EventEnvelope(
+            event_id=self.ledger.stable_event_id(
+                "catalyst.normalized.v1",
+                catalyst_id,
+            ),
             event_type="catalyst.normalized.v1",
             event_time=document.published_at,
             emitted_at=datetime.now(UTC),
@@ -215,12 +237,6 @@ class DocumentIngestionService:
                 "available_from": document.ingested_at.isoformat(),
             },
         )
-        self._publish(event)
-
-    def _publish(self, event: EventEnvelope) -> None:
-        if not self.ledger.append(event):
-            return
-        self.ledger.deliver(event, self.publisher)
 
 
 class FundamentalsIngestionService:
@@ -258,22 +274,35 @@ class FundamentalsIngestionService:
             )
             raw_object_id = self.market_store.register_raw_object(archived)
             inserted_ids = self.document_store.insert_facts(page.facts, raw_object_id)
-            inserted_set = set(inserted_ids)
+            events: list[EventEnvelope] = []
             for fact in page.facts:
-                if fact.fact_id not in inserted_set:
-                    continue
-                normalized = fact.model_copy(update={"raw_object_id": raw_object_id})
-                event = EventEnvelope(
-                    event_id=uuid7(),
+                normalized = fact.model_copy(
+                    update={
+                        "fact_id": self.document_store.fact_id_for_fingerprint(
+                            fact.fact_fingerprint
+                        ),
+                        "raw_object_id": raw_object_id,
+                    }
+                )
+                events.append(EventEnvelope(
+                    event_id=self.ledger.stable_event_id(
+                        "fundamental.fact.received.v1",
+                        normalized.fact_fingerprint,
+                    ),
                     event_type="fundamental.fact.received.v1",
                     event_time=normalized.available_from,
                     emitted_at=datetime.now(UTC),
                     producer="event-collector",
                     correlation_id=run_id,
                     payload=normalized.model_dump(mode="json"),
-                )
-                if self.ledger.append(event):
-                    self.ledger.deliver(event, self.publisher)
+                ))
+            batch = tuple(events)
+            enqueued = self.ledger.append_batch(batch)
+            self.ledger.deliver_batch(
+                batch,
+                self.publisher,
+                enqueued_event_ids=enqueued,
+            )
         except Exception as exc:
             self.market_store.finish_run(
                 ingestion_run_id=run_id,

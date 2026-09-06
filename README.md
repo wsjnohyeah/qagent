@@ -1,6 +1,6 @@
 # Agentic Quant Trading System
 
-A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains implemented and locally verified foundations through **Phase 6.1**: safety controls, read-only market data, event/document ingestion, point-in-time research, evidence-bound LLM analysis, ML/registry and constrained strategy-generation tooling, an authenticated System Steward, drill-down object explorers, and a persistent broker-free shadow runtime. Implementation completeness is not the same as passing statistical or production-operational exit criteria; see `docs/REVIEW_REMEDIATION_2026-09-05.md`.
+A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains implemented and locally verified foundations through **Phase 6.1**: safety controls, read-only market data, event/document ingestion, point-in-time research, evidence-bound LLM analysis, ML/registry and constrained strategy-generation tooling, an authenticated System Steward, drill-down object explorers, and a persistent broker-free shadow runtime. Implementation completeness is not the same as passing statistical or production-operational exit criteria; see `docs/REVIEW_REMEDIATION_2026-09-06.md`.
 
 > Live-money execution is not implemented. `live` is not a valid mode, and setting `LIVE_TRADING_ENABLED=true` makes startup fail.
 
@@ -52,7 +52,8 @@ entities, and links near-duplicate coverage to one catalyst without using an LLM
 Phase 3A adds immutable evidence packets, research feature snapshots, strategy
 specifications, experiment runs, and backtest trades. Its baseline runner enforces
 next-bar execution and nonzero commission/slippage. This is research-infrastructure
-validation, not a profitable-strategy claim.
+validation, not a profitable-strategy claim. The current correction record is
+`docs/REVIEW_REMEDIATION_2026-09-06.md`.
 
 Phase 3A.2 strengthens that path with exact XNYS session-close availability, immutable
 corporate-action and historical-universe records, split-adjusted point-in-time features,
@@ -105,9 +106,11 @@ The Phase 6 shadow runtime admits only an exact immutable strategy specification
 an exact execution-contract validation certificate. Each attempted exposure persists its
 signal candidate, deterministic risk decision, approved plan, and virtual order/fill lineage,
 including the account and evidence used by the gate. It models commission, spread, slippage,
-impact, known-liquidity limits, cash, and realized P&L. It contains no broker client or order-
-submission path. Bounded local data validates the workflow; production can run the same
-partitionable contracts over longer history.
+impact, known-liquidity limits, the versioned protective-stop/target rule, cash, and realized
+P&L. A plan must be durable before a later bar can create a fill; missed runtime bars are not
+backfilled as forward trades. It contains no broker client or order-submission path. Bounded
+local data validates the workflow; production can run the same partitionable contracts over
+longer history.
 
 ## Commands
 
@@ -177,8 +180,10 @@ macro-event blackout unless a separately validated event strategy is explicitly 
 Candidate/snapshot ID mismatches and signal or feature timestamps later than evaluation time
 also reject.
 
-Long-horizon market backfills use `quant-alpaca resumable-backfill`; completed date
-partitions are skipped on rerun. `quant-research quality` persists a dataset audit, and
+Long-horizon market backfills use `quant-alpaca resumable-backfill`; completed fixed date
+partitions retain their identity when a requested range is extended and are skipped on rerun.
+`quant-research validate --strategy-spec-id ID ...` validates an exact generated immutable
+spec instead of substituting a template. `quant-research quality` persists a dataset audit, and
 `quant-research import-reference` accepts reviewed, versioned corporate-action or historical-
 universe JSON batches. See the market-data and research runbooks for their contracts.
 

@@ -2,7 +2,7 @@
 
 ## Current
 
-- Implemented foundations through Phase 6.1 pass bounded-development validation, including
+- Implemented foundations through the corrected Phase 6.1 baseline pass bounded-development validation, including
   Phase 1B open-session checks, corrected point-in-time research/ML contracts, constrained
   ML + LLM strategy generation, and the authenticated Control Center/System Steward/shadow
   decision lineage. Phase 5 statistical promotion and Phase 6 continuous-operation exit
@@ -35,8 +35,8 @@
 - Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
   experiment runs, backtest trades, corporate actions, historical universe membership,
   feature parity checks, and walk-forward reports are stored through Alembic revision
-  `20260905_0025`, including exact validation contracts, shadow risk lineage, workflow
-  leases, and the event outbox.
+  `20260906_0026`, including exact validation contracts, shadow risk lineage, fenced workflow
+  attempts, generation-attempt audit, runtime leases, and the event outbox.
 - The Phase 3 runner provides buy-and-hold, long/cash momentum, and long/cash
   mean-reversion baselines with next-bar execution, commission, slippage, metrics, hashes,
   and append-only completion events.
@@ -79,20 +79,22 @@
 - The persistent broker-free shadow runtime admits only the exact static strategy ID and
   execution contract covered by a gate-eligible, human-confirmed validation certificate.
   It records candidate → deterministic risk decision → approved plan → modeled virtual
-  order/fill lineage, cash, and P&L. Research-only buy-and-hold cannot be shadow-adopted.
-  No broker adapter exists.
+  order/fill lineage, cash, and P&L. A plan is persisted on one completed bar and can execute
+  only on a later bar; missed bars are never synthesized into forward fills. Research-only
+  buy-and-hold cannot be shadow-adopted. No broker adapter exists.
 - The global new-exposure pause is enforced inside the shadow tick boundary, so a manually
   confirmed tick cannot bypass the scheduler's kill switch.
 - Tactical risk evaluation now requires explicit, auditable catalyst, restriction-status,
   liquidity, data-health, macro-calendar, and duplicate-order facts. Unknown/unsafe facts
-  reject, and `risk_policy@0.2.0` applies a 24-hour major-macro-event blackout unless the
-  strategy is separately approved for that event. Candidate/snapshot mismatches and future
-  signal/feature timestamps also reject.
+  reject, and `risk_policy@0.3.0` applies a 24-hour major-macro-event blackout unless the
+  strategy is separately approved for that event. The policy also owns the baseline
+  stop/target geometry used identically by research and shadow. Candidate/snapshot mismatches
+  and future signal/feature timestamps also reject.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; local and remote `main`
   were synchronized at `06b6853` before this remediation iteration.
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases.
-- Current reviewed baseline passes 96 tests, authenticated local and PostgreSQL/MinIO/Redis
+- Current corrected baseline passes 106 tests, authenticated local and PostgreSQL/MinIO/Redis
   doctors, JavaScript parsing, schema migration checks, zero PostgreSQL schema drift, and the
   repository secret scan. Paid providers were not called during this remediation.
 - Phase 4 adds point-in-time document retrieval, `research_analysis@0.2.0`, exact quotation
@@ -176,3 +178,5 @@
 - ADR 0018: run adopted strategies in a persistent, idempotent, broker-free shadow runtime.
 - ADR 0019: require explicit external risk context and enforce pause at the shadow boundary.
 - ADR 0020: bind exact research/execution contracts and use recoverable Phase 6 operations.
+- ADR 0021: require forward shadow timing, complete execution-contract binding, durable event
+  reconciliation, and attempt-level workflow/runtime fencing.

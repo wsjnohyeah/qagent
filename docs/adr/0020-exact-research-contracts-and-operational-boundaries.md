@@ -1,6 +1,6 @@
 # ADR 0020: Exact research contracts and recoverable Phase 6 operations
 
-- Status: accepted after the 2026-09-06 fix verification.
+- Status: accepted; forward-shadow and recovery details superseded by ADR 0021.
 - Decision: bind admission to an exact executable contract, align research labels and
   execution semantics, and make Phase 6 state recoverable across processes before any
   Phase 7 broker adapter is considered.
@@ -47,7 +47,7 @@ to the operator.
   runtime and must be recomputed.
 - Local bounded tests can validate workflow correctness, but cannot satisfy the Phase 5 alpha
   criterion or Phase 6 elapsed continuous-operation criterion.
-- The completed-bar shadow simulator remains broker-free. Exchange-time order interaction,
-  broker reconciliation, and paper credentials remain Phase 7.
+- ADR 0021 replaces completed-bar pseudo-forward replay with durable pre-bar plans. The
+  simulator remains broker-free; broker reconciliation and paper credentials remain Phase 7.
 - Production TLS, backup/restore, external monitoring, and secret delivery remain deployment
   gates requiring infrastructure decisions rather than being claimed from local tests.

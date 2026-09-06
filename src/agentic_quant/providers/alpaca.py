@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 
 from agentic_quant.domain import OptionSnapshot, StockBar
-from agentic_quant.ids import uuid7
+from agentic_quant.ids import stable_uuid
 from agentic_quant.market_calendar import MarketSessionClock
 from agentic_quant.providers.base import (
     EntitlementCheck,
@@ -171,7 +171,7 @@ class AlpacaMarketDataProvider:
     ) -> StockBar:
         event_time = datetime.fromisoformat(str(item["t"]).replace("Z", "+00:00")).astimezone(UTC)
         return StockBar(
-            bar_id=uuid7(),
+            bar_id=stable_uuid("bar", "alpaca", feed, symbol.upper(), timeframe, event_time),
             symbol=symbol.upper(),
             timeframe=timeframe,
             event_time=event_time,
@@ -284,7 +284,13 @@ class AlpacaMarketDataProvider:
         as_of = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00")).astimezone(UTC)
         greeks = item.get("greeks") or {}
         return OptionSnapshot(
-            option_snapshot_id=uuid7(),
+            option_snapshot_id=stable_uuid(
+                "option",
+                "alpaca",
+                feed,
+                contract_symbol,
+                as_of,
+            ),
             contract_symbol=contract_symbol,
             underlying_symbol=underlying_symbol.upper(),
             as_of=as_of,

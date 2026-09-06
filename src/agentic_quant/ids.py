@@ -21,3 +21,8 @@ def uuid7(now_ms: int | None = None) -> str:
     )
     return str(uuid.UUID(int=value))
 
+
+def stable_uuid(*parts: object) -> str:
+    """Return a deterministic UUID for an immutable external business identity."""
+    material = ":".join(str(part) for part in parts)
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"qagent:{material}"))

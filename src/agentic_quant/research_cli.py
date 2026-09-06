@@ -30,6 +30,7 @@ from agentic_quant.research import (
 )
 from agentic_quant.research_store import ResearchStore
 from agentic_quant.reference_data import GovernedReferenceImporter, ReferenceDataStore
+from agentic_quant.risk import RestrictionRegistry, RiskPolicy
 from agentic_quant.data_quality import MarketDataQualityService
 from agentic_quant.validation import (
     SELECTION_METRICS,
@@ -143,6 +144,10 @@ def _services(settings: Settings) -> tuple[MarketDataStore, ResearchStore, Resea
             research_store,
             ledger,
             calendar_name=settings.market_calendar,
+            risk_policy=RiskPolicy.from_yaml(settings.risk_policy_path),
+            restrictions=RestrictionRegistry.from_yaml(
+                settings.restricted_securities_path
+            ),
         ),
     )
 
@@ -223,12 +228,21 @@ def _validate(settings: Settings, args: argparse.Namespace) -> None:
     strategy_types = tuple(
         item.strip() for item in args.strategies.split(",") if item.strip()
     )
+    strategy_spec = None
+    if args.strategy_spec_id:
+        strategy_spec = research_store.strategy_spec(args.strategy_spec_id)
+        if strategy_spec is None:
+            raise ValueError("Strategy specification not found")
     report = WalkForwardValidator(
         research_store,
         EventLedger(settings.database_url),
         calendar_name=settings.market_calendar,
         promotion_policy=load_promotion_gate_policy(
             settings.research_promotion_policy_path
+        ),
+        risk_policy=RiskPolicy.from_yaml(settings.risk_policy_path),
+        restrictions=RestrictionRegistry.from_yaml(
+            settings.restricted_securities_path
         ),
     ).run(
         symbol=args.symbol.upper(),
@@ -251,6 +265,7 @@ def _validate(settings: Settings, args: argparse.Namespace) -> None:
             market_impact_bps_per_side=Decimal(str(args.market_impact_bps)),
             max_volume_participation=Decimal(str(args.max_volume_participation)),
         ),
+        strategy_spec=strategy_spec,
     )
     print(json.dumps(report.model_dump(mode="json"), indent=2))
 
@@ -497,6 +512,10 @@ def main() -> None:
     validate.add_argument("--start", required=True, type=_parse_time)
     validate.add_argument("--end", required=True, type=_parse_time)
     validate.add_argument("--strategies", default=",".join(SUPPORTED_STRATEGIES))
+    validate.add_argument(
+        "--strategy-spec-id",
+        help="Validate this exact immutable generated strategy specification",
+    )
     validate.add_argument(
         "--selection-metric",
         choices=SELECTION_METRICS,

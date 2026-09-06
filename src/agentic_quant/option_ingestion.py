@@ -77,11 +77,15 @@ class OptionDataIngestionService:
                 raw_object_id = self.store.register_raw_object(archived)
                 inserted_ids = self.store.insert_option_snapshots(page.snapshots, raw_object_id)
                 records_inserted += len(inserted_ids)
-                for snapshot in page.snapshots:
-                    if snapshot.option_snapshot_id not in inserted_ids:
-                        continue
-                    event = EventEnvelope(
-                        event_id=uuid7(),
+                events = tuple(
+                    EventEnvelope(
+                        event_id=self.ledger.stable_event_id(
+                            "option.snapshot.received.v1",
+                            (
+                                f"{snapshot.source}:{snapshot.feed}:"
+                                f"{snapshot.contract_symbol}:{snapshot.as_of.isoformat()}"
+                            ),
+                        ),
                         event_type="option.snapshot.received.v1",
                         event_time=snapshot.as_of,
                         emitted_at=datetime.now(UTC),
@@ -91,8 +95,14 @@ class OptionDataIngestionService:
                             update={"raw_object_id": raw_object_id}
                         ).model_dump(mode="json"),
                     )
-                    if self.ledger.append(event):
-                        self.ledger.deliver(event, self.publisher)
+                    for snapshot in page.snapshots
+                )
+                enqueued = self.ledger.append_batch(events)
+                self.ledger.deliver_batch(
+                    events,
+                    self.publisher,
+                    enqueued_event_ids=enqueued,
+                )
                 page_token = page.next_page_token
                 if page_token is None:
                     break

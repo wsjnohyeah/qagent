@@ -34,6 +34,11 @@ from agentic_quant.research import (
     research_code_sha256,
 )
 from agentic_quant.research_store import ResearchStore, _canonical_hash
+from agentic_quant.risk import (
+    BASELINE_EXECUTION_PROFILE_VERSION,
+    RestrictionRegistry,
+    RiskPolicy,
+)
 
 
 _ONE = Decimal("1")
@@ -267,6 +272,7 @@ def assess_research_gate(
     worst_drawdown: Decimal,
     probability_of_backtest_overfitting: Decimal,
     deflated_sharpe_probability: Decimal,
+    pbo_applicable: bool = True,
 ) -> dict[str, Any]:
     evidence_shortfalls: list[str] = []
     threshold_failures: list[str] = []
@@ -282,7 +288,11 @@ def assess_research_gate(
         evidence_shortfalls.append(
             f"regimes {regime_count} < {policy.minimum_regime_count}"
         )
-    if (
+    if not pbo_applicable:
+        evidence_shortfalls.append(
+            "probability_of_backtest_overfitting is not applicable to one candidate"
+        )
+    elif (
         probability_of_backtest_overfitting
         > policy.maximum_probability_of_backtest_overfitting
     ):
@@ -316,6 +326,26 @@ def _mean(values: list[Decimal]) -> Decimal:
     return sum(values, _ZERO) / Decimal(len(values)) if values else _ZERO
 
 
+def continuous_oos_equity_and_drawdown(
+    paths: tuple[tuple[Decimal, ...], ...],
+) -> tuple[tuple[Decimal, ...], Decimal]:
+    """Chain selected fold paths while preserving every intrafold observation."""
+    continuous = [_ONE]
+    for path in paths:
+        if not path or path[0] <= 0:
+            raise ValueError("Selected OOS equity paths require a positive base")
+        for previous, current in zip(path, path[1:]):
+            if previous <= 0:
+                raise ValueError("Selected OOS equity path crossed zero")
+            continuous.append(continuous[-1] * current / previous)
+    peak = continuous[0]
+    drawdown = _ZERO
+    for value in continuous:
+        peak = max(peak, value)
+        drawdown = min(drawdown, value / peak - _ONE)
+    return tuple(continuous), drawdown
+
+
 def _selection_value(result: BacktestResult, metric: str) -> Decimal:
     metrics = result.experiment.metrics
     if metric == "sharpe_ratio":
@@ -335,6 +365,8 @@ class WalkForwardValidator:
         *,
         calendar_name: str = "XNYS",
         promotion_policy: PromotionGatePolicy = DEFAULT_PROMOTION_GATE_POLICY,
+        risk_policy: RiskPolicy | None = None,
+        restrictions: RestrictionRegistry | None = None,
     ) -> None:
         self.store = store
         self.ledger = ledger
@@ -343,7 +375,11 @@ class WalkForwardValidator:
             store,
             ledger,
             calendar_name=calendar_name,
+            risk_policy=risk_policy,
+            restrictions=restrictions,
         )
+        self.risk_policy = self.backtester.risk_policy
+        self.restrictions = self.backtester.restrictions
 
     def run(
         self,
@@ -401,6 +437,7 @@ class WalkForwardValidator:
         candidate_oos_scores: dict[str, list[Decimal]] = {
             strategy_type: [] for strategy_type in strategy_types
         }
+        selected_oos_equity_paths: list[tuple[Decimal, ...]] = []
         offset = 0
         while offset + required <= len(decision_indices):
             train_indices = decision_indices[offset : offset + train_bars]
@@ -459,6 +496,9 @@ class WalkForwardValidator:
                 > selected_test_value
                 for name in strategy_types
             )
+            selected_oos_equity_paths.append(
+                test_results[selected_strategy].equity_curve
+            )
             train_start, train_end = self._window_bounds(bars, train_indices)
             test_start, test_end = self._window_bounds(bars, test_indices)
             folds.append(
@@ -503,8 +543,10 @@ class WalkForwardValidator:
             candidate_oos_scores={
                 name: tuple(values) for name, values in candidate_oos_scores.items()
             },
+            selected_oos_equity_paths=tuple(selected_oos_equity_paths),
             validated_strategy_spec_ids=validated_strategy_spec_ids,
             cost_model=costs,
+            initial_equity=initial_equity,
             trial_count=self.store.strategy_trial_count(
                 symbol=symbol,
                 timeframe=timeframe,
@@ -609,8 +651,10 @@ class WalkForwardValidator:
         embargo_bars: int,
         folds: tuple[WalkForwardFold, ...],
         candidate_oos_scores: dict[str, tuple[Decimal, ...]],
+        selected_oos_equity_paths: tuple[tuple[Decimal, ...], ...],
         validated_strategy_spec_ids: dict[str, str],
         cost_model: BacktestCostModel,
+        initial_equity: Decimal,
         trial_count: int,
         code_git_sha: str,
     ) -> WalkForwardValidationReport:
@@ -621,16 +665,10 @@ class WalkForwardValidator:
             - fold.selected_test_metrics.sharpe_ratio
             for fold in folds
         ]
-        compounded = _ONE
-        cumulative_peak = _ONE
-        cumulative_drawdown = _ZERO
-        for value in test_returns:
-            compounded *= _ONE + value
-            cumulative_peak = max(cumulative_peak, compounded)
-            cumulative_drawdown = min(
-                cumulative_drawdown,
-                compounded / cumulative_peak - _ONE,
-            )
+        continuous_oos_equity, cumulative_drawdown = (
+            continuous_oos_equity_and_drawdown(selected_oos_equity_paths)
+        )
+        compounded = continuous_oos_equity[-1]
         below_median = sum(
             1
             for fold in folds
@@ -663,7 +701,7 @@ class WalkForwardValidator:
         pbo_metrics = combinatorial_purged_diagnostics(candidate_oos_scores)
         dsr_metrics = deflated_sharpe_diagnostics(
             tuple(test_returns),
-            number_of_trials=max(trial_count, len(strategy_types)),
+            number_of_trials=len(strategy_types),
         )
         validation_subject = (
             "static_strategy" if len(strategy_types) == 1 else "adaptive_selector"
@@ -674,16 +712,24 @@ class WalkForwardValidator:
             "feature_set_version": FEATURE_SET_VERSION,
             "backtest_engine_version": BACKTEST_ENGINE_VERSION,
             "cost_model": cost_model.model_dump(mode="json"),
+            "risk_policy": self.risk_policy.model_dump(mode="json"),
+            "restriction_registry_version": self.restrictions.version,
+            "initial_equity": str(initial_equity),
+            "execution_profile": BASELINE_EXECUTION_PROFILE_VERSION,
         }
         execution_contract_sha256 = _canonical_hash(execution_contract)
         robustness_metrics = {
             "combinatorial_purged_validation": pbo_metrics,
             "deflated_sharpe": dsr_metrics,
+            "selected_oos_equity_path": [
+                str(value) for value in continuous_oos_equity
+            ],
+            "historical_trial_count_diagnostic": trial_count,
         }
         gate_assessment = assess_research_gate(
             policy=self.promotion_policy,
             fold_count=len(folds),
-            candidate_count=max(trial_count, len(strategy_types)),
+            candidate_count=len(strategy_types),
             regime_count=len(regime_metrics),
             positive_fold_rate=Decimal(
                 str(aggregate["positive_oos_fold_rate"])
@@ -697,6 +743,7 @@ class WalkForwardValidator:
             deflated_sharpe_probability=Decimal(
                 str(dsr_metrics["deflated_sharpe_probability"])
             ),
+            pbo_applicable=not bool(pbo_metrics.get("not_applicable", False)),
         )
         report_material = {
             "symbol": symbol.upper(),

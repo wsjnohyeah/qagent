@@ -4,11 +4,16 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from fastapi.testclient import TestClient
 from hypothesis import HealthCheck, given, settings as hypothesis_settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
+from pydantic import SecretStr
+from sqlalchemy import insert
 
+from agentic_quant.api import create_app
 from agentic_quant.config import AppEnvironment, Settings, TradingMode
+from agentic_quant.database import runtime_controls
 from agentic_quant.domain import (
     AccountState,
     Direction,
@@ -18,7 +23,26 @@ from agentic_quant.domain import (
     Verdict,
 )
 from agentic_quant.ids import uuid7
-from agentic_quant.risk import RestrictionRegistry, RiskPolicy, evaluate_candidate
+from agentic_quant.ledger import EventLedger
+from agentic_quant.migrations import upgrade_database
+from agentic_quant.risk import (
+    RestrictionRegistry,
+    RiskPolicy,
+    baseline_long_exit,
+    evaluate_candidate,
+)
+
+
+def test_baseline_bracket_executes_stop_first_when_intrabar_order_is_unknown() -> None:
+    price, reason = baseline_long_exit(
+        open_price=Decimal("100"),
+        high_price=Decimal("105"),
+        low_price=Decimal("95"),
+        close_price=Decimal("102"),
+        invalidation=Decimal("98"),
+        target=Decimal("104"),
+    )
+    assert (price, reason) == (Decimal("98"), "protective_stop")
 
 
 def candidate(symbol: str = "DEMO", stop: str = "16.65") -> SignalCandidate:
@@ -164,6 +188,38 @@ def test_production_boots_paused_and_never_auto_migrates() -> None:
             auto_migrate=False,
             auth_required=False,
         )
+
+
+def test_production_worker_restart_pauses_but_api_restart_preserves_control(
+    settings: Settings,
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    with ledger.engine.begin() as connection:
+        connection.execute(
+            insert(runtime_controls).values(
+                control_key="new_exposure_paused",
+                state_json={"paused": False},
+                updated_by="previous-human-confirmation",
+                updated_at=datetime.now(UTC),
+            )
+        )
+    production = settings.model_copy(
+        update={
+            "app_env": AppEnvironment.PRODUCTION,
+            "auto_migrate": False,
+            "auth_required": True,
+            "admin_username": "admin",
+            "admin_password_hash": SecretStr("test-hash"),
+            "session_secret": SecretStr("x" * 64),
+            "global_new_exposure_paused": True,
+            "shadow_runtime_enabled": False,
+        }
+    )
+    with TestClient(create_app(production, process_role="api")) as client:
+        assert client.app.state.actions.new_exposure_paused(default=True) is False
+    with TestClient(create_app(production, process_role="worker")) as client:
+        assert client.app.state.actions.new_exposure_paused(default=False) is True
 
 
 def test_restricted_symbol_always_rejected(settings: Settings) -> None:

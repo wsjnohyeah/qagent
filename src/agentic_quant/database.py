@@ -254,6 +254,7 @@ workflow_jobs = Table(
     Column("max_attempts", Integer, nullable=False),
     Column("dependency_job_ids_json", JSON, nullable=False),
     Column("lease_owner", String(120), nullable=True, index=True),
+    Column("lease_token", String(36), nullable=True, index=True),
     Column("lease_expires_at", DateTime(timezone=True), nullable=True, index=True),
     Column("cursor_json", JSON, nullable=False),
     Column("result_json", JSON, nullable=False),
@@ -553,6 +554,32 @@ strategy_specs = Table(
     Column("code_sha256", String(64), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     UniqueConstraint("name", "version", name="uq_strategy_specs_name_version"),
+)
+
+strategy_generation_attempts = Table(
+    "strategy_generation_attempts",
+    metadata,
+    Column("generation_attempt_id", String(36), primary_key=True),
+    Column("feature_snapshot_id", String(36), nullable=False, index=True),
+    Column("analysis_id", String(36), nullable=False, index=True),
+    Column("forecast_id", String(36), nullable=False, index=True),
+    Column("status", String(24), nullable=False, index=True),
+    Column("provider", String(24), nullable=True),
+    Column("generation_invocation_id", String(36), nullable=True),
+    Column("critique_invocation_id", String(36), nullable=True),
+    Column(
+        "strategy_spec_id",
+        String(36),
+        ForeignKey("strategy_specs.strategy_spec_id"),
+        nullable=True,
+        index=True,
+    ),
+    Column("proposal_json", JSON, nullable=True),
+    Column("critique_json", JSON, nullable=True),
+    Column("error_code", String(120), nullable=True),
+    Column("error_message", Text, nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
 )
 
 experiment_runs = Table(
@@ -1359,6 +1386,16 @@ runtime_controls = Table(
     Column("control_key", String(80), primary_key=True),
     Column("state_json", JSON, nullable=False),
     Column("updated_by", String(80), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+runtime_leases = Table(
+    "runtime_leases",
+    metadata,
+    Column("lease_key", String(80), primary_key=True),
+    Column("lease_owner", String(120), nullable=False, index=True),
+    Column("lease_token", String(36), nullable=False, unique=True),
+    Column("lease_expires_at", DateTime(timezone=True), nullable=False, index=True),
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )
 

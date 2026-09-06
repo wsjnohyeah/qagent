@@ -1,4 +1,6 @@
-version: risk_policy@0.2.0
+version: risk_policy@0.3.0
+baseline_stop_fraction: "0.02"
+baseline_target_r_multiple: "2.00"
 minimum_reward_risk: "1.50"
 minimum_relative_volume: "2.00"
 maximum_quote_age_seconds: 15
@@ -11,5 +13,6 @@ account_floor_usd: "40000.00"
 slippage_buffer_per_share_usd: "0.05"
 maximum_equity_quantity: 250
 allowed_execution_modes:
+  - backtest
   - shadow
   - paper

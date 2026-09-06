@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 from datetime import UTC, datetime, timedelta
 import signal
 
@@ -17,13 +18,26 @@ async def run_shadow_worker(settings: Settings) -> None:
     """Run the Phase 6 scheduler without exposing an HTTP listener."""
     if not settings.shadow_runtime_enabled:
         raise RuntimeError("Shadow worker requires SHADOW_RUNTIME_ENABLED=true")
-    application = create_app(settings)
+    application = create_app(settings, process_role="worker")
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for name in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(name, stop.set)
     async with application.router.lifespan_context(application):
-        await stop.wait()
+        runtime_task = application.state.shadow_task
+        if runtime_task is None:
+            raise RuntimeError("Shadow runtime task was not started")
+        stop_task = asyncio.create_task(stop.wait(), name="worker-stop-signal")
+        done, _ = await asyncio.wait(
+            (stop_task, runtime_task),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if runtime_task in done:
+            stop_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await stop_task
+            await runtime_task
+            raise RuntimeError("Shadow runtime exited unexpectedly")
 
 
 def worker_is_healthy(settings: Settings) -> bool:

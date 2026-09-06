@@ -7,10 +7,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from sqlalchemy import update
 
 import agentic_quant.providers.alpaca_stream as alpaca_stream_module
 from agentic_quant.archive import FileRawArchive
 from agentic_quant.config import Settings
+from agentic_quant.database import event_outbox
 from agentic_quant.ledger import EventLedger
 from agentic_quant.live_ingestion import LiveMarketDataService
 from agentic_quant.market_calendar import MarketGapDetector
@@ -117,6 +119,63 @@ def test_live_frame_archives_persists_publishes_and_deduplicates(
     assert health["market_quotes"] == 1
     assert health["market_bars"] == 1
     assert health["raw_objects"] == 1
+
+
+def test_live_batch_delivery_failure_leaves_every_business_event_recoverable(
+    tmp_path: Path, settings: Settings
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+
+    class FailFirstPublisher(RecordingPublisher):
+        def publish(self, *, event_type: str, event_id: str, envelope_json: str) -> str:
+            if not self.events:
+                self.events.append(json.loads(envelope_json))
+                raise RuntimeError("temporary bus failure")
+            return super().publish(
+                event_type=event_type,
+                event_id=event_id,
+                envelope_json=envelope_json,
+            )
+
+    flaky = FailFirstPublisher()
+    service = LiveMarketDataService(
+        archive=FileRawArchive(tmp_path / "raw"),
+        store=MarketDataStore(ledger.engine),
+        ledger=ledger,
+        publisher=flaky,
+        feed="sip",
+    )
+    received_at = datetime(2026, 9, 3, 14, 30, 1, tzinfo=UTC)
+    with pytest.raises(RuntimeError, match="temporary bus failure"):
+        service.ingest_frame(live_messages(), received_at=received_at)
+
+    assert MarketDataStore(ledger.engine).health_summary()["market_bars"] == 1
+    assert len(ledger.recent()) == 3
+    assert ledger.outbox_health()["event_outbox_failed"] == 1
+    assert ledger.outbox_health()["event_outbox_published"] == 2
+
+    # Replay does not create duplicate business rows or event identities.
+    replay = RecordingPublisher()
+    replay_service = LiveMarketDataService(
+        archive=FileRawArchive(tmp_path / "raw"),
+        store=MarketDataStore(ledger.engine),
+        ledger=ledger,
+        publisher=replay,
+        feed="sip",
+    )
+    assert replay_service.ingest_frame(
+        live_messages(), received_at=received_at
+    ).records_inserted == 0
+    with ledger.engine.begin() as connection:
+        connection.execute(
+            update(event_outbox)
+            .where(event_outbox.c.status == "FAILED")
+            .values(next_attempt_at=datetime.now(UTC))
+        )
+    assert ledger.publish_pending(replay, worker_id="recovery")["published"] == 1
+    assert len(ledger.recent()) == 3
+    assert ledger.outbox_health()["event_outbox_published"] == 3
 
 
 def test_gap_detector_uses_exchange_sessions() -> None:

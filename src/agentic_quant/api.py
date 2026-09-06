@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 import hmac
 import json
 from pathlib import Path
@@ -32,7 +33,7 @@ from agentic_quant.document_ingestion import (
 )
 from agentic_quant.document_store import DocumentStore
 from agentic_quant.data_quality import MarketDataQualityService
-from agentic_quant.domain import LLMProviderName, LLMWorkload
+from agentic_quant.domain import BacktestCostModel, LLMProviderName, LLMWorkload
 from agentic_quant.event_bus import NullEventPublisher, RedisStreamPublisher
 from agentic_quant.intelligence import (
     EvidenceBoundResearchAnalyst,
@@ -90,6 +91,7 @@ from agentic_quant.research_store import ResearchStore
 from agentic_quant.shadow import ShadowRuntime
 from agentic_quant.steward import SystemSteward
 from agentic_quant.strategy_generation import HybridStrategyGenerator
+from agentic_quant.validation import WalkForwardValidator, load_promotion_gate_policy
 from agentic_quant.workflow import WorkflowJobStore
 
 
@@ -225,6 +227,22 @@ class StrategyGenerationRequest(BaseModel):
     provider: LLMProviderName | None = None
 
 
+class ExactStrategyValidationRequest(BaseModel):
+    strategy_spec_id: str = Field(min_length=1, max_length=36)
+    symbol: str = Field(min_length=1, max_length=24, pattern=r"^[A-Za-z.\-]+$")
+    timeframe: Literal["1Min", "1Day"] = "1Day"
+    as_of_start: datetime
+    as_of_end: datetime
+    selection_metric: Literal["sharpe_ratio", "sortino_ratio", "total_return"] = (
+        "sharpe_ratio"
+    )
+    train_bars: int = Field(default=40, ge=22)
+    test_bars: int = Field(default=10, ge=1)
+    step_bars: int = Field(default=10, ge=1)
+    embargo_bars: int = Field(default=1, ge=1)
+    initial_equity: Decimal = Field(default=Decimal("100000"), gt=0)
+
+
 class MLTrainingRequest(BaseModel):
     symbol: str = Field(min_length=1, max_length=24, pattern=r"^[A-Za-z.\-]+$")
     timeframe: Literal["1Min", "1Day"] = "1Day"
@@ -242,8 +260,14 @@ class MLPromotionRequest(BaseModel):
     reason: str = Field(min_length=3, max_length=500)
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    process_role: str = "api",
+) -> FastAPI:
     app_settings = settings or Settings()
+    if process_role not in {"api", "worker"}:
+        raise ValueError("process_role must be api or worker")
     if (
         app_settings.app_env == AppEnvironment.PRODUCTION
         and not app_settings.auth_required
@@ -415,6 +439,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             upgrade_database(app_settings.database_url)
         else:
             require_current_database(app_settings.database_url)
+        if (
+            app_settings.app_env == AppEnvironment.PRODUCTION
+            and process_role == "worker"
+        ):
+            actions.enforce_production_worker_boot_pause()
         if inspect(ledger.engine).has_table("system_lists"):
             objects.ensure_defaults()
         archive = build_raw_archive(app_settings)
@@ -449,29 +478,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         stop_shadow = asyncio.Event()
 
         async def shadow_loop() -> None:
+            failure_streak = 0
             while not stop_shadow.is_set():
-                delivery = ledger.publish_pending(
-                    application.state.publisher,
-                    worker_id="shadow-runtime",
-                )
-                if runtime_is_paused():
-                    actions.record_pipeline_heartbeat(
-                        pipeline="shadow",
-                        status="WAITING",
-                        detail=(
-                            "Global new-exposure pause is active; "
-                            f"outbox published={delivery['published']} "
-                            f"failed={delivery['failed']}"
-                        ),
+                delay = app_settings.shadow_poll_seconds
+                try:
+                    delivery = ledger.publish_pending(
+                        application.state.publisher,
+                        worker_id="shadow-runtime",
                     )
-                elif not actions.pipeline_enabled("shadow"):
-                    actions.record_pipeline_heartbeat(
-                        pipeline="shadow",
-                        status="PAUSED",
-                        detail="Shadow pipeline control is disabled",
-                    )
-                else:
-                    try:
+                    if runtime_is_paused():
+                        actions.record_pipeline_heartbeat(
+                            pipeline="shadow",
+                            status="WAITING",
+                            detail=(
+                                "Global new-exposure pause is active; "
+                                f"outbox published={delivery['published']} "
+                                f"failed={delivery['failed']}"
+                            ),
+                        )
+                    elif not actions.pipeline_enabled("shadow"):
+                        actions.record_pipeline_heartbeat(
+                            pipeline="shadow",
+                            status="PAUSED",
+                            detail="Shadow pipeline control is disabled",
+                        )
+                    else:
                         result = await shadow.tick(
                             trigger="scheduler",
                             new_exposure_paused=runtime_is_paused(),
@@ -484,16 +515,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                 f"and created {result['events_created']} events"
                             ),
                         )
-                    except Exception as exc:
+                    failure_streak = 0
+                except Exception as exc:
+                    failure_streak += 1
+                    delay = min(
+                        app_settings.shadow_poll_seconds,
+                        max(1, 2 ** min(failure_streak - 1, 8)),
+                    )
+                    try:
                         actions.record_pipeline_heartbeat(
                             pipeline="shadow",
                             status="FAILED",
-                            detail=f"{type(exc).__name__}: {exc}",
+                            detail=(
+                                f"attempt={failure_streak}; "
+                                f"{type(exc).__name__}: {exc}"
+                            ),
                         )
+                    except Exception:
+                        pass
+                    if failure_streak >= 5:
+                        raise RuntimeError(
+                            "Shadow runtime stopped after five consecutive failures"
+                        ) from exc
                 try:
                     await asyncio.wait_for(
                         stop_shadow.wait(),
-                        timeout=app_settings.shadow_poll_seconds,
+                        timeout=delay,
                     )
                 except TimeoutError:
                     continue
@@ -503,6 +550,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if app_settings.shadow_runtime_enabled
             else None
         )
+        application.state.shadow_task = shadow_task
         try:
             yield
         finally:
@@ -1112,6 +1160,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> list[dict[str, Any]]:
         return research_store.recent_validation_reports(limit=limit)
 
+    @application.post("/v1/research/validations")
+    def run_exact_strategy_validation(
+        payload: ExactStrategyValidationRequest,
+    ) -> dict[str, Any]:
+        require_development()
+        require_pipeline("research")
+        spec = research_store.strategy_spec(payload.strategy_spec_id)
+        if spec is None:
+            raise HTTPException(status_code=404, detail="strategy specification not found")
+        try:
+            report = WalkForwardValidator(
+                research_store,
+                ledger,
+                calendar_name=app_settings.market_calendar,
+                promotion_policy=load_promotion_gate_policy(
+                    app_settings.research_promotion_policy_path
+                ),
+                risk_policy=risk_policy,
+                restrictions=restrictions,
+            ).run(
+                symbol=payload.symbol.upper(),
+                timeframe=payload.timeframe,
+                as_of_start=payload.as_of_start,
+                as_of_end=payload.as_of_end,
+                code_git_sha=app_settings.source_git_sha or "UNAVAILABLE",
+                selection_metric=payload.selection_metric,
+                train_bars=payload.train_bars,
+                test_bars=payload.test_bars,
+                step_bars=payload.step_bars,
+                embargo_bars=payload.embargo_bars,
+                initial_equity=payload.initial_equity,
+                cost_model=BacktestCostModel(),
+                strategy_spec=spec,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return report.model_dump(mode="json")
+
     @application.get("/v1/research/validations/{validation_report_id}")
     def research_validation(validation_report_id: str) -> dict[str, Any]:
         report = research_store.validation_report(validation_report_id)
@@ -1301,6 +1387,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=429, detail=str(exc)) from exc
         except LLMProviderError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @application.get("/v1/research/strategy-generation-attempts")
+    def strategy_generation_attempts_endpoint(
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> list[dict[str, Any]]:
+        return research_store.generation_attempts(limit=limit)
 
     @application.get("/v1/decision-inspector/{analysis_id}")
     def decision_inspector(analysis_id: str) -> dict[str, Any]:

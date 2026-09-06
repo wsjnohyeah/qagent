@@ -5,7 +5,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Engine, and_, func, insert, select
+from sqlalchemy import Engine, and_, func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -21,6 +21,7 @@ from agentic_quant.database import (
     feature_snapshots,
     market_bars,
     strategy_specs,
+    strategy_generation_attempts,
     validation_folds,
     validation_reports,
 )
@@ -390,6 +391,98 @@ class ResearchStore:
                 f"Strategy version {spec.name}@{spec.version} already exists with different content"
             )
         return stored
+
+    def strategy_spec(self, strategy_spec_id: str) -> StrategySpec | None:
+        with self.engine.connect() as connection:
+            row = connection.execute(
+                select(strategy_specs).where(
+                    strategy_specs.c.strategy_spec_id == strategy_spec_id
+                )
+            ).one_or_none()
+        return (
+            None
+            if row is None
+            else self._strategy_spec_from_row(dict(row._mapping))
+        )
+
+    def create_generation_attempt(
+        self,
+        *,
+        generation_attempt_id: str,
+        feature_snapshot_id: str,
+        analysis_id: str,
+        forecast_id: str,
+        provider: str | None,
+    ) -> None:
+        now = datetime.now(UTC)
+        with self.engine.begin() as connection:
+            connection.execute(
+                insert(strategy_generation_attempts).values(
+                    generation_attempt_id=generation_attempt_id,
+                    feature_snapshot_id=feature_snapshot_id,
+                    analysis_id=analysis_id,
+                    forecast_id=forecast_id,
+                    status="STARTED",
+                    provider=provider,
+                    generation_invocation_id=None,
+                    critique_invocation_id=None,
+                    strategy_spec_id=None,
+                    proposal_json=None,
+                    critique_json=None,
+                    error_code=None,
+                    error_message=None,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    def update_generation_attempt(
+        self,
+        generation_attempt_id: str,
+        *,
+        status: str,
+        generation_invocation_id: str | None = None,
+        critique_invocation_id: str | None = None,
+        strategy_spec_id: str | None = None,
+        proposal: dict[str, Any] | None = None,
+        critique: dict[str, Any] | None = None,
+        error_code: str | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        values: dict[str, Any] = {
+            "status": status,
+            "updated_at": datetime.now(UTC),
+            "error_code": error_code,
+            "error_message": error_message[:2_000] if error_message else None,
+        }
+        optional = {
+            "generation_invocation_id": generation_invocation_id,
+            "critique_invocation_id": critique_invocation_id,
+            "strategy_spec_id": strategy_spec_id,
+            "proposal_json": proposal,
+            "critique_json": critique,
+        }
+        values.update({key: value for key, value in optional.items() if value is not None})
+        with self.engine.begin() as connection:
+            result = connection.execute(
+                update(strategy_generation_attempts)
+                .where(
+                    strategy_generation_attempts.c.generation_attempt_id
+                    == generation_attempt_id
+                )
+                .values(**values)
+            )
+        if int(result.rowcount or 0) != 1:
+            raise ValueError("Strategy generation attempt was not found")
+
+    def generation_attempts(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        statement = (
+            select(strategy_generation_attempts)
+            .order_by(strategy_generation_attempts.c.created_at.desc())
+            .limit(limit)
+        )
+        with self.engine.connect() as connection:
+            return [dict(row._mapping) for row in connection.execute(statement)]
 
     def record_backtest(self, result: BacktestResult) -> None:
         experiment = result.experiment

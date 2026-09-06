@@ -199,7 +199,11 @@ class MLDatasetBuilder:
             adjusted_future = float(future.close)
             cash_distributions = 0.0
             for action in actions:
-                if not snapshot.as_of < action.effective_at <= future.available_from:
+                # The position starts at the next bar's open. Actions between the
+                # decision close and that open belong to the prior holder; entry
+                # prices already reflect them. Only actions effective strictly
+                # after entry and no later than the exit event belong in the label.
+                if not entry.event_time < action.effective_at <= future.event_time:
                     continue
                 if (
                     action.action_type == CorporateActionType.SPLIT

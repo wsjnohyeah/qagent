@@ -13,7 +13,7 @@ from agentic_quant.data_quality import (
     MarketDataQualityService,
     inspect_market_bars,
 )
-from agentic_quant.database import event_outbox
+from agentic_quant.database import event_outbox, workflow_jobs
 from agentic_quant.domain import (
     BacktestCostModel,
     DataQualityStatus,
@@ -248,24 +248,123 @@ def test_fresh_running_partition_is_not_stolen_by_another_invoker(
         partition_days=1,
     )
 
-    assert jobs.claim(planned[0].workflow_job_id) is True
+    lease_token = jobs.claim(planned[0].workflow_job_id, worker_id="inline-worker")
+    assert lease_token is not None
     assert jobs.requeue_stale(job_group_id=job_group_id) == 0
-    assert jobs.claim(planned[0].workflow_job_id) is False
+    assert jobs.claim(planned[0].workflow_job_id) is None
     assert jobs.heartbeat(
         planned[0].workflow_job_id,
         worker_id="different-worker",
+        lease_token=lease_token,
     ) is False
-    assert jobs.heartbeat(planned[0].workflow_job_id) is True
+    assert jobs.heartbeat(
+        planned[0].workflow_job_id,
+        worker_id="inline-worker",
+        lease_token=lease_token,
+    ) is True
     with pytest.raises(ValueError, match="active lease owner"):
         jobs.complete(
             planned[0].workflow_job_id,
             result={"ok": True},
             worker_id="different-worker",
+            lease_token=lease_token,
         )
-    jobs.complete(planned[0].workflow_job_id, result={"ok": True})
+    jobs.complete(
+        planned[0].workflow_job_id,
+        result={"ok": True},
+        worker_id="inline-worker",
+        lease_token=lease_token,
+    )
     completed = jobs.jobs(job_group_id=job_group_id)[0]
     assert completed.status.value == "COMPLETED"
     assert completed.lease_owner is None
+
+
+def test_reclaimed_workflow_attempt_rejects_stale_same_owner_token(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    jobs = WorkflowJobStore(ledger.engine)
+    workflow = ResumableMarketBackfill(
+        service=FakeIngestionService(), jobs=jobs  # type: ignore[arg-type]
+    )
+    group_id, planned = workflow.plan(
+        StockBarsRequest(
+            symbol="AAPL",
+            timeframe="1Day",
+            feed="sip",
+            start=datetime(2026, 1, 1, tzinfo=UTC),
+            end=datetime(2026, 1, 2, tzinfo=UTC),
+        ),
+        partition_days=1,
+    )
+    first_token = jobs.claim(
+        planned[0].workflow_job_id,
+        worker_id="same-process",
+        lease_for=timedelta(microseconds=1),
+    )
+    assert first_token is not None
+    with ledger.engine.begin() as connection:
+        connection.execute(
+            update(workflow_jobs)
+            .where(
+                workflow_jobs.c.workflow_job_id == planned[0].workflow_job_id
+            )
+            .values(lease_expires_at=datetime.now(UTC) - timedelta(seconds=1))
+        )
+    assert jobs.heartbeat(
+        planned[0].workflow_job_id,
+        worker_id="same-process",
+        lease_token=first_token,
+    ) is False
+    assert jobs.requeue_stale(job_group_id=group_id) == 1
+    second_token = jobs.claim(
+        planned[0].workflow_job_id,
+        worker_id="same-process",
+    )
+    assert second_token is not None and second_token != first_token
+    with pytest.raises(ValueError, match="active lease owner"):
+        jobs.complete(
+            planned[0].workflow_job_id,
+            result={"attempt": 1},
+            worker_id="same-process",
+            lease_token=first_token,
+        )
+    jobs.complete(
+        planned[0].workflow_job_id,
+        result={"attempt": 2},
+        worker_id="same-process",
+        lease_token=second_token,
+    )
+
+
+def test_backfill_range_extension_reuses_completed_fixed_partitions(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    jobs = WorkflowJobStore(ledger.engine)
+    workflow = ResumableMarketBackfill(
+        service=FakeIngestionService(), jobs=jobs  # type: ignore[arg-type]
+    )
+    short = StockBarsRequest(
+        symbol="AAPL",
+        timeframe="1Day",
+        feed="sip",
+        start=datetime(2026, 1, 1, tzinfo=UTC),
+        end=datetime(2026, 1, 3, tzinfo=UTC),
+    )
+    extended = short.model_copy(
+        update={"end": datetime(2026, 1, 4, tzinfo=UTC)}
+    )
+    first_group, first_jobs = workflow.plan(short, partition_days=1)
+    second_group, extended_jobs = workflow.plan(extended, partition_days=1)
+    assert first_group == second_group
+    assert [job.workflow_job_id for job in extended_jobs[:2]] == [
+        job.workflow_job_id for job in first_jobs
+    ]
+    assert len(extended_jobs) == 3
 
 
 def test_event_outbox_retries_with_stable_event_identity(

@@ -6,7 +6,7 @@ import hashlib
 import json
 from typing import Any, Self
 
-from pydantic import Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 from agentic_quant.domain import (
     EventEnvelope,
@@ -34,6 +34,8 @@ STRATEGY_CRITIQUE_SCHEMA = "strategy_critique@0.1.0"
 
 
 class ConstrainedStrategyProposal(FrozenModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     schema_version: str = Field(pattern=r"^strategy_proposal@0\.1\.0$")
     strategy_type: str = Field(pattern=r"^(momentum|mean_reversion)$")
     timeframe: str = Field(pattern=r"^1Day$")
@@ -55,6 +57,8 @@ class ConstrainedStrategyProposal(FrozenModel):
 
 
 class StrategyCritique(FrozenModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     schema_version: str = Field(pattern=r"^strategy_critique@0\.1\.0$")
     verdict: str = Field(pattern=r"^(ACCEPT|REJECT)$")
     reasons: tuple[str, ...] = Field(min_length=1, max_length=12)
@@ -135,64 +139,109 @@ class HybridStrategyGenerator:
                 "uncertainty": str(forecast.uncertainty),
             },
         }
-        generation = await self.gateway.complete(
-            LLMRequest(
-                workload=LLMWorkload.STRATEGY_GENERATION,
-                prompt_version="hybrid_strategy_generation@0.1.0",
-                instructions=self._generation_instructions(),
-                input_text=json.dumps(source, sort_keys=True, default=str),
-                max_output_tokens=900,
-            ),
-            provider_override=provider_override,
+        attempt_id = uuid7()
+        self.research.create_generation_attempt(
+            generation_attempt_id=attempt_id,
+            feature_snapshot_id=feature_snapshot_id,
+            analysis_id=analysis_id,
+            forecast_id=forecast_id,
+            provider=provider_override.value if provider_override is not None else None,
         )
-        proposal = ConstrainedStrategyProposal.model_validate(
-            self._json_object(generation.output_text or "")
-        )
-        if set(proposal.evidence_ids) != evidence_ids:
-            raise ValueError("Strategy proposal must cite the exact hybrid evidence set")
-        critique_input = {
-            "proposal": proposal.model_dump(mode="json"),
-            "allowed_evidence_ids": sorted(evidence_ids),
-            "source_summary": source,
-        }
-        critique_invocation = await self.gateway.complete(
-            LLMRequest(
-                workload=LLMWorkload.STRATEGY_CRITIQUE,
-                prompt_version="hybrid_strategy_critique@0.1.0",
-                instructions=self._critique_instructions(),
-                input_text=json.dumps(critique_input, sort_keys=True, default=str),
-                max_output_tokens=700,
-            ),
-            provider_override=provider_override,
-        )
-        critique = StrategyCritique.model_validate(
-            self._json_object(critique_invocation.output_text or "")
-        )
-        if set(critique.evidence_ids) != evidence_ids:
-            raise ValueError("Strategy critique must cite the exact hybrid evidence set")
-        result: dict[str, Any] = {
-            "status": critique.verdict,
-            "proposal": proposal.model_dump(mode="json"),
-            "critique": critique.model_dump(mode="json"),
-            "generation_invocation_id": generation.invocation_id,
-            "critique_invocation_id": critique_invocation.invocation_id,
-            "strategy_spec": None,
-            "automatic_adoption": False,
-        }
-        if critique.verdict == "ACCEPT":
-            spec = self._compile(
-                proposal=proposal,
-                symbol=snapshot.symbol,
-                feature_snapshot_id=snapshot.feature_snapshot_id,
-                analysis_id=analysis.analysis_id,
-                forecast_id=forecast.forecast_id,
-                generation_invocation_id=generation.invocation_id,
-                critique_invocation_id=critique_invocation.invocation_id,
+        generation_invocation_id: str | None = None
+        critique_invocation_id: str | None = None
+        raw_proposal: dict[str, Any] | None = None
+        proposal_json: dict[str, Any] | None = None
+        critique_json: dict[str, Any] | None = None
+        try:
+            generation = await self.gateway.complete(
+                LLMRequest(
+                    workload=LLMWorkload.STRATEGY_GENERATION,
+                    prompt_version="hybrid_strategy_generation@0.1.0",
+                    instructions=self._generation_instructions(),
+                    input_text=json.dumps(source, sort_keys=True, default=str),
+                    max_output_tokens=900,
+                ),
+                provider_override=provider_override,
             )
-            stored = self.research.record_strategy_spec(spec)
-            result["strategy_spec"] = stored.model_dump(mode="json")
-            self._emit(stored, result)
-        return result
+            generation_invocation_id = generation.invocation_id
+            raw_proposal = self._json_object(generation.output_text or "")
+            self.research.update_generation_attempt(
+                attempt_id,
+                status="PROPOSED",
+                generation_invocation_id=generation_invocation_id,
+                proposal=raw_proposal,
+            )
+            proposal = ConstrainedStrategyProposal.model_validate(raw_proposal)
+            proposal_json = proposal.model_dump(mode="json")
+            if set(proposal.evidence_ids) != evidence_ids:
+                raise ValueError("Strategy proposal must cite the exact hybrid evidence set")
+            critique_input = {
+                "proposal": proposal_json,
+                "allowed_evidence_ids": sorted(evidence_ids),
+                "source_summary": source,
+            }
+            critique_invocation = await self.gateway.complete(
+                LLMRequest(
+                    workload=LLMWorkload.STRATEGY_CRITIQUE,
+                    prompt_version="hybrid_strategy_critique@0.1.0",
+                    instructions=self._critique_instructions(),
+                    input_text=json.dumps(critique_input, sort_keys=True, default=str),
+                    max_output_tokens=700,
+                ),
+                provider_override=provider_override,
+            )
+            critique_invocation_id = critique_invocation.invocation_id
+            raw_critique = self._json_object(critique_invocation.output_text or "")
+            critique = StrategyCritique.model_validate(raw_critique)
+            critique_json = critique.model_dump(mode="json")
+            if set(critique.evidence_ids) != evidence_ids:
+                raise ValueError("Strategy critique must cite the exact hybrid evidence set")
+            result: dict[str, Any] = {
+                "generation_attempt_id": attempt_id,
+                "status": critique.verdict,
+                "proposal": proposal_json,
+                "critique": critique_json,
+                "generation_invocation_id": generation_invocation_id,
+                "critique_invocation_id": critique_invocation_id,
+                "strategy_spec": None,
+                "automatic_adoption": False,
+            }
+            stored: StrategySpec | None = None
+            if critique.verdict == "ACCEPT":
+                spec = self._compile(
+                    proposal=proposal,
+                    symbol=snapshot.symbol,
+                    feature_snapshot_id=snapshot.feature_snapshot_id,
+                    analysis_id=analysis.analysis_id,
+                    forecast_id=forecast.forecast_id,
+                    generation_invocation_id=generation_invocation_id,
+                    critique_invocation_id=critique_invocation_id,
+                )
+                stored = self.research.record_strategy_spec(spec)
+                result["strategy_spec"] = stored.model_dump(mode="json")
+                self._emit(stored, result)
+            self.research.update_generation_attempt(
+                attempt_id,
+                status=critique.verdict,
+                generation_invocation_id=generation_invocation_id,
+                critique_invocation_id=critique_invocation_id,
+                strategy_spec_id=(stored.strategy_spec_id if stored is not None else None),
+                proposal=proposal_json,
+                critique=critique_json,
+            )
+            return result
+        except Exception as exc:
+            self.research.update_generation_attempt(
+                attempt_id,
+                status="FAILED",
+                generation_invocation_id=generation_invocation_id,
+                critique_invocation_id=critique_invocation_id,
+                proposal=raw_proposal or proposal_json,
+                critique=critique_json,
+                error_code=type(exc).__name__,
+                error_message=str(exc),
+            )
+            raise
 
     def _compile(
         self,
@@ -247,8 +296,6 @@ class HybridStrategyGenerator:
                 "feature_snapshot_id": feature_snapshot_id,
                 "analysis_id": analysis_id,
                 "forecast_id": forecast_id,
-                "generation_invocation_id": generation_invocation_id,
-                "critique_invocation_id": critique_invocation_id,
                 "automatic_adoption": False,
             },
             code_sha256=code_sha256,

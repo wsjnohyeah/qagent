@@ -11,7 +11,7 @@ from typing import Any
 import websockets
 
 from agentic_quant.domain import StockBar, StockQuote, StockTrade
-from agentic_quant.ids import uuid7
+from agentic_quant.ids import stable_uuid
 
 
 class AlpacaStreamError(RuntimeError):
@@ -40,7 +40,7 @@ def normalize_stream_message(
     }
     if event_type == "b":
         return StockBar(
-            bar_id=uuid7(),
+            bar_id=stable_uuid("bar", "alpaca", feed, symbol, "1Min", event_time),
             timeframe="1Min",
             available_from=event_time + timedelta(minutes=1),
             open=Decimal(str(item["o"])),
@@ -54,7 +54,7 @@ def normalize_stream_message(
         )
     if event_type == "t":
         return StockTrade(
-            trade_id=uuid7(),
+            trade_id=stable_uuid("trade", "alpaca", feed, symbol, item["i"]),
             provider_trade_id=str(item["i"]),
             available_from=received_at,
             price=Decimal(str(item["p"])),
@@ -67,7 +67,7 @@ def normalize_stream_message(
     if event_type == "q":
         fingerprint_source = json.dumps(item, sort_keys=True, separators=(",", ":"))
         return StockQuote(
-            quote_id=uuid7(),
+            quote_id=stable_uuid("quote", "alpaca", feed, fingerprint_source),
             quote_fingerprint=hashlib.sha256(fingerprint_source.encode()).hexdigest(),
             available_from=received_at,
             bid_exchange=str(item.get("bx", "")),

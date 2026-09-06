@@ -612,6 +612,13 @@ class AdminActionService:
             return default
         return bool(value.get("paused", default))
 
+    def enforce_production_worker_boot_pause(self) -> None:
+        """Require a fresh human resume after every production worker boot."""
+        self._set_runtime_control(
+            paused=True,
+            updated_by="production-worker-startup",
+        )
+
     def pipeline_enabled(self, pipeline: str) -> bool:
         values = {
             item["pipeline"]: bool(item["enabled"])

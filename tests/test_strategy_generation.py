@@ -6,6 +6,9 @@ from decimal import Decimal
 import json
 from types import SimpleNamespace
 
+import pytest
+from pydantic import ValidationError
+
 from agentic_quant.domain import (
     AnalystClaim,
     EvidencePacket,
@@ -27,7 +30,10 @@ from agentic_quant.migrations import upgrade_database
 from agentic_quant.ml import MLStore
 from agentic_quant.research import FEATURE_SET_VERSION
 from agentic_quant.research_store import ResearchStore
-from agentic_quant.strategy_generation import HybridStrategyGenerator
+from agentic_quant.strategy_generation import (
+    ConstrainedStrategyProposal,
+    HybridStrategyGenerator,
+)
 
 
 def test_hybrid_generator_compiles_only_a_bounded_research_spec(
@@ -157,8 +163,7 @@ def test_hybrid_generator_compiles_only_a_bounded_research_spec(
         async def complete(self, request, provider_override=None):  # type: ignore[no-untyped-def]
             del provider_override
             self.calls += 1
-            if self.calls == 1:
-                assert request.workload.value == "strategy_generation"
+            if request.workload.value == "strategy_generation":
                 output = {
                     "schema_version": "strategy_proposal@0.1.0",
                     "strategy_type": "momentum",
@@ -182,15 +187,23 @@ def test_hybrid_generator_compiles_only_a_bounded_research_spec(
                 output_text=json.dumps(output),
             )
 
+    generator = HybridStrategyGenerator(  # type: ignore[arg-type]
+        FakeGateway(),
+        research,
+        intelligence,
+        ml,
+        ledger,
+        code_git_sha="test-sha",
+    )
     result = asyncio.run(
-        HybridStrategyGenerator(  # type: ignore[arg-type]
-            FakeGateway(),
-            research,
-            intelligence,
-            ml,
-            ledger,
-            code_git_sha="test-sha",
-        ).generate(
+        generator.generate(
+            feature_snapshot_id=snapshot.feature_snapshot_id,
+            analysis_id=analysis.analysis_id,
+            forecast_id=forecast.forecast_id,
+        )
+    )
+    retry = asyncio.run(
+        generator.generate(
             feature_snapshot_id=snapshot.feature_snapshot_id,
             analysis_id=analysis.analysis_id,
             forecast_id=forecast.forecast_id,
@@ -207,6 +220,59 @@ def test_hybrid_generator_compiles_only_a_bounded_research_spec(
     assert spec["data_requirements"]["origin"] == (
         "hybrid_ml_llm_constrained_dsl"
     )
+    assert retry["strategy_spec"]["strategy_spec_id"] == spec["strategy_spec_id"]
+    assert "generation_invocation_id" not in spec["data_requirements"]
+    attempts = research.generation_attempts()
+    assert len(attempts) == 2
+    assert {attempt["status"] for attempt in attempts} == {"ACCEPT"}
+    assert len({attempt["generation_invocation_id"] for attempt in attempts}) == 2
     assert ledger.by_correlation_id(spec["strategy_spec_id"])[-1][
         "event_type"
     ] == "research.strategy_candidate.compiled.v1"
+
+    class UnsupportedFieldGateway:
+        async def complete(self, request, provider_override=None):  # type: ignore[no-untyped-def]
+            del request, provider_override
+            return SimpleNamespace(
+                invocation_id="unsupported-generation",
+                output_text=json.dumps(
+                    {
+                        **result["proposal"],
+                        "stop_loss": "0.01",
+                    }
+                ),
+            )
+
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        asyncio.run(
+            HybridStrategyGenerator(  # type: ignore[arg-type]
+                UnsupportedFieldGateway(),
+                research,
+                intelligence,
+                ml,
+            ).generate(
+                feature_snapshot_id=snapshot.feature_snapshot_id,
+                analysis_id=analysis.analysis_id,
+                forecast_id=forecast.forecast_id,
+            )
+        )
+    failed = research.generation_attempts(limit=1)[0]
+    assert failed["status"] == "FAILED"
+    assert failed["proposal_json"]["stop_loss"] == "0.01"
+
+
+def test_generated_strategy_dsl_rejects_unsupported_fields() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        ConstrainedStrategyProposal.model_validate(
+            {
+                "schema_version": "strategy_proposal@0.1.0",
+                "strategy_type": "momentum",
+                "timeframe": "1Day",
+                "return_window": 5,
+                "slow_window": 20,
+                "threshold": "0.01",
+                "thesis": "A sufficiently long bounded test thesis.",
+                "evidence_ids": ("FEATURE:x", "ANALYSIS:y", "FORECAST:z"),
+                "stop_loss": "0.01",
+            }
+        )
