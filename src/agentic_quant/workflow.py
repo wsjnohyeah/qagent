@@ -68,6 +68,33 @@ class WorkflowJobStore:
         with self.engine.begin() as connection:
             connection.execute(statement)
 
+    def incomplete_group_ids(
+        self,
+        *,
+        job_type_prefix: str,
+        exclude_group_id: str | None = None,
+        limit: int = 100,
+    ) -> tuple[str, ...]:
+        statement = (
+            select(
+                workflow_jobs.c.job_group_id,
+                func.min(workflow_jobs.c.created_at).label("first_created_at"),
+            )
+            .where(
+                workflow_jobs.c.job_type.like(f"{job_type_prefix}%"),
+                workflow_jobs.c.status != WorkflowJobStatus.COMPLETED.value,
+            )
+            .group_by(workflow_jobs.c.job_group_id)
+            .order_by(func.min(workflow_jobs.c.created_at).asc())
+            .limit(limit)
+        )
+        if exclude_group_id is not None:
+            statement = statement.where(
+                workflow_jobs.c.job_group_id != exclude_group_id
+            )
+        with self.engine.connect() as connection:
+            return tuple(str(row.job_group_id) for row in connection.execute(statement))
+
     def requeue_stale(
         self,
         *,

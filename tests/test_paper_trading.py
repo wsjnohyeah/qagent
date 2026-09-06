@@ -4,11 +4,13 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 import json
+from types import SimpleNamespace
 from typing import Any, cast
 
 import httpx
 import pytest
 from sqlalchemy import insert
+from sqlalchemy import update
 
 from agentic_quant.database import (
     paper_enrollments,
@@ -19,11 +21,18 @@ from agentic_quant.database import (
 )
 from agentic_quant.ledger import EventLedger
 from agentic_quant.migrations import upgrade_database
-from agentic_quant.paper import PaperBroker, PaperTradingRuntime
+from agentic_quant.paper import (
+    PAPER_EXECUTION_PROFILE_VERSION,
+    PaperBroker,
+    PaperTradingRuntime,
+)
 from agentic_quant.providers.alpaca_paper import (
     AlpacaPaperConfigurationError,
+    AlpacaPaperResponseError,
     AlpacaPaperTradingProvider,
+    normalize_long_bracket_prices,
 )
+from agentic_quant.risk import BASELINE_EXECUTION_PROFILE_VERSION
 from agentic_quant.shadow import ShadowRuntime
 
 
@@ -48,8 +57,9 @@ def test_alpaca_adapter_is_pinned_to_paper_and_submission_is_idempotent() -> Non
             posts += 1
             submitted = json.loads(request.content)
             assert submitted["type"] == "limit"
-            assert submitted["limit_price"] == "100"
+            assert submitted["limit_price"] == "100.00"
             assert submitted["order_class"] == "bracket"
+            assert submitted["time_in_force"] == "day"
             stored = {
                 "id": "paper-order-1",
                 "client_order_id": "qagent-test",
@@ -96,24 +106,68 @@ def test_alpaca_adapter_is_pinned_to_paper_and_submission_is_idempotent() -> Non
     assert posts == 1
 
 
+def test_alpaca_price_precision_is_directional_and_geometry_stays_valid() -> None:
+    entry, target, stop = normalize_long_bracket_prices(
+        entry_limit_price=Decimal("121.379"),
+        take_profit_price=Decimal("126.2248"),
+        stop_loss_price=Decimal("118.9426"),
+    )
+    assert (entry, target, stop) == (
+        Decimal("121.37"),
+        Decimal("126.22"),
+        Decimal("118.95"),
+    )
+
+    sub_dollar = normalize_long_bracket_prices(
+        entry_limit_price=Decimal("0.92347"),
+        take_profit_price=Decimal("0.95009"),
+        stop_loss_price=Decimal("0.90009"),
+    )
+    assert sub_dollar == (
+        Decimal("0.9234"),
+        Decimal("0.9500"),
+        Decimal("0.9001"),
+    )
+    with pytest.raises(ValueError, match="stop < entry < target"):
+        normalize_long_bracket_prices(
+            entry_limit_price=Decimal("1.001"),
+            take_profit_price=Decimal("1.004"),
+            stop_loss_price=Decimal("0.99999"),
+        )
+
+
 class _FakeShadow:
+    restrictions = SimpleNamespace(is_restricted=lambda *_args, **_kwargs: False)
+
+    def __init__(self) -> None:
+        self.deployment_status = "ACTIVE"
+        self.contract_status = "CURRENT"
+        self.execution_profile = PAPER_EXECUTION_PROFILE_VERSION
+        self.maximum_trade_risk_usd = "130"
+
     def deployment(self, deployment_id: str) -> dict[str, Any]:
         return {
             "shadow_deployment_id": deployment_id,
             "strategy_name": "Paper test momentum",
             "strategy_spec_id": "strategy-1",
             "symbol": "AAPL",
-            "status": "ACTIVE",
-            "contract_status": "CURRENT",
+            "status": self.deployment_status,
+            "contract_status": self.contract_status,
+            "execution_contract_json": {
+                "execution_profile": self.execution_profile,
+            },
         }
 
     def virtual_account(self) -> dict[str, Any]:
         return {
             "account_floor_usd": "40000",
             "daily_loss_stop_usd": "520",
-            "maximum_trade_risk_usd": "130",
+            "maximum_trade_risk_usd": self.maximum_trade_risk_usd,
             "maximum_concurrent_risk_usd": "780",
         }
+
+    def effective_risk_policy(self) -> Any:
+        return SimpleNamespace(minimum_reward_risk=Decimal("1.5"))
 
 
 class _FakeBroker:
@@ -121,6 +175,8 @@ class _FakeBroker:
         self.orders: dict[str, dict[str, Any]] = {}
         self.submissions = 0
         self.cancellations = 0
+        self.account_id = "paper-account-1"
+        self.positions: tuple[dict[str, Any], ...] = ()
 
     async def __aenter__(self) -> _FakeBroker:
         return self
@@ -130,7 +186,7 @@ class _FakeBroker:
 
     async def fetch_account(self) -> dict[str, Any]:
         return {
-            "id": "paper-account-1",
+            "id": self.account_id,
             "account_number": "DO-NOT-PERSIST",
             "status": "ACTIVE",
             "currency": "USD",
@@ -146,7 +202,7 @@ class _FakeBroker:
         }
 
     async def fetch_positions(self) -> tuple[dict[str, Any], ...]:
-        return ()
+        return self.positions
 
     async def fetch_order_by_client_id(
         self, client_order_id: str
@@ -190,6 +246,48 @@ class _FakeBroker:
             if value["id"] == broker_order_id:
                 value["status"] = "canceled"
                 value["legs"] = []
+
+
+class _UnknownOnceBroker(_FakeBroker):
+    def __init__(self, *, accepted_before_timeout: bool = False) -> None:
+        super().__init__()
+        self.accepted_before_timeout = accepted_before_timeout
+        self.post_attempts = 0
+
+    async def submit_bracket_order(
+        self,
+        *,
+        client_order_id: str,
+        symbol: str,
+        quantity: int,
+        entry_limit_price: Decimal,
+        take_profit_price: Decimal,
+        stop_loss_price: Decimal,
+    ) -> dict[str, Any]:
+        self.post_attempts += 1
+        if self.post_attempts == 1:
+            if self.accepted_before_timeout:
+                await super().submit_bracket_order(
+                    client_order_id=client_order_id,
+                    symbol=symbol,
+                    quantity=quantity,
+                    entry_limit_price=entry_limit_price,
+                    take_profit_price=take_profit_price,
+                    stop_loss_price=stop_loss_price,
+                )
+            raise AlpacaPaperResponseError(
+                status_code=504,
+                endpoint="/v2/orders",
+                detail="outcome unknown",
+            )
+        return await super().submit_bracket_order(
+            client_order_id=client_order_id,
+            symbol=symbol,
+            quantity=quantity,
+            entry_limit_price=entry_limit_price,
+            take_profit_price=take_profit_price,
+            stop_loss_price=stop_loss_price,
+        )
 
 
 def _insert_plan(
@@ -241,6 +339,77 @@ def _insert_plan(
             )
         )
     return plan_id
+
+
+def _paper_fixture(
+    settings,  # type: ignore[no-untyped-def]
+    *,
+    broker: _FakeBroker,
+    now: datetime,
+) -> tuple[EventLedger, PaperTradingRuntime, _FakeShadow, list[datetime]]:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    deployment_id = "deployment-1"
+    with ledger.engine.begin() as connection:
+        connection.execute(
+            insert(strategy_specs).values(
+                strategy_spec_id="strategy-1",
+                name="Paper test momentum",
+                version="1.0.0",
+                strategy_type="momentum",
+                timeframe="1Day",
+                feature_set_version="test",
+                parameters_json={},
+                data_requirements_json={},
+                code_sha256="b" * 64,
+                created_at=now - timedelta(days=1),
+            )
+        )
+        connection.execute(
+            insert(shadow_deployments).values(
+                shadow_deployment_id=deployment_id,
+                virtual_account_id="virtual-account-1",
+                strategy_sleeve_id=None,
+                strategy_spec_id="strategy-1",
+                adoption_id=None,
+                symbol="AAPL",
+                status="ACTIVE",
+                initial_cash=Decimal("100000"),
+                cash_balance=Decimal("100000"),
+                position_quantity=Decimal("0"),
+                average_entry_price=None,
+                last_price=Decimal("100"),
+                realized_pnl=Decimal("0"),
+                unrealized_pnl=Decimal("0"),
+                last_processed_bar_time=None,
+                created_at=now - timedelta(days=1),
+                updated_at=now - timedelta(days=1),
+            )
+        )
+        connection.execute(
+            insert(paper_enrollments).values(
+                paper_enrollment_id="enrollment-1",
+                shadow_deployment_id=deployment_id,
+                broker_account_id=None,
+                status="ACTIVE",
+                created_by="operator",
+                reason="Approved for paper test",
+                created_at=now - timedelta(minutes=1),
+                updated_at=now - timedelta(minutes=1),
+            )
+        )
+    _insert_plan(ledger, deployment_id=deployment_id, now=now, suffix="one")
+    shadow = _FakeShadow()
+    clock = [now + timedelta(seconds=1)]
+    runtime = PaperTradingRuntime(
+        ledger.engine,
+        cast(ShadowRuntime, shadow),
+        broker_factory=lambda: cast(PaperBroker, broker),
+        enabled=True,
+        trading_mode="paper",
+        now_provider=lambda: clock[0],
+    )
+    return ledger, runtime, shadow, clock
 
 
 def test_paper_runtime_submits_once_reconciles_and_pause_blocks_new_exposure(
@@ -353,3 +522,161 @@ def test_paper_runtime_submits_once_reconciles_and_pause_blocks_new_exposure(
     assert broker.cancellations == 1
     assert runtime.orders()[0]["status"] == "canceled"
     assert runtime.orders()[0]["lifecycle_complete"] is True
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_blocker"),
+    (
+        ("pause", "PAPER_ENROLLMENT_NOT_ACTIVE"),
+        ("retire", "PAPER_ENROLLMENT_NOT_ACTIVE"),
+        ("contract", "PAPER_EXECUTION_CONTRACT_NOT_VALIDATED"),
+        ("risk", "PAPER_TRADE_RISK_LIMIT"),
+        ("plan", "SHADOW_PLAN_NOT_OPEN"),
+        ("global", "GLOBAL_NEW_EXPOSURE_PAUSED"),
+    ),
+)
+def test_unknown_submission_is_reauthorized_before_every_retry(
+    settings,  # type: ignore[no-untyped-def]
+    mutation: str,
+    expected_blocker: str,
+) -> None:
+    now = datetime(2026, 9, 8, 20, tzinfo=UTC)
+    broker = _UnknownOnceBroker()
+    ledger, runtime, shadow, clock = _paper_fixture(
+        settings,
+        broker=broker,
+        now=now,
+    )
+    with pytest.raises(AlpacaPaperResponseError):
+        asyncio.run(runtime.tick(trigger="unknown", new_exposure_paused=False))
+    assert broker.post_attempts == 1
+    assert runtime.orders()[0]["status"] == "SUBMISSION_UNKNOWN"
+
+    paused = False
+    if mutation in {"pause", "retire"}:
+        runtime.set_enrollment_status(
+            enrollment_id="enrollment-1",
+            status="PAUSED" if mutation == "pause" else "RETIRED",
+            reason="adversarial retry test",
+            updated_by="test",
+        )
+    elif mutation == "contract":
+        shadow.execution_profile = BASELINE_EXECUTION_PROFILE_VERSION
+    elif mutation == "risk":
+        shadow.maximum_trade_risk_usd = "1"
+    elif mutation == "plan":
+        with ledger.engine.begin() as connection:
+            connection.execute(
+                update(shadow_trade_plans)
+                .where(shadow_trade_plans.c.trade_plan_id == "plan-one")
+                .values(status="CANCELLED")
+            )
+    else:
+        paused = True
+
+    clock[0] += timedelta(seconds=1)
+    result = asyncio.run(
+        runtime.tick(trigger="retry", new_exposure_paused=paused)
+    )
+    assert result["orders_submitted"] == 0
+    assert broker.post_attempts == 1
+    blocked = runtime.orders()[0]
+    assert blocked["status"] == "SUBMISSION_BLOCKED"
+    assert expected_blocker in str(blocked["error_message"])
+
+
+def test_unknown_submission_is_never_forwarded_to_a_different_account(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    now = datetime(2026, 9, 8, 20, tzinfo=UTC)
+    broker = _UnknownOnceBroker()
+    _, runtime, _, clock = _paper_fixture(settings, broker=broker, now=now)
+    with pytest.raises(AlpacaPaperResponseError):
+        asyncio.run(runtime.tick(trigger="unknown", new_exposure_paused=False))
+    broker.account_id = "paper-account-2"
+    clock[0] += timedelta(seconds=1)
+    with pytest.raises(RuntimeError, match="account changed"):
+        asyncio.run(runtime.tick(trigger="account-change", new_exposure_paused=False))
+    clock[0] += timedelta(seconds=1)
+    result = asyncio.run(
+        runtime.tick(trigger="account-change-retry", new_exposure_paused=False)
+    )
+    assert result["orders_submitted"] == 0
+    assert broker.post_attempts == 1
+    blocked = runtime.orders()[0]
+    assert blocked["status"] == "SUBMISSION_BLOCKED"
+    assert "ORDER_ACCOUNT_MISMATCH" in str(blocked["error_message"])
+
+
+def test_lost_successful_response_is_reconciled_without_a_second_post(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    now = datetime(2026, 9, 8, 20, tzinfo=UTC)
+    broker = _UnknownOnceBroker(accepted_before_timeout=True)
+    _, runtime, _, clock = _paper_fixture(settings, broker=broker, now=now)
+    with pytest.raises(AlpacaPaperResponseError):
+        asyncio.run(runtime.tick(trigger="lost-response", new_exposure_paused=False))
+    clock[0] += timedelta(seconds=1)
+    result = asyncio.run(
+        runtime.tick(trigger="reconcile", new_exposure_paused=False)
+    )
+    assert result["orders_reconciled"] == 1
+    assert result["orders_submitted"] == 0
+    assert broker.post_attempts == 1
+    assert runtime.orders()[0]["status"] == "accepted"
+
+
+def test_partial_fill_expiry_cancels_remainder_but_keeps_lifecycle_open(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    now = datetime(2026, 9, 8, 20, tzinfo=UTC)
+    broker = _FakeBroker()
+    ledger, runtime, _, clock = _paper_fixture(settings, broker=broker, now=now)
+    asyncio.run(runtime.tick(trigger="submit", new_exposure_paused=False))
+    order = runtime.orders()[0]
+    client_order_id = str(order["client_order_id"])
+    broker.orders[client_order_id]["status"] = "partially_filled"
+    broker.orders[client_order_id]["filled_qty"] = "1"
+    broker.positions = ({"symbol": "AAPL", "qty": "1"},)
+    clock[0] = now + timedelta(days=2)
+
+    result = asyncio.run(
+        runtime.tick(trigger="expired-partial", new_exposure_paused=False)
+    )
+    assert result["orders_submitted"] == 0
+    assert broker.cancellations == 1
+    stored = runtime.orders()[0]
+    assert stored["lifecycle_complete"] is False
+    assert stored["status"] == "SUBMISSION_BLOCKED"
+    assert "POSITION_OPEN_REQUIRES_EXIT" in str(stored["error_message"])
+
+    _insert_plan(
+        ledger,
+        deployment_id="deployment-1",
+        now=clock[0],
+        suffix="after-partial",
+    )
+    clock[0] += timedelta(seconds=1)
+    second = asyncio.run(
+        runtime.tick(trigger="still-open", new_exposure_paused=False)
+    )
+    assert second["orders_submitted"] == 0
+    assert broker.submissions == 1
+
+
+def test_paper_enrollment_rejects_shadow_only_execution_certificate(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    shadow = _FakeShadow()
+    shadow.execution_profile = BASELINE_EXECUTION_PROFILE_VERSION
+    runtime = PaperTradingRuntime(
+        ledger.engine,
+        cast(ShadowRuntime, shadow),
+        broker_factory=lambda: cast(PaperBroker, _FakeBroker()),
+        enabled=True,
+        trading_mode="paper",
+    )
+    with pytest.raises(ValueError, match="separately validated"):
+        runtime.enrollment_preview("deployment-1")

@@ -148,6 +148,10 @@ Verify and record:
 - Before enabling Paper, `POST /v1/paper/probe` succeeds read-only and the returned account
   identity, cash/equity, and positions match the dedicated Alpaca Paper account. No order is
   submitted as a deployment health check.
+- Current Shadow certificates are not Paper-compatible. Keep Paper order submission disabled
+  until `alpaca_day_limit_bracket_one_session@0.1.0` has a matching validator, nested-order
+  lifecycle, deterministic session-close exit, and explicit enrollment. Never copy or edit a
+  certificate to bypass this gate.
 - PostgreSQL and Redis health.
 - Restart behavior after one controlled API restart.
 - Backup output and a restore test before durable operation.

@@ -1,20 +1,24 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import asyncio
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import insert, select
 
 from agentic_quant.api import create_app
 from agentic_quant.control_plane import SystemObjectStore
+from agentic_quant.database import shadow_trade_plans, validation_reports
 from agentic_quant.domain import BacktestCostModel, StockBar
 from agentic_quant.ids import uuid7
 from agentic_quant.ledger import EventLedger
 from agentic_quant.market_calendar import MarketSessionClock
 from agentic_quant.market_store import MarketDataStore
 from agentic_quant.migrations import upgrade_database
-from agentic_quant.research_store import ResearchStore
+from agentic_quant.research_store import ResearchStore, _canonical_hash
 from agentic_quant.research import default_strategy_spec, research_code_sha256
 from agentic_quant.validation import (
     PromotionGatePolicy,
@@ -23,6 +27,8 @@ from agentic_quant.validation import (
     continuous_oos_equity_and_drawdown,
     combinatorial_purged_diagnostics,
     deflated_sharpe_diagnostics,
+    validation_execution_contract,
+    validation_input_fingerprint,
 )
 from agentic_quant.risk import RestrictionRegistry, RiskPolicy
 from agentic_quant.shadow import ShadowRuntime
@@ -91,6 +97,55 @@ def _validator(settings):  # type: ignore[no-untyped-def]
     return ledger, research_store, WalkForwardValidator(research_store, ledger), bars
 
 
+def _seed_eligible_report(
+    ledger: EventLedger,
+    *,
+    spec,  # type: ignore[no-untyped-def]
+    timeframe: str,
+    risk_policy: RiskPolicy,
+    restrictions: RestrictionRegistry,
+) -> str:
+    report_id = uuid7()
+    contract = validation_execution_contract(
+        validation_subject="static_strategy",
+        validated_strategy_spec_ids={
+            str(spec.strategy_type): spec.strategy_spec_id
+        },
+        cost_model=BacktestCostModel(),
+        risk_policy=risk_policy,
+        restriction_registry_version=restrictions.version,
+        initial_equity=Decimal("100000"),
+    )
+    with ledger.engine.begin() as connection:
+        connection.execute(
+            insert(validation_reports).values(
+                validation_report_id=report_id,
+                symbol="AAPL",
+                timeframe=timeframe,
+                strategy_types=[str(spec.strategy_type)],
+                validation_subject="static_strategy",
+                validated_strategy_spec_ids={
+                    str(spec.strategy_type): spec.strategy_spec_id
+                },
+                execution_contract_json=contract,
+                execution_contract_sha256=_canonical_hash(contract),
+                selection_metric="sharpe_ratio",
+                train_bars=22,
+                test_bars=5,
+                step_bars=5,
+                embargo_bars=1,
+                aggregate_metrics={},
+                regime_metrics={},
+                robustness_metrics={},
+                gate_assessment={"eligible_for_human_review": True},
+                report_hash="a" * 64,
+                code_git_sha="test-fixture-only",
+                created_at=datetime.now(UTC),
+            )
+        )
+    return report_id
+
+
 def test_walk_forward_validation_preserves_embargo_and_all_candidates(
     settings,  # type: ignore[no-untyped-def]
 ) -> None:
@@ -133,6 +188,25 @@ def test_walk_forward_validation_preserves_embargo_and_all_candidates(
     assert report.robustness_metrics["deflated_sharpe"]["sample_size"] == 3
     assert report.robustness_metrics["deflated_sharpe"]["number_of_trials"] == 2
     assert report.robustness_metrics["selection_search_trial_count"] == 2
+    validation_input = report.robustness_metrics["validation_input"]
+    assert validation_input["bar_count"] == len(bars)
+    assert len(validation_input["market_data_sha256"]) == 64
+    changed_bars = (
+        bars[0].model_copy(update={"close": bars[0].close + Decimal("0.01")}),
+        *bars[1:],
+    )
+    changed_input = validation_input_fingerprint(
+        bars=changed_bars,
+        as_of_start=bars[20].available_from,
+        selection_metric="sharpe_ratio",
+        train_bars=22,
+        test_bars=5,
+        step_bars=5,
+        embargo_bars=1,
+    )
+    assert changed_input["market_data_sha256"] != validation_input[
+        "market_data_sha256"
+    ]
     assert report.gate_assessment["status"] == "INSUFFICIENT_EVIDENCE"
     assert report.gate_assessment["automatic_promotion"] is False
     assert len(report.report_hash) == 64
@@ -278,6 +352,125 @@ def test_real_static_validation_can_reach_adoption_and_shadow_start(
     )
     assert adoption["status"] == "ADOPTED_FOR_SHADOW"
     assert deployment["status"] == "ACTIVE"
+
+
+def test_shadow_adoption_rejects_unsupported_minute_execution(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    store = ResearchStore(ledger.engine)
+    spec = store.record_strategy_spec(
+        default_strategy_spec(
+            "momentum",
+            timeframe="1Min",
+            code_sha256=research_code_sha256(),
+        )
+    )
+    policy = RiskPolicy.from_yaml(settings.risk_policy_path)
+    restrictions = RestrictionRegistry.from_yaml(
+        settings.restricted_securities_path
+    )
+    report_id = _seed_eligible_report(
+        ledger,
+        spec=spec,
+        timeframe="1Min",
+        risk_policy=policy,
+        restrictions=restrictions,
+    )
+    objects = SystemObjectStore(ledger.engine, ledger)
+    objects.ensure_defaults()
+    shadow = ShadowRuntime(
+        ledger.engine,
+        store,
+        objects,
+        risk_policy=policy,
+        restrictions=restrictions,
+    )
+    shadow.initialize_virtual_account()
+    with pytest.raises(ValueError, match="supports 1Day strategies only"):
+        shadow.adoption_preview(
+            strategy_spec_id=spec.strategy_spec_id,
+            validation_report_id=report_id,
+        )
+
+
+def test_shadow_computation_crossing_open_cannot_create_a_late_fill(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    market = MarketDataStore(ledger.engine)
+    store = ResearchStore(ledger.engine)
+    bars = _regime_bars(count=25)
+    market.insert_bars(bars[:-2], raw_object_id="TEST_RAW")
+    spec = store.record_strategy_spec(
+        default_strategy_spec(
+            "momentum",
+            timeframe="1Day",
+            code_sha256=research_code_sha256(),
+        )
+    )
+    policy = RiskPolicy.from_yaml(settings.risk_policy_path)
+    restrictions = RestrictionRegistry.from_yaml(
+        settings.restricted_securities_path
+    )
+    report_id = _seed_eligible_report(
+        ledger,
+        spec=spec,
+        timeframe="1Day",
+        risk_policy=policy,
+        restrictions=restrictions,
+    )
+    objects = SystemObjectStore(ledger.engine, ledger)
+    objects.ensure_defaults()
+    opening = MarketSessionClock("XNYS").daily_bar_session_open(
+        bars[-1].event_time
+    )
+    clock = [opening - timedelta(seconds=1)]
+    shadow = ShadowRuntime(
+        ledger.engine,
+        store,
+        objects,
+        risk_policy=policy,
+        restrictions=restrictions,
+        now_provider=lambda: clock[0],
+    )
+    shadow.initialize_virtual_account()
+    shadow.adopt_strategy(
+        strategy_spec_id=spec.strategy_spec_id,
+        validation_report_id=report_id,
+        reason="Timing regression fixture",
+        approved_by="test-admin",
+    )
+    shadow.start_deployment(
+        strategy_spec_id=spec.strategy_spec_id,
+        symbol="AAPL",
+        initial_cash=Decimal("100000"),
+        requested_by="test-admin",
+    )
+    market.insert_bars((bars[-2],), raw_object_id="TEST_RAW")
+    original_build = shadow.features.build
+
+    def slow_build(**kwargs):  # type: ignore[no-untyped-def]
+        snapshot = original_build(**kwargs)
+        clock[0] = opening + timedelta(seconds=1)
+        return snapshot
+
+    with patch.object(shadow.features, "build", side_effect=slow_build):
+        asyncio.run(
+            shadow.tick(trigger="cross-open", new_exposure_paused=False)
+        )
+    with ledger.engine.connect() as connection:
+        plans = connection.execute(select(shadow_trade_plans)).all()
+    assert plans == []
+
+    market.insert_bars((bars[-1],), raw_object_id="TEST_RAW")
+    clock[0] = bars[-1].available_from + timedelta(seconds=1)
+    asyncio.run(shadow.tick(trigger="next-bar", new_exposure_paused=False))
+    assert not any(
+        event["event_type"] == "VIRTUAL_FILL" for event in shadow.events()
+    )
 
 
 def test_pbo_and_deflated_sharpe_diagnostics_are_bounded_and_deterministic() -> None:

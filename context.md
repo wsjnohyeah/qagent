@@ -4,12 +4,13 @@ Last updated: 2026-09-06 PDT
 
 Context format: v1
 
-Current phase: implementation foundations through Phase 7 are locally implemented, including
-the four pre-cloud hardening milestones, `3b3926e` correctness remediation, and a disabled-by-
-default Alpaca Paper submission/reconciliation boundary; the first external Paper order,
-cloud deployment, and statistical/elapsed production evidence remain open
+Current phase: implementation foundations through the Phase 7 broker boundary are locally
+implemented, including the four pre-cloud hardening milestones and two independent-review
+remediation passes. Alpaca Paper probing/reconciliation is present, but order authorization is
+code-blocked until a separately validated Paper execution lifecycle exists; cloud deployment
+and statistical/elapsed production evidence remain open
 
-Current documented baseline: C032 — `Build guarded Alpaca paper execution`
+Current documented baseline: C034 — `Close Paper authorization and recovery gaps`
 
 ## Purpose and authority
 
@@ -50,7 +51,8 @@ A Git commit cannot contain its own content-derived hash without changing that h
   The social aggregate adapter is implemented but disabled by default. The LLM transport and
   routing layer has passed bounded live OpenAI and Meta probes. ML forecast tooling is now
   connected to the research evidence graph. A separate Alpaca Paper broker adapter is now
-  implemented but disabled by default; no live-money adapter or mode exists.
+  implemented but disabled by default and fail-closed for current Shadow certificates; no
+  live-money adapter or mode exists.
 - Phase 3A persists immutable evidence packets, feature snapshots, strategy specifications,
   experiment runs, and backtest trades. Three deterministic baselines run with next-bar
   execution and nonzero commission/slippage; their output is infrastructure evidence only.
@@ -118,36 +120,42 @@ A Git commit cannot contain its own content-derived hash without changing that h
   covered by a gate-eligible report and separate human confirmations. Every attempted
   exposure persists candidate → deterministic risk decision → approved plan → open-price
   risk review → virtual order/fill lineage, including account context and known decision-bar
-  liquidity. Observation, approval and persistence use actual runtime timestamps; a plan must
-  be durable before its market open, and reward/risk plus quantity are recalculated from that
-  open. Missed or late bars are recorded/cancelled and never fabricated as forward fills.
+  liquidity. Observation, decision completion, pending persistence, and durable activation use
+  actual runtime timestamps; a plan becomes `OPEN` only after a post-commit check before its
+  market open, and reward/risk plus quantity are recalculated from that open. Missed or late
+  bars are recorded/cancelled and never fabricated as forward fills. Forward Shadow currently
+  rejects non-`1Day` strategies at adoption.
   Active deployments recheck their exact contract before every tick and move to
   `REVALIDATION_REQUIRED` after an engine/config mismatch. Every strategy/symbol deployment is
   now an attribution sleeve under one
   `SHARED_MASTER` virtual account; open plans atomically reserve shared cash and concurrent
   risk and settle P&L once. It processes each stored bar idempotently. The literal multi-session buy-
-  and-hold benchmark is research-only. A separately confirmed Phase 7 enrollment may mirror
-  only newly created approved plans to Alpaca Paper; Shadow itself makes no broker call.
+  and-hold benchmark is research-only. Shadow itself makes no broker call.
 - Phase 7 persists Paper enrollments, deterministic client-order intents, broker lifecycle
   events, account/position snapshots, and runtime runs through Alembic revision
-  `20260906_0028`. The only broker host is exactly `paper-api.alpaca.markets`. Submission is
-  disabled by default and needs Paper mode, a separate administrator-confirmed deployment
-  enrollment, an enabled pipeline, and a confirmed global resume.
-- The first Paper contract is long, whole-share, price-capped GTC bracket execution. It
-  queries Alpaca by stable client ID before every retry, cancels unfilled entries after plan
-  expiry, and blocks new exposure on account identity mismatch, broker blocks, insufficient
-  buying power, account floor/daily loss, per-trade/concurrent risk, stale exact contracts,
-  or unmanaged broker positions. Pause does not stop reconciliation or confirmed cancel.
+  `20260906_0030`. The only broker host is exactly `paper-api.alpaca.markets`.
+- Existing one-bar Shadow certificates cannot authorize a different Paper broker lifecycle.
+  Paper requires `alpaca_day_limit_bracket_one_session@0.1.0`, which no current validator
+  issues, so enrollment/submission is intentionally blocked. The adapter uses account-bound
+  intents, stable client IDs, Alpaca price increments, DAY brackets, and current authorization
+  before every POST. Partial-fill expiry cancels the remaining entry, but any nonzero broker
+  position remains `POSITION_OPEN_REQUIRES_EXIT` and blocks new exposure. Read-only probing
+  and reconciliation remain available; automatic position exit and complete child-order
+  persistence remain open.
 - Code modification is represented by scoped change sessions. The web process exposes no
   shell; a trusted external coding worker must produce a diff and passing test record before
   a separate local-commit approval. Push and deployment remain external actions.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; this iteration starts from
-  synchronized commit `c396833`. No cloud host is configured yet.
+  synchronized commit `c4e0a34`. No cloud host is configured yet.
 - The independent `06b6853` fix verification is mapped item-by-item in
   `docs/REVIEW_REMEDIATION_2026-09-05.md`. The deterministic F01–F11 counterexamples are
   followed by the corrections from the `56bb979` review in
   `docs/REVIEW_REMEDIATION_2026-09-06.md`; production-only observation, TLS, backup/restore,
   and monitoring evidence are still reported as gates rather than simulated locally.
+- The independent `c6a8020` review is dispositioned in
+  `docs/REVIEW_REMEDIATION_C6A8020_2026-09-06.md`. Its Paper authorization, price, lifecycle,
+  coordinator rollover, Shadow cutoff, minute-scope, and validation-cache counterexamples now
+  have explicit fixes or fail-closed gates.
 - Tactical risk calls now require a typed external context covering catalyst applicability,
   known restriction status, liquidity, market-data health, macro-calendar knowledge, nearest
   major macro event, event-strategy approval, and duplicate intent. Unknown or unsafe facts
@@ -164,6 +172,8 @@ A Git commit cannot contain its own content-derived hash without changing that h
   Research LLM, constrained strategy generation, exact validation, and human-gated shadow
   readiness. Completed stages are not repeated after restart. Data/budget/human prerequisites
   are explicit `WAITING_*` outcomes; infrastructure failures use fenced bounded retries.
+  Older incomplete hourly groups are consumed before current work. Validation reuse requires
+  the full execution contract plus the exact market-data/window fingerprint.
 - Static exact-spec validation now has a subject-specific gate: multi-candidate breadth and
   PBO are N/A rather than impossible requirements, while folds, regimes, drawdown, positive
   OOS rate and Deflated Sharpe remain enforced. Deflated Sharpe uses the recorded market-
@@ -253,6 +263,10 @@ Development service ports bind only to loopback. The local Compose credentials a
   Alembic zero-drift. The rebuilt page served all new Strategy/Shadow/Coordinator labels.
 - C032 targeted and full local checks pass 121 tests plus Flake8 and strict mypy across 58
   source files. Docker/PostgreSQL drift and GitHub CI are rerun before handoff.
+- C034 local release gate passes 138 tests, Flake8, strict mypy across 58 source files,
+  authenticated local and Docker doctors, secret scan, JavaScript compilation, PostgreSQL
+  Alembic zero-drift, and fresh SQLite base-to-`20260906_0030` plus downgrade/re-upgrade.
+  PostgreSQL reports migration head `20260906_0030` and zero Paper orders.
 - The current local PostgreSQL Strategy registry contains nine historical deterministic
   baseline versions and no hybrid ML + LLM strategy yet. The revised UI now states this
   explicitly instead of implying missing lineage; a hybrid lineage will appear only after a
@@ -277,7 +291,7 @@ Development service ports bind only to loopback. The local Compose credentials a
 - Phase 2 fixtures verify primary/secondary source distinction, correction-version retention, SEC filing and XBRL normalization, IR feed parsing, and cross-document catalyst deduplication.
 - Alpaca REST results are now normalized to the internal half-open `[start, end)` contract;
   `market_data_quality@0.2.0` rejects out-of-window rows and live gap seeds use only 1Min bars.
-- Alembic migrations through `20260906_0028` own the Phase 3D/4/5/6/7 schema, including exact
+- Alembic migrations through `20260906_0030` own the Phase 3D/4/5/6/7 schema, including exact
   validation contracts, shadow decision lineage, fenced workflow/runtime leases, the event
   outbox, and strategy-generation attempt audit.
 - `make research-smoke`: passed with 100 deterministic daily bars, three immutable baseline
@@ -770,7 +784,7 @@ year or more of data.
 | Admin actions | `src/agentic_quant/admin_actions.py` | allowlist, immutable preview, expiry, exact confirmation, execution audit |
 | System Steward | `src/agentic_quant/steward.py` | current-state snapshot, exact citations, persistent conversations, action proposals |
 | Shadow runtime | `src/agentic_quant/shadow.py` | adopted-strategy deployments, idempotent virtual events, modeled cash/P&L |
-| Paper runtime | `src/agentic_quant/paper.py` | enrollment gates, durable order intents, account/risk checks, and broker reconciliation |
+| Paper runtime | `src/agentic_quant/paper.py` | fail-closed profile admission, account-bound durable intents, per-POST authorization, position-aware reconciliation |
 | Alpaca Paper adapter | `src/agentic_quant/providers/alpaca_paper.py` | paper-host-only account, position, idempotent bracket order, and cancellation calls |
 | Code sessions | `src/agentic_quant/code_changes.py` | scoped no-shell request/diff/test/commit-approval state machine |
 | Risk configuration | `configs/risk_policy.yaml` | versioned conservative limits |
@@ -794,7 +808,7 @@ year or more of data.
 | Research persistence | `src/agentic_quant/research_store.py` | immutable evidence/features/specs/experiments/trades and as-of reads |
 | Reference data | `src/agentic_quant/reference_data.py` | bitemporal corporate-action and historical-universe queries |
 | Research operations | `src/agentic_quant/research_cli.py` | synthetic smoke, stored-data baselines, parity audit, experiment listing |
-| Validation engine | `src/agentic_quant/validation.py` | rolling train/embargo/test selection, regime reports, selection diagnostics |
+| Validation engine | `src/agentic_quant/validation.py` | rolling train/embargo/test selection, regime reports, selection diagnostics, exact input fingerprints |
 | Research gate | `configs/research_promotion_policy.yaml` | versioned PBO, DSR, sample, regime, positive-fold, and drawdown thresholds |
 | LLM gateway | `src/agentic_quant/llm.py` | versioned workload routing and bounded OpenAI/Meta Responses calls |
 | LLM persistence | `src/agentic_quant/llm_store.py` | immutable route revisions, source/config lineage, output, usage, latency, and status |
@@ -804,7 +818,7 @@ year or more of data.
 | ML training/registry | `src/agentic_quant/ml.py`, `configs/ml_policy.yaml` | PIT labels, logistic/stump walk-forward, calibration, drift, JSON registry, forecasts |
 | Strategy generator | `src/agentic_quant/strategy_generation.py` | evidence/forecast-bound LLM generation, adversarial critique, constrained research DSL |
 | Runtime worker | `src/agentic_quant/worker.py` | supervised shadow and autonomous research schedulers with persistent heartbeats |
-| Schema migrations | `migrations/` | Alembic schema history through Paper revision `20260906_0028` |
+| Schema migrations | `migrations/` | Alembic schema history through Paper account-binding revision `20260906_0030` |
 
 ## Current executable risk baseline
 
@@ -2472,8 +2486,9 @@ Ordered near-term work:
 
 1. Select the VPS/cloud provider, domain/TLS, backup/monitoring, and secret-delivery inputs;
    then execute the guarded bootstrap against a fresh production data plane.
-2. Run a read-only Alpaca Paper probe in the intended environment, review one exact
-   enrollment, and let the administrator explicitly decide when to permit the first order.
+2. Run a read-only Alpaca Paper probe in the intended environment. Build and validate the
+   separate Paper execution profile, nested-child lifecycle, and deterministic session-close
+   exit before any enrollment or external order.
 3. Run production long-horizon backfill, enable paid coordinator stages only after route/USD-
    budget review, and collect Phase 5 statistical plus continuous-shadow evidence.
 4. Continue interactive UI review and add account/coordinator affordances where operator use
@@ -2493,10 +2508,10 @@ Ordered near-term work:
 - Notification channels beyond the dashboard.
 - Whether credit spreads enter the first paper release.
 
-None of these blocks local implementation or fixture testing. Public exposure, the first
-external Paper order, and cloud deployment remain gated until their corresponding decisions
-are made. Phase 7 code is now implemented in the user-requested pre-cloud position; no Paper
-order was used as a build test.
+None of these blocks local implementation or fixture testing. Public exposure and cloud
+deployment remain gated until their corresponding decisions are made. The first external
+Paper order is additionally blocked by the missing compatible execution certificate and
+position-exit lifecycle. No Paper order was used as a build test.
 
 ### C030 — `Build shared account and autonomous bootstrap`
 
@@ -2674,6 +2689,68 @@ order was used as a build test.
     research path is verified through a safe LLM abstention. Cloud infrastructure/TLS/secrets/
     backup/monitoring, production-scale statistical evidence, a naturally accepted live-model
     generation/critique path, and elapsed Shadow/Paper observation remain open.
+
+### D040 — Paper execution requires its own validated lifecycle
+
+- Date: 2026-09-06 PDT.
+- The independent review of `c6a8020` demonstrated that the existing next-open, one-bar
+  Shadow certificate did not match the initial broker bracket's possible entry and holding
+  behavior. It also reproduced unsafe retry, price-increment, partial-fill, scheduler rollover,
+  and forward-time edge cases.
+- Decision: do not treat an idempotent broker adapter as a validated execution strategy.
+  Existing Shadow certificates cannot enroll for Paper. A future
+  `alpaca_day_limit_bracket_one_session@0.1.0` validator must model the same broker entry,
+  expiry, child-order, partial-fill, and deterministic position-exit rules before the first
+  external order.
+- Decision: every POST rechecks present authorization and binds its intent to one broker
+  account. Broker position evidence, not parent-order status alone, closes a lifecycle.
+- Decision: Forward Shadow is explicitly daily-only and activates a newly persisted plan only
+  after a post-commit cutoff check. Interrupted pending activations cancel and release their
+  reservation on recovery.
+- Formal record: ADR 0025 and
+  `docs/REVIEW_REMEDIATION_C6A8020_2026-09-06.md`.
+
+### C034 — `Close Paper authorization and recovery gaps`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-06 PDT.
+- User intent: finish the local end-to-end readiness audit, exercise the real ML + LLM path,
+  then assess the independent `c6a8020` review and fix every necessary reproducible issue.
+- Scope:
+  - Reauthorized every new/recovered Paper POST against current enrollment, deployment, plan,
+    restriction, broker account, buying power, and final-price risk; bound durable intents to
+    one broker account under Alembic `20260906_0030`.
+  - Added Alpaca tick-size normalization, DAY time-in-force, nested-leg lookup, position-aware
+    lifecycle completion, partial-entry expiry cancellation, and durable open-position blocks.
+  - Rejected Shadow-only certificates at Paper enrollment and exposed the required independent
+    profile in API/UI. No current production path can produce that profile, so external Paper
+    submission is fail-closed pending the matching validator and automatic exit lifecycle.
+  - Made Shadow daily-only, based risk on decision-completed time, and added post-commit plan
+    activation plus interrupted-activation cleanup. Daily plan expiry is the next session close.
+  - Recovered incomplete coordinator groups across UTC-hour boundaries and made validation
+    cache reuse depend on the full execution contract plus exact market-data/window input hash.
+  - Added ADR 0025, the itemized review disposition, and corrected README, deployment,
+    runbook, project-state, master-context, and Paper Control Center claims.
+- Architecture/decision impact:
+  - A broker connectivity layer, an execution strategy, and empirical authorization are three
+    separate states. The current source may bootstrap paused and probe Paper read-only, but it
+    cannot truthfully claim unattended Paper readiness.
+  - R01, R03, R05, R06, and R07 are directly corrected. R02 is closed by authorization gating.
+    R04's unsafe completion is corrected, while automatic broker position exit and complete
+    child-order persistence remain explicit prerequisites to producing the R02 profile.
+- Validation:
+  - `make release-check` passed: Flake8, strict mypy across 58 source files, all 138 tests,
+    authenticated local doctor, secret scan, Docker rebuild/doctor, and PostgreSQL Alembic
+    zero-drift.
+  - A fresh SQLite database upgraded base-to-`20260906_0030`, downgraded to `0029`, re-upgraded,
+    and reported no migration drift. PostgreSQL is at `0030`; `paper_orders` remains zero.
+  - The browser JavaScript compiles. Adverse tests cover all unknown-retry authorization
+    variants, account switching, accepted/lost responses, partial fills, price boundaries,
+    cross-hour recovery, cross-open computation, daily-only admission, and input-cache drift.
+- Expected global state after commit:
+  - Local source is ready for a guarded, paused cloud bootstrap and read-only Paper probe. The
+    first external Paper order remains code-blocked pending a matching execution validator,
+    nested child-order lifecycle, and deterministic position exit. No live-money path exists.
 
 ## Template for future commit entries
 

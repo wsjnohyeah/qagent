@@ -57,6 +57,7 @@ def test_admin_session_is_required_and_csrf_protects_writes(
         assert "ML + Research LLM decision chain" in page.text
         assert "EXECUTION_RISK_REVIEW" in page.text
         assert "Alpaca paper trading" in page.text
+        assert "Paper order submission is fail-closed" in page.text
         assert "Live money is impossible" in page.text
         assert client.get("/health/live").status_code == 200
         assert client.get("/v1/system/status").status_code == 401

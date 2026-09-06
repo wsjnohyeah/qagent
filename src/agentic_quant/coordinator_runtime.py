@@ -33,7 +33,12 @@ from agentic_quant.research_store import ResearchStore
 from agentic_quant.risk import RestrictionRegistry
 from agentic_quant.shadow import ShadowRuntime
 from agentic_quant.strategy_generation import HybridStrategyGenerator
-from agentic_quant.validation import WalkForwardValidator, load_promotion_gate_policy
+from agentic_quant.validation import (
+    WalkForwardValidator,
+    load_promotion_gate_policy,
+    validation_execution_contract,
+    validation_input_fingerprint,
+)
 
 
 class ResearchCoordinatorHandler:
@@ -365,30 +370,6 @@ class ResearchCoordinatorHandler:
         spec = self.research.strategy_spec(str(spec_id))
         if spec is None:
             return {"outcome": "WAITING_STRATEGY_SPEC"}
-        expected_risk = self.shadow.effective_risk_policy().model_dump(mode="json")
-        prior = next(
-            (
-                item
-                for item in self.research.recent_validation_reports(limit=500)
-                if dict(item.get("validated_strategy_spec_ids") or {}).get(
-                    str(spec.strategy_type)
-                )
-                == spec.strategy_spec_id
-                and dict(item.get("execution_contract_json") or {}).get(
-                    "risk_policy"
-                )
-                == expected_risk
-            ),
-            None,
-        )
-        if prior is not None:
-            return {
-                "outcome": "REUSED",
-                "validation_report_id": str(prior["validation_report_id"]),
-                "eligible_for_human_review": bool(
-                    dict(prior["gate_assessment"]).get("eligible_for_human_review")
-                ),
-            }
         as_of = datetime.fromisoformat(str(context["as_of"]))
         bars = self.research.load_bars(
             symbol=str(context["symbol"]),
@@ -400,6 +381,55 @@ class ResearchCoordinatorHandler:
                 "outcome": "WAITING_VALIDATION_HISTORY",
                 "bar_count": len(bars),
                 "required_bars": 72,
+            }
+        validation_start = bars[20].available_from
+        costs = BacktestCostModel()
+        initial_equity = Decimal(
+            str(self.shadow.virtual_account()["initial_cash"])
+        )
+        expected_contract = validation_execution_contract(
+            validation_subject="static_strategy",
+            validated_strategy_spec_ids={
+                str(spec.strategy_type): spec.strategy_spec_id
+            },
+            cost_model=costs,
+            risk_policy=self.shadow.effective_risk_policy(),
+            restriction_registry_version=self.restrictions.version,
+            initial_equity=initial_equity,
+        )
+        expected_input = validation_input_fingerprint(
+            bars=bars,
+            as_of_start=validation_start,
+            selection_metric="sharpe_ratio",
+            train_bars=40,
+            test_bars=10,
+            step_bars=10,
+            embargo_bars=1,
+        )
+        prior = next(
+            (
+                item
+                for item in self.research.recent_validation_reports(limit=500)
+                if dict(item.get("validated_strategy_spec_ids") or {}).get(
+                    str(spec.strategy_type)
+                )
+                == spec.strategy_spec_id
+                and dict(item.get("execution_contract_json") or {})
+                == expected_contract
+                and dict(item.get("robustness_metrics") or {}).get(
+                    "validation_input"
+                )
+                == expected_input
+            ),
+            None,
+        )
+        if prior is not None:
+            return {
+                "outcome": "REUSED",
+                "validation_report_id": str(prior["validation_report_id"]),
+                "eligible_for_human_review": bool(
+                    dict(prior["gate_assessment"]).get("eligible_for_human_review")
+                ),
             }
         try:
             report = WalkForwardValidator(
@@ -414,17 +444,15 @@ class ResearchCoordinatorHandler:
             ).run(
                 symbol=str(context["symbol"]),
                 timeframe=str(context["timeframe"]),
-                as_of_start=bars[20].available_from,
+                as_of_start=validation_start,
                 as_of_end=as_of,
                 code_git_sha=self.settings.source_git_sha or "UNAVAILABLE",
                 train_bars=40,
                 test_bars=10,
                 step_bars=10,
                 embargo_bars=1,
-                initial_equity=Decimal(
-                    str(self.shadow.virtual_account()["initial_cash"])
-                ),
-                cost_model=BacktestCostModel(),
+                initial_equity=initial_equity,
+                cost_model=costs,
                 strategy_spec=spec,
             )
         except ValueError as exc:

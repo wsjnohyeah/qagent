@@ -3,8 +3,7 @@
 ## Current
 
 - Implemented foundations through the corrected Phase 6.1 baseline, the four pre-cloud
-  hardening milestones, and the Phase 7 Alpaca Paper boundary pass bounded-development
-  validation, including
+  hardening milestones, and a fail-closed Phase 7 Alpaca Paper boundary, including
   Phase 1B open-session checks, corrected point-in-time research/ML contracts, constrained
   ML + LLM strategy generation, and the authenticated Control Center/System Steward/shadow
   decision lineage. Phase 5 statistical promotion and Phase 6 continuous-operation exit
@@ -40,7 +39,7 @@
 - Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
   experiment runs, backtest trades, corporate actions, historical universe membership,
   feature parity checks, and walk-forward reports are stored through Alembic revision
-  `20260906_0029`, including exact validation contracts, shadow risk lineage, fenced workflow
+  `20260906_0030`, including exact validation contracts, shadow risk lineage, fenced workflow
   attempts, generation-attempt audit, runtime leases, and the event outbox.
 - The Phase 3 runner provides buy-and-hold, long/cash momentum, and long/cash
   mean-reversion baselines with next-bar execution, commission, slippage, metrics, hashes,
@@ -95,16 +94,24 @@
 - Active deployments recheck the exact execution contract on every tick. Engine, cost, risk,
   feature, or restriction changes move stale deployments to `REVALIDATION_REQUIRED` and
   cancel reserved plans without resetting account history.
-- The Phase 7 Alpaca Paper adapter consumes only newly created plans from separately
-  confirmed Paper enrollments. It persists a deterministic client-order intent before I/O,
-  recovers unknown submissions by client ID, submits price-capped GTC brackets, reconciles
-  account/position/order state, expires unfilled entries, and permits confirmed cancellation.
-  Account identity, buying power, floor/daily-loss, trade/concurrent risk, unmanaged positions,
-  pipeline state, and global pause all fail closed. The live host is rejected in settings.
+- A Shadow plan is first persisted as `PENDING_ACTIVATION` and becomes executable only after
+  a post-commit clock check proves durability before the next session open. Shadow admission
+  explicitly supports `1Day` only; unsupported minute strategies fail before deployment.
+- The Phase 7 Alpaca Paper adapter persists deterministic, broker-account-bound intents,
+  performs idempotent client-ID recovery, applies Alpaca price increments, submits DAY bracket
+  requests, and reconciles account/position/order state. Every POST rechecks current
+  enrollment, deployment, plan, contract, account, restriction, buying power, and final-price
+  risk. Partial entry expiry cancels the remainder, but a nonzero position remains
+  `POSITION_OPEN_REQUIRES_EXIT` and blocks expansion.
+- Existing Shadow one-bar validation cannot authorize the different Paper lifecycle. Paper
+  requires `alpaca_day_limit_bracket_one_session@0.1.0`; no current validator issues it, so
+  Paper enrollment/submission is intentionally fail-closed. Read-only account probing and
+  reconciliation remain available. The live host remains impossible.
 - A persistent hourly coordinator owns the market-data → feature → ML → forecast → Research
-  LLM → constrained strategy → exact-validation → shadow-readiness DAG. It resumes fenced
-  jobs after failure, records `WAITING_*` business gates, defaults paid research off, and
-  cannot promote/adopt/execute without human confirmation.
+  LLM → constrained strategy → exact-validation → shadow-readiness DAG. It recovers older
+  incomplete hourly groups before current work, records `WAITING_*` business gates, defaults
+  paid research off, and cannot promote/adopt/execute without human confirmation. Validation
+  reuse is bound to the exact contract plus market-data and window fingerprints.
 - The global new-exposure pause is enforced inside the shadow tick boundary, so a manually
   confirmed tick cannot bypass the scheduler's kill switch.
 - Tactical risk evaluation now requires explicit, auditable catalyst, restriction-status,
@@ -114,13 +121,13 @@
   stop/target geometry used identically by research and shadow. Candidate/snapshot mismatches
   and future signal/feature timestamps also reject.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; local and remote `main`
-  were synchronized at `3b3926e` before this implementation iteration.
+  were synchronized at `c4e0a34` before this implementation iteration.
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases.
-- The current end-to-end audit passes 124 tests, strict typing across 58 source files,
-  authenticated local
-  and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, schema migration checks, zero
-  PostgreSQL schema drift, and the repository secret scan.
+- The current end-to-end audit passes 138 tests, strict typing across 58 source files,
+  authenticated local and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, fresh schema
+  upgrade/downgrade/re-upgrade checks, zero PostgreSQL schema drift, and the repository secret
+  scan.
 - A real bounded AAPL coordinator run trained 734 point-in-time examples, persisted two ML
   candidates and a one-bar forecast, supplied 14 time-safe feature/forecast/document items to
   `gpt-5.6-sol`, and received a citation-valid `ABSTAIN` at 0.90 confidence. The selected ML
@@ -133,6 +140,10 @@
   subject-aware admission, actual-time forward guards, calendar-correct ML labels,
   execution-price revalidation, active-contract quarantine, legacy event reconciliation,
   and search-trial accounting.
+- The independent review of `c6a8020` is dispositioned in
+  `docs/REVIEW_REMEDIATION_C6A8020_2026-09-06.md`. Its R01–R07 counterexamples now have
+  direct fixes or explicit fail-closed scope gates; the report's G01/G02/G04/G05 product and
+  production-evidence work remains visible rather than being claimed complete.
 - Phase 4 adds point-in-time document retrieval, `research_analysis@0.2.0`, exact quotation
   validation, deterministic abstention, atomic estimated-USD reservations, and Decision
   Inspector graph `ai_infrastructure_graph@0.1.0`.
@@ -170,9 +181,9 @@
 
 1. Select cloud/VPS, domain/TLS, backup/monitoring, and secret-delivery inputs; then run the
    existing one-command bootstrap on a fresh production data plane.
-2. Run the read-only Alpaca Paper account probe in the intended environment, review and
-   confirm one exact enrollment, then let the administrator decide when to send the first
-   Paper order. Build verification itself sends no order.
+2. Run the read-only Alpaca Paper account probe in the intended environment. Before any
+   enrollment or external order, build the matching Paper execution validator, nested-order
+   lifecycle, and deterministic session-close position exit required by ADR 0025.
 3. Run production-scale backfill, enable paid coordinator stages only after budget review,
    and collect Phase 5 statistical plus continuous-shadow evidence.
 4. Continue interactive Phase 6.1 UI review with real operator navigation and refine labels;
@@ -185,8 +196,9 @@
 
 - Cloud deployment needs the VPS/provider, domain/TLS plan, backup/monitoring choices, and
   secret delivery mechanism. The GitHub repository is configured.
-- Sending the first Paper order remains an explicit operator decision. The adapter is built,
-  but no fixture test or deployment health check authorizes an external order.
+- Sending the first Paper order is code-blocked until a compatible Paper execution profile
+  exists, and remains an explicit operator decision afterward. No fixture test or deployment
+  health check authorizes an external order.
 
 ## Decisions
 
@@ -231,3 +243,5 @@
   ingestion IDs without rewriting immutable events.
 - ADR 0024: isolate Alpaca Paper behind an exact host, durable idempotent intents, account and
   risk reconciliation, and per-deployment administrator confirmation; retain no live path.
+- ADR 0025: reject Shadow certificates at the Paper boundary; require a separately validated
+  Paper lifecycle, reauthorize every POST, and keep positions open until broker-flat evidence.

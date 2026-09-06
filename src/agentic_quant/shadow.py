@@ -181,6 +181,10 @@ class ShadowRuntime:
             )
         if str(spec.timeframe) != str(report.timeframe):
             raise ValueError("Validation report timeframe does not match the strategy")
+        if str(spec.timeframe) != "1Day":
+            raise ValueError(
+                "Forward Shadow currently supports 1Day strategies only"
+            )
         if dict(spec.data_requirements_json or {}).get("shadow_deployable") is not True:
             raise ValueError(
                 "This strategy is a research benchmark and has no matching shadow "
@@ -588,7 +592,7 @@ class ShadowRuntime:
                 == shadow_signal_candidates.c.shadow_deployment_id,
             )
             .where(
-                (shadow_trade_plans.c.status == "OPEN")
+                shadow_trade_plans.c.status.in_(("OPEN", "PENDING_ACTIVATION"))
                 & shadow_signal_candidates.c.shadow_deployment_id.in_(deployment_ids)
             )
         ).all()
@@ -597,7 +601,9 @@ class ShadowRuntime:
                 update(shadow_trade_plans)
                 .where(
                     (shadow_trade_plans.c.trade_plan_id == plan.trade_plan_id)
-                    & (shadow_trade_plans.c.status == "OPEN")
+                    & shadow_trade_plans.c.status.in_(
+                        ("OPEN", "PENDING_ACTIVATION")
+                    )
                 )
                 .values(status="CANCELLED", closed_at=closed_at)
             )
@@ -621,6 +627,7 @@ class ShadowRuntime:
                 strategy_specs.c.parameters_json,
                 strategy_adoptions.c.validation_report_id,
                 validation_reports.c.execution_contract_sha256,
+                validation_reports.c.execution_contract_json,
             )
             .join(
                 strategy_specs,
@@ -1047,13 +1054,19 @@ class ShadowRuntime:
             )
             return 0, 0
         observed_at = self._now()
+        created = self._cancel_interrupted_plan_activations(
+            deployment=deployment,
+            run_id=run_id,
+            lease_token=lease_token,
+            cancelled_at=observed_at,
+        )
         bars = self.research_store.load_bars(
             symbol=str(deployment["symbol"]),
             timeframe=str(deployment["timeframe"]),
             as_of_end=observed_at,
         )
         if len(bars) < 22:
-            return 0, 0
+            return 0, created
         quality_report = self.data_quality.require_bars(
             bars,
             symbol=str(deployment["symbol"]),
@@ -1067,12 +1080,12 @@ class ShadowRuntime:
             if last_processed is None or bar.event_time > last_processed
         ]
         if not new_bars:
-            return 0, 0
+            return 0, created
         # Forward shadow deliberately consumes only the newest completed bar. It
         # never reconstructs hypothetical orders for bars that arrived while the
         # worker was offline.
         decision_bar = new_bars[-1]
-        created = self._execute_open_plan(
+        created += self._execute_open_plan(
             deployment=deployment,
             execution_bar=decision_bar,
             run_id=run_id,
@@ -1088,7 +1101,10 @@ class ShadowRuntime:
             bars=tuple(bar for bar in bars if bar.event_time <= decision_bar.event_time),
         )
         action = self._signal_action(refreshed, snapshot.values)
+        decision_completed_at = self._now()
         candidate = decision = plan = evaluation_context = None
+        earliest_execution_at: datetime | None = None
+        pending_activation: dict[str, Any] | None = None
         lineage_values: list[dict[str, Any]] = []
         if action == SignalAction.LONG:
             earliest_execution_at = (
@@ -1096,10 +1112,10 @@ class ShadowRuntime:
                 if decision_bar.timeframe == "1Day"
                 else decision_bar.available_from
             )
-            expiry = snapshot.as_of + (
-                timedelta(days=7)
+            expiry = (
+                self.session_clock.next_daily_session_close(decision_bar.event_time)
                 if decision_bar.timeframe == "1Day"
-                else timedelta(minutes=5)
+                else snapshot.as_of + timedelta(minutes=5)
             )
             (
                 candidate,
@@ -1114,7 +1130,7 @@ class ShadowRuntime:
                 snapshot_id=snapshot.feature_snapshot_id,
                 snapshot_values=snapshot.values,
                 signal_time=snapshot.as_of,
-                evaluation_time=observed_at,
+                evaluation_time=decision_completed_at,
                 earliest_execution_at=earliest_execution_at,
                 exit_time=expiry,
                 planned_entry=decision_bar.close,
@@ -1159,7 +1175,7 @@ class ShadowRuntime:
                         execution_contract_sha256=refreshed[
                             "execution_contract_sha256"
                         ],
-                        created_at=observed_at,
+                        created_at=decision_completed_at,
                     )
                 )
                 account = self._account_state(refreshed, snapshot.as_of)
@@ -1221,11 +1237,16 @@ class ShadowRuntime:
                                 invalidation=plan.invalidation,
                                 targets_json=[str(value) for value in plan.targets],
                                 expires_at=plan.expires_at,
-                                status="OPEN",
-                                created_at=observed_at,
+                                status="PENDING_ACTIVATION",
+                                created_at=decision_completed_at,
                                 closed_at=None,
                             )
                         )
+                        pending_activation = {
+                            "trade_plan_id": plan.trade_plan_id,
+                            "reserved_cash": reserved_cash,
+                            "reserved_risk_usd": reserved_risk,
+                        }
                     else:
                         lineage_values[:] = [
                             value
@@ -1261,10 +1282,134 @@ class ShadowRuntime:
                 .values(
                     last_price=decision_bar.close,
                     last_processed_bar_time=decision_bar.event_time,
-                    updated_at=observed_at,
+                    updated_at=decision_completed_at,
                 )
             )
+        if pending_activation is not None:
+            assert earliest_execution_at is not None
+            durable_ready_at = self._now()
+            activated = durable_ready_at < earliest_execution_at
+            with self.engine.begin() as connection:
+                self._assert_runtime_lease(connection, lease_token)
+                changed = connection.execute(
+                    update(shadow_trade_plans)
+                    .where(
+                        (shadow_trade_plans.c.trade_plan_id
+                         == pending_activation["trade_plan_id"])
+                        & (shadow_trade_plans.c.status == "PENDING_ACTIVATION")
+                    )
+                    .values(
+                        status="OPEN" if activated else "CANCELLED",
+                        created_at=durable_ready_at,
+                        closed_at=None if activated else durable_ready_at,
+                    )
+                )
+                if int(changed.rowcount or 0) != 1:
+                    raise RuntimeError("Shadow plan activation lost its pending state")
+                if not activated:
+                    self.accounts.release_or_settle(
+                        account_id=str(refreshed["virtual_account_id"]),
+                        reserved_cash=Decimal(
+                            str(pending_activation["reserved_cash"])
+                        ),
+                        reserved_risk_usd=Decimal(
+                            str(pending_activation["reserved_risk_usd"])
+                        ),
+                        realized_pnl_delta=_ZERO,
+                        connection=connection,
+                    )
+            if not activated:
+                late_event = self._operational_event(
+                    deployment=refreshed,
+                    run_id=run_id,
+                    bar_id=decision_bar.bar_id,
+                    event_type="TRADE_PLAN_CANCELLED",
+                    event_time=durable_ready_at,
+                    payload={
+                        "trade_plan_id": pending_activation["trade_plan_id"],
+                        "reason_codes": ["PLAN_NOT_DURABLE_BEFORE_EXECUTION"],
+                        "earliest_execution_at": earliest_execution_at.isoformat(),
+                        "virtual_only": True,
+                    },
+                )
+                late_event["sequence"] = self._next_event_sequence(
+                    str(refreshed["shadow_deployment_id"])
+                )
+                with self.engine.begin() as connection:
+                    self._assert_runtime_lease(connection, lease_token)
+                    connection.execute(insert(shadow_events).values(**late_event))
+                created += 1
         return 1, created + len(lineage_values)
+
+    def _cancel_interrupted_plan_activations(
+        self,
+        *,
+        deployment: dict[str, Any],
+        run_id: str,
+        lease_token: str,
+        cancelled_at: datetime,
+    ) -> int:
+        """Fail closed after a crash between plan persistence and activation."""
+        with self.engine.connect() as connection:
+            rows = connection.execute(
+                select(
+                    shadow_trade_plans,
+                    shadow_signal_candidates.c.decision_bar_id,
+                )
+                .join(
+                    shadow_signal_candidates,
+                    shadow_signal_candidates.c.candidate_id
+                    == shadow_trade_plans.c.candidate_id,
+                )
+                .where(
+                    (shadow_signal_candidates.c.shadow_deployment_id
+                     == deployment["shadow_deployment_id"])
+                    & (shadow_trade_plans.c.status == "PENDING_ACTIVATION")
+                )
+            ).all()
+        if not rows:
+            return 0
+        next_sequence = self._next_event_sequence(
+            str(deployment["shadow_deployment_id"])
+        )
+        events: list[dict[str, Any]] = []
+        with self.engine.begin() as connection:
+            self._assert_runtime_lease(connection, lease_token)
+            for row in rows:
+                changed = connection.execute(
+                    update(shadow_trade_plans)
+                    .where(
+                        (shadow_trade_plans.c.trade_plan_id == row.trade_plan_id)
+                        & (shadow_trade_plans.c.status == "PENDING_ACTIVATION")
+                    )
+                    .values(status="CANCELLED", closed_at=cancelled_at)
+                )
+                if int(changed.rowcount or 0) != 1:
+                    continue
+                self.accounts.release_or_settle(
+                    account_id=str(deployment["virtual_account_id"]),
+                    reserved_cash=Decimal(str(row.reserved_cash)),
+                    reserved_risk_usd=Decimal(str(row.reserved_risk_usd)),
+                    realized_pnl_delta=_ZERO,
+                    connection=connection,
+                )
+                event = self._operational_event(
+                    deployment=deployment,
+                    run_id=run_id,
+                    bar_id=str(row.decision_bar_id),
+                    event_type="TRADE_PLAN_CANCELLED",
+                    event_time=cancelled_at,
+                    payload={
+                        "trade_plan_id": str(row.trade_plan_id),
+                        "reason_codes": ["INTERRUPTED_BEFORE_DURABLE_ACTIVATION"],
+                        "virtual_only": True,
+                    },
+                )
+                event["sequence"] = next_sequence + len(events)
+                events.append(event)
+            if events:
+                connection.execute(insert(shadow_events), events)
+        return len(events)
 
     def _require_revalidation(
         self,

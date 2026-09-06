@@ -119,6 +119,42 @@ class AutonomousCoordinator:
             as_of=as_of,
             timeframe=timeframe,
         )
+        backlog_group_ids = self.jobs.incomplete_group_ids(
+            job_type_prefix="coordinator.",
+            exclude_group_id=group_id,
+        )
+        backlog_summaries = []
+        processed_total = 0
+        for backlog_group_id in backlog_group_ids:
+            remaining = (
+                None
+                if max_jobs is None
+                else max(0, max_jobs - processed_total)
+            )
+            if remaining == 0:
+                break
+            summary = await self._run_group(
+                backlog_group_id,
+                max_jobs=remaining,
+            )
+            backlog_summaries.append(summary)
+            processed_total += int(summary["processed_this_run"])
+        remaining = (
+            None if max_jobs is None else max(0, max_jobs - processed_total)
+        )
+        current = await self._run_group(group_id, max_jobs=remaining)
+        current["processed_this_run"] = (
+            int(current["processed_this_run"]) + processed_total
+        )
+        current["backlog_groups"] = backlog_summaries
+        return current
+
+    async def _run_group(
+        self,
+        group_id: str,
+        *,
+        max_jobs: int | None,
+    ) -> dict[str, Any]:
         recovered = self.jobs.requeue_stale(
             job_group_id=group_id,
             stale_after=timedelta(minutes=10),
@@ -126,7 +162,7 @@ class AutonomousCoordinator:
         processed = 0
         # Re-read after every pass so newly-completed parents unlock their child
         # jobs in the same cycle. A bounded loop cannot spin indefinitely.
-        for _ in range(len(symbols) * len(COORDINATOR_STAGES)):
+        for _ in range(max(1, len(self.jobs.jobs(job_group_id=group_id)))):
             progressed = False
             current = self.jobs.jobs(job_group_id=group_id)
             by_id = {item.workflow_job_id: item for item in current}

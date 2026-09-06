@@ -1523,6 +1523,7 @@ paper_orders = Table(
     ),
     Column("client_order_id", String(48), nullable=False, unique=True),
     Column("broker_order_id", String(80), nullable=True, unique=True),
+    Column("broker_account_id", String(80), nullable=True, index=True),
     Column("symbol", String(24), nullable=False, index=True),
     Column("side", String(8), nullable=False),
     Column("quantity", Numeric(24, 10), nullable=False),

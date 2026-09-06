@@ -46,6 +46,74 @@ _ZERO = Decimal("0")
 SELECTION_METRICS = ("sharpe_ratio", "sortino_ratio", "total_return")
 _NORMAL = NormalDist()
 _EULER_MASCHERONI = 0.5772156649015329
+VALIDATION_INPUT_VERSION = "walk_forward_validation_input@0.1.0"
+
+
+def validation_execution_contract(
+    *,
+    validation_subject: str,
+    validated_strategy_spec_ids: dict[str, str],
+    cost_model: BacktestCostModel,
+    risk_policy: RiskPolicy,
+    restriction_registry_version: str,
+    initial_equity: Decimal,
+) -> dict[str, Any]:
+    return {
+        "subject": validation_subject,
+        "strategy_spec_ids": validated_strategy_spec_ids,
+        "feature_set_version": FEATURE_SET_VERSION,
+        "backtest_engine_version": BACKTEST_ENGINE_VERSION,
+        "cost_model": cost_model.model_dump(mode="json"),
+        "risk_policy": risk_policy.model_dump(mode="json"),
+        "restriction_registry_version": restriction_registry_version,
+        "initial_equity": str(initial_equity),
+        "execution_profile": BASELINE_EXECUTION_PROFILE_VERSION,
+    }
+
+
+def validation_input_fingerprint(
+    *,
+    bars: tuple[StockBar, ...],
+    as_of_start: datetime,
+    selection_metric: str,
+    train_bars: int,
+    test_bars: int,
+    step_bars: int,
+    embargo_bars: int,
+) -> dict[str, Any]:
+    """Identify the market data and windowing inputs behind a cached report."""
+    material = [
+        {
+            "symbol": bar.symbol,
+            "timeframe": bar.timeframe,
+            "event_time": bar.event_time.isoformat(),
+            "available_from": bar.available_from.isoformat(),
+            "open": str(bar.open),
+            "high": str(bar.high),
+            "low": str(bar.low),
+            "close": str(bar.close),
+            "volume": bar.volume,
+            "trade_count": bar.trade_count,
+            "vwap": str(bar.vwap) if bar.vwap is not None else None,
+            "source": bar.source,
+            "feed": bar.feed,
+        }
+        for bar in bars
+    ]
+    return {
+        "version": VALIDATION_INPUT_VERSION,
+        "market_data_sha256": _canonical_hash(material),
+        "bar_count": len(bars),
+        "as_of_start": as_of_start.isoformat(),
+        "source_max_available_from": (
+            max(bar.available_from for bar in bars).isoformat() if bars else None
+        ),
+        "selection_metric": selection_metric,
+        "train_bars": train_bars,
+        "test_bars": test_bars,
+        "step_bars": step_bars,
+        "embargo_bars": embargo_bars,
+    }
 
 
 class PromotionGatePolicy(FrozenModel):
@@ -437,6 +505,15 @@ class WalkForwardValidator:
                 f"requires {required}, found {len(decision_indices)}"
             )
         costs = cost_model or BacktestCostModel()
+        validation_input = validation_input_fingerprint(
+            bars=bars,
+            as_of_start=as_of_start,
+            selection_metric=selection_metric,
+            train_bars=train_bars,
+            test_bars=test_bars,
+            step_bars=step_bars,
+            embargo_bars=embargo_bars,
+        )
         strategy_code_hash = research_code_sha256()
         folds: list[WalkForwardFold] = []
         validated_strategy_spec_ids: dict[str, str] = {}
@@ -557,6 +634,7 @@ class WalkForwardValidator:
                 symbol=symbol,
                 timeframe=timeframe,
             ),
+            validation_input=validation_input,
             code_git_sha=code_git_sha,
         )
         self.store.record_validation_report(report)
@@ -662,6 +740,7 @@ class WalkForwardValidator:
         cost_model: BacktestCostModel,
         initial_equity: Decimal,
         trial_count: int,
+        validation_input: dict[str, Any],
         code_git_sha: str,
     ) -> WalkForwardValidationReport:
         test_returns = [fold.selected_test_metrics.total_return for fold in folds]
@@ -713,17 +792,14 @@ class WalkForwardValidator:
             tuple(test_returns),
             number_of_trials=search_trial_count,
         )
-        execution_contract = {
-            "subject": validation_subject,
-            "strategy_spec_ids": validated_strategy_spec_ids,
-            "feature_set_version": FEATURE_SET_VERSION,
-            "backtest_engine_version": BACKTEST_ENGINE_VERSION,
-            "cost_model": cost_model.model_dump(mode="json"),
-            "risk_policy": self.risk_policy.model_dump(mode="json"),
-            "restriction_registry_version": self.restrictions.version,
-            "initial_equity": str(initial_equity),
-            "execution_profile": BASELINE_EXECUTION_PROFILE_VERSION,
-        }
+        execution_contract = validation_execution_contract(
+            validation_subject=validation_subject,
+            validated_strategy_spec_ids=validated_strategy_spec_ids,
+            cost_model=cost_model,
+            risk_policy=self.risk_policy,
+            restriction_registry_version=self.restrictions.version,
+            initial_equity=initial_equity,
+        )
         execution_contract_sha256 = _canonical_hash(execution_contract)
         robustness_metrics = {
             "combinatorial_purged_validation": pbo_metrics,
@@ -733,6 +809,7 @@ class WalkForwardValidator:
             ],
             "historical_trial_count_diagnostic": trial_count,
             "selection_search_trial_count": search_trial_count,
+            "validation_input": validation_input,
         }
         gate_assessment = assess_research_gate(
             policy=self.promotion_policy,

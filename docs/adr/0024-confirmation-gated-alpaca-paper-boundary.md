@@ -1,6 +1,6 @@
 # ADR 0024: Use a confirmation-gated, idempotent Alpaca Paper boundary
 
-- Status: Accepted
+- Status: Amended by ADR 0025
 - Date: 2026-09-06
 
 ## Context
@@ -28,9 +28,10 @@ submission boundary.
 4. The worker persists an order intent before network I/O and derives one deterministic
    Alpaca `client_order_id` per plan. Every first attempt and retry looks up that ID. An
    unknown transport outcome remains nonterminal and is reconciled/retried with the same ID.
-5. The first executable contract is long, whole-share, price-capped GTC bracket orders. The
-   entry is a limit at the validated plan price; stop and take-profit are attached. An
-   unfilled order is cancelled after plan expiry.
+5. The initial adapter shape was long, whole-share, price-capped GTC bracket orders. Review
+   established that this did not match the one-bar Shadow validation contract. ADR 0025 now
+   requires a separately validated DAY-bracket profile and keeps submission fail-closed until
+   its complete historical and broker lifecycle exists.
 6. Before new submission, the runtime rechecks Alpaca account blocks, buying power, account
    floor, daily loss, per-trade risk, concurrent risk, account identity, exact strategy
    contract, and unmanaged positions. Any unknown or conflicting condition blocks new

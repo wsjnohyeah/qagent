@@ -1,6 +1,6 @@
 # Agentic Quant Trading System
 
-A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains implemented and locally verified foundations through **Phase 7**: safety controls, read-only market data, event/document ingestion, point-in-time research, evidence-bound LLM analysis, ML/registry and constrained strategy generation, an authenticated System Steward, a persistent broker-free shadow runtime, a shared account/coordinator, and a confirmation-gated Alpaca Paper adapter with durable reconciliation. Implementation completeness is not the same as passing statistical or production-operational exit criteria; see `docs/REVIEW_REMEDIATION_2026-09-06.md`.
+A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains implemented and locally verified foundations through the **Phase 7 broker boundary**: safety controls, read-only market data, event/document ingestion, point-in-time research, evidence-bound LLM analysis, ML/registry and constrained strategy generation, an authenticated System Steward, a persistent broker-free shadow runtime, a shared account/coordinator, and a fail-closed Alpaca Paper adapter with durable reconciliation. The adapter is not yet authorized for an external order because its separately validated execution profile and automatic position-exit lifecycle remain open. Implementation completeness is not the same as passing statistical or production-operational exit criteria; see `docs/REVIEW_REMEDIATION_C6A8020_2026-09-06.md`.
 
 > Live-money execution is not implemented. `live` is not a valid mode, and setting `LIVE_TRADING_ENABLED=true` makes startup fail.
 
@@ -128,8 +128,10 @@ risk revision invalidates prior execution certificates until exact validation is
 
 The autonomous coordinator persists an hourly, per-symbol eight-stage DAG from market-data
 collection through feature/ML/LLM research, constrained generation, exact validation, and
-human-gated shadow readiness. It resumes failed jobs without repeating completed parents.
-Paid LLM stages default off, and the coordinator cannot promote, adopt, or submit orders.
+human-gated shadow readiness. It resumes incomplete groups across hour boundaries without
+repeating completed parents. Validation reuse requires both the exact execution contract and
+the actual market-data/window fingerprint. Paid LLM stages default off, and the coordinator
+cannot promote, adopt, or submit orders.
 
 ## Commands
 
@@ -448,25 +450,36 @@ Only plans created after enrollment are eligible. The worker creates a durable l
 before network I/O, derives a stable Alpaca `client_order_id`, looks up that ID before every
 retry, and records each observed broker lifecycle change.
 
-The first release supports long US-equity, whole-share, price-capped GTC bracket orders. The
-entry limit prevents a gap from paying more than the validated entry bound; stop and target
-remain attached. Unfilled entries are cancelled after plan expiry. New submissions also
-recheck paper buying power, account floor/daily loss, per-trade and concurrent dollar risk,
-broker account identity, and unmanaged positions. Existing orders continue reconciling while
-the global new-exposure switch is paused.
+The adapter supports long US-equity, whole-share, price-capped DAY bracket intents, broker
+price increments, pinned account identity, idempotent recovery, and position-aware
+reconciliation. Every POST rechecks current enrollment, plan, contract, restriction, buying
+power, account floor/daily loss, and per-trade/concurrent dollar risk. An expired partial
+entry has its remainder canceled, but a nonzero position stays open as
+`POSITION_OPEN_REQUIRES_EXIT`; automatic session-close liquidation and complete child-order
+tracking are not yet implemented.
+
+Most importantly, the existing Shadow profile
+`next_open_market_revalidated_bracket_one_bar@0.2.0` cannot authorize this broker behavior.
+Paper requires `alpaca_day_limit_bracket_one_session@0.1.0`, and the current validator does
+not issue that certificate. Enrollment and order submission therefore fail closed until a
+matching validator and lifecycle are implemented. Read-only broker probing remains available.
 
 Submission is off by default. Staged setup is:
 
 1. Keep `TRADING_MODE=shadow`, confirm an eligible Strategy and Shadow deployment, and use
    the Paper page's read-only connection test.
-2. Confirm the exact deployment's `paper.enroll` preview. Historical plans remain excluded.
-3. Set `TRADING_MODE=paper` and `PAPER_TRADING_ENABLED=true` only in the intended worker
+2. Implement and pass the Paper-compatible execution validation/lifecycle milestone; do not
+   substitute an existing Shadow certificate.
+3. Only then confirm the exact deployment's `paper.enroll` preview. Historical plans remain
+   excluded.
+4. Set `TRADING_MODE=paper` and `PAPER_TRADING_ENABLED=true` only in the intended worker
    environment, restart, inspect account identity and pipeline heartbeat, then separately
    confirm the global resume action.
 
 The broker base URL is hard-pinned to `https://paper-api.alpaca.markets`; configuration that
 enables Paper against the live Alpaca host fails startup. There is no `live` trading mode and
-`LIVE_TRADING_ENABLED=true` always fails. See `runbooks/paper_trading.md` and ADR 0024.
+`LIVE_TRADING_ENABLED=true` always fails. See `runbooks/paper_trading.md`, ADR 0024, and
+ADR 0025.
 
 ## Repository map
 
@@ -564,12 +577,13 @@ in `docs/DEPLOYMENT.md`.
 
 ## GitHub and cloud path
 
-Current delivery order: the four pre-cloud hardening tasks and Phase 7 Alpaca Paper adapter
-are implemented and locally release-tested. A real bounded AAPL ML + Research LLM run is
+Current delivery order: the four pre-cloud hardening tasks and the fail-closed Phase 7 Alpaca
+Paper boundary are implemented and locally release-tested. A real bounded AAPL ML + Research LLM run is
 documented in `docs/E2E_DEPLOYMENT_READINESS_AUDIT_2026-09-06.md`; it correctly abstained on
-weak evidence and did not generate, adopt, or trade a strategy. Cloud bootstrap, a read-only production Paper
-account probe, production-scale backfill, statistical promotion evidence, and continuous
-shadow/paper observation follow on the remote data plane. No Paper order has been sent as
+weak evidence and did not generate, adopt, or trade a strategy. Cloud bootstrap and a
+read-only production Paper account probe may proceed; the matching Paper execution
+validator/lifecycle, production-scale backfill, statistical promotion evidence, and continuous
+shadow/Paper observation remain. No Paper order has been sent as
 part of local build verification.
 
 The source repository is [wsjnohyeah/qagent](https://github.com/wsjnohyeah/qagent), with

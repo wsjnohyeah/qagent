@@ -271,6 +271,52 @@ def test_autonomous_coordinator_resumes_failed_stage_without_repeating_parents(
     assert calls[-1] == COORDINATOR_STAGES[-1]
 
 
+def test_autonomous_coordinator_recovers_failed_group_after_hour_rollover(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    jobs = WorkflowJobStore(ledger.engine)
+    calls: list[tuple[str, str]] = []
+    failed_once = False
+
+    async def handler(job, dependencies):  # type: ignore[no-untyped-def]
+        nonlocal failed_once
+        stage = str(job.payload["stage"])
+        calls.append((str(job.job_group_id), stage))
+        if stage == "train_ml" and not failed_once:
+            failed_once = True
+            raise RuntimeError("one-time trainer fault")
+        prior = dict(dependencies[-1].result) if dependencies else {}
+        return {**prior, "outcome": "COMPLETED", "last_stage": stage}
+
+    coordinator = AutonomousCoordinator(
+        jobs,
+        handler=handler,
+        worker_id="hour-rollover-test",
+    )
+    cutoff = datetime(2026, 9, 5, 22, tzinfo=UTC)
+    first = asyncio.run(
+        coordinator.run_once(symbols=("AAPL",), as_of=cutoff)
+    )
+    old_group_id = str(first["job_group_id"])
+    second = asyncio.run(
+        coordinator.run_once(
+            symbols=("AAPL",),
+            as_of=cutoff + timedelta(hours=1),
+        )
+    )
+
+    old_jobs = jobs.jobs(job_group_id=old_group_id)
+    assert all(job.status.value == "COMPLETED" for job in old_jobs)
+    assert next(
+        job for job in old_jobs if job.payload["stage"] == "train_ml"
+    ).attempt_count == 2
+    assert calls.count((old_group_id, "collect_market_data")) == 1
+    assert second["completed"] is True
+    assert second["backlog_groups"][0]["job_group_id"] == old_group_id
+
+
 def test_fresh_running_partition_is_not_stolen_by_another_invoker(
     settings,  # type: ignore[no-untyped-def]
 ) -> None:

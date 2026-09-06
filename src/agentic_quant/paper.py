@@ -29,6 +29,7 @@ from agentic_quant.database import (
 from agentic_quant.ids import stable_uuid, uuid7
 from agentic_quant.providers.alpaca_paper import (
     AlpacaPaperResponseError,
+    normalize_long_bracket_prices,
 )
 from agentic_quant.shadow import ShadowRuntime
 
@@ -62,6 +63,9 @@ class PaperBroker(Protocol):
 
 BrokerFactory = Callable[[], PaperBroker]
 _ZERO = Decimal("0")
+PAPER_EXECUTION_PROFILE_VERSION = (
+    "alpaca_day_limit_bracket_one_session@0.1.0"
+)
 _TERMINAL_FAILURES = {
     "canceled",
     "expired",
@@ -105,11 +109,29 @@ def _safe_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _order_lifecycle_complete(payload: dict[str, Any]) -> bool:
+def _order_lifecycle_complete(
+    payload: dict[str, Any],
+    *,
+    position_quantity: Decimal = _ZERO,
+) -> bool:
     status = str(payload.get("status") or "unknown").lower()
     if status in _TERMINAL_FAILURES:
-        return True
+        if position_quantity != _ZERO:
+            return False
+        failure_legs = payload.get("legs")
+        if not isinstance(failure_legs, list) or not failure_legs:
+            return True
+        failure_leg_statuses = {
+            str(leg.get("status") or "unknown").lower()
+            for leg in failure_legs
+            if isinstance(leg, dict)
+        }
+        return bool(failure_leg_statuses) and failure_leg_statuses <= (
+            _TERMINAL_FAILURES | {"filled"}
+        )
     if status != "filled":
+        return False
+    if position_quantity != _ZERO:
         return False
     legs = payload.get("legs")
     if not isinstance(legs, list) or not legs:
@@ -183,15 +205,43 @@ class PaperTradingRuntime:
                     ).scalar_one()
                 ),
             }
+        active_enrollments = [
+            item
+            for item in self.enrollments(limit=1_000)
+            if item["status"] == "ACTIVE"
+        ]
+        compatible_active_enrollments = 0
+        for enrollment in active_enrollments:
+            try:
+                deployment = self.shadow.deployment(
+                    str(enrollment["shadow_deployment_id"])
+                )
+            except ValueError:
+                continue
+            contract = dict(deployment.get("execution_contract_json") or {})
+            if (
+                deployment.get("status") == "ACTIVE"
+                and deployment.get("contract_status") == "CURRENT"
+                and contract.get("execution_profile")
+                == PAPER_EXECUTION_PROFILE_VERSION
+            ):
+                compatible_active_enrollments += 1
+        infrastructure_ready = (
+            self.configured and self.enabled and self.trading_mode == "paper"
+        )
         return {
             "provider": "alpaca_paper",
             "configured": self.configured,
             "paper_trading_enabled": self.enabled,
             "trading_mode": self.trading_mode,
             "live_money_possible": False,
+            "infrastructure_ready": infrastructure_ready,
             "submission_ready": (
-                self.configured and self.enabled and self.trading_mode == "paper"
+                infrastructure_ready and compatible_active_enrollments > 0
             ),
+            "compatible_active_enrollments": compatible_active_enrollments,
+            "required_execution_profile": PAPER_EXECUTION_PROFILE_VERSION,
+            "execution_policy": "separately_validated_profile_only",
             "latest_account": latest,
             "latest_run": recent_runs[0] if recent_runs else None,
             **counts,
@@ -223,6 +273,15 @@ class PaperTradingRuntime:
             raise ValueError("Only an active shadow deployment can enter paper trading")
         if deployment.get("contract_status") != "CURRENT":
             raise ValueError("The deployment requires exact-contract revalidation")
+        execution_contract = dict(deployment.get("execution_contract_json") or {})
+        if (
+            execution_contract.get("execution_profile")
+            != PAPER_EXECUTION_PROFILE_VERSION
+        ):
+            raise ValueError(
+                "This validation uses a Shadow-only execution profile; Alpaca Paper "
+                "requires a separately validated compatible execution profile"
+            )
         with self.engine.connect() as connection:
             existing = connection.execute(
                 select(paper_enrollments).where(
@@ -302,32 +361,38 @@ class PaperTradingRuntime:
     ) -> dict[str, Any]:
         if status not in {"ACTIVE", "PAUSED", "RETIRED"}:
             raise ValueError("Unsupported paper enrollment status")
-        with self.engine.begin() as connection:
-            row = connection.execute(
-                select(paper_enrollments).where(
-                    paper_enrollments.c.paper_enrollment_id == enrollment_id
+        token = self._acquire_lease(owner=f"enrollment-state:{uuid7()}")
+        if token is None:
+            raise ValueError("Paper runtime is submitting; retry the enrollment change")
+        try:
+            with self.engine.begin() as connection:
+                row = connection.execute(
+                    select(paper_enrollments).where(
+                        paper_enrollments.c.paper_enrollment_id == enrollment_id
+                    )
+                ).one_or_none()
+                if row is None:
+                    raise ValueError("Paper enrollment not found")
+                if row.status == "RETIRED":
+                    raise ValueError("Retired paper enrollments cannot be changed")
+                if status == "ACTIVE":
+                    self.enrollment_preview(str(row.shadow_deployment_id))
+                values: dict[str, Any] = {
+                    "status": status,
+                    "reason": reason,
+                    "created_by": updated_by,
+                    "updated_at": self._now(),
+                }
+                if status == "ACTIVE" and row.status == "ACCOUNT_MISMATCH":
+                    values["broker_account_id"] = None
+                connection.execute(
+                    update(paper_enrollments)
+                    .where(paper_enrollments.c.paper_enrollment_id == enrollment_id)
+                    .values(**values)
                 )
-            ).one_or_none()
-            if row is None:
-                raise ValueError("Paper enrollment not found")
-            if row.status == "RETIRED":
-                raise ValueError("Retired paper enrollments cannot be changed")
-            if status == "ACTIVE":
-                self.enrollment_preview(str(row.shadow_deployment_id))
-            values: dict[str, Any] = {
-                "status": status,
-                "reason": reason,
-                "created_by": updated_by,
-                "updated_at": self._now(),
-            }
-            if status == "ACTIVE" and row.status == "ACCOUNT_MISMATCH":
-                values["broker_account_id"] = None
-            connection.execute(
-                update(paper_enrollments)
-                .where(paper_enrollments.c.paper_enrollment_id == enrollment_id)
-                .values(**values)
-            )
-        return self.enrollment(enrollment_id)
+            return self.enrollment(enrollment_id)
+        finally:
+            self._release_lease(token)
 
     def enrollment(self, enrollment_id: str) -> dict[str, Any]:
         values = [
@@ -371,11 +436,34 @@ class PaperTradingRuntime:
                 paper_orders,
                 paper_enrollments.c.shadow_deployment_id,
                 paper_enrollments.c.status.label("enrollment_status"),
+                paper_enrollments.c.broker_account_id.label(
+                    "enrollment_broker_account_id"
+                ),
+                shadow_trade_plans.c.status.label("plan_status"),
+                shadow_signal_candidates.c.shadow_deployment_id.label(
+                    "plan_shadow_deployment_id"
+                ),
+                shadow_deployments.c.status.label("shadow_status"),
             )
             .join(
                 paper_enrollments,
                 paper_enrollments.c.paper_enrollment_id
                 == paper_orders.c.paper_enrollment_id,
+            )
+            .join(
+                shadow_trade_plans,
+                shadow_trade_plans.c.trade_plan_id
+                == paper_orders.c.shadow_trade_plan_id,
+            )
+            .join(
+                shadow_signal_candidates,
+                shadow_signal_candidates.c.candidate_id
+                == shadow_trade_plans.c.candidate_id,
+            )
+            .join(
+                shadow_deployments,
+                shadow_deployments.c.shadow_deployment_id
+                == paper_enrollments.c.shadow_deployment_id,
             )
             .order_by(paper_orders.c.updated_at.desc())
             .limit(limit)
@@ -495,8 +583,22 @@ class PaperTradingRuntime:
         async with self.broker_factory() as broker:
             await broker.cancel_order(str(row.broker_order_id))
             payload = await broker.fetch_order_by_client_id(str(row.client_order_id))
+            positions = await broker.fetch_positions()
         if payload is not None:
-            self._apply_broker_order(str(row.paper_order_id), payload, self._now())
+            position_quantity = self._position_quantity(
+                positions, symbol=str(row.symbol)
+            )
+            self._apply_broker_order(
+                str(row.paper_order_id),
+                payload,
+                self._now(),
+                position_quantity=position_quantity,
+            )
+            if position_quantity != _ZERO:
+                self._mark_submission_blocked(
+                    str(row.paper_order_id),
+                    ("POSITION_OPEN_REQUIRES_EXIT",),
+                )
         return next(
             item for item in self.orders(limit=1_000)
             if item["paper_order_id"] == paper_order_id
@@ -554,6 +656,12 @@ class PaperTradingRuntime:
                     raise RuntimeError("Alpaca paper account response has no account ID")
                 self._pin_account(broker_account_id)
                 all_orders = self.orders(limit=10_000)
+                position_quantity_by_symbol = {
+                    str(position.get("symbol") or "UNKNOWN").upper(): _decimal(
+                        position.get("qty")
+                    )
+                    for position in positions
+                }
                 limits = self.shadow.virtual_account()
                 paper_equity = _decimal(account.get("equity"))
                 paper_daily_pnl = paper_equity - _decimal(
@@ -571,32 +679,47 @@ class PaperTradingRuntime:
                     submission_blockers.append("PAPER_ACCOUNT_FLOOR_REACHED")
                 if paper_daily_pnl <= -_decimal(limits["daily_loss_stop_usd"]):
                     submission_blockers.append("PAPER_DAILY_LOSS_STOP_REACHED")
-                managed_symbols = {
-                    str(order["symbol"])
-                    for order in all_orders
-                    if not bool(order["lifecycle_complete"])
-                }
+                expected_positions: dict[str, Decimal] = {}
+                for order in all_orders:
+                    if bool(order["lifecycle_complete"]):
+                        continue
+                    symbol = str(order["symbol"]).upper()
+                    expected_positions[symbol] = (
+                        expected_positions.get(symbol, _ZERO)
+                        + _decimal(order["filled_quantity"])
+                    )
+                managed_symbols = set(expected_positions)
                 unmanaged_symbols = sorted(
-                    str(position.get("symbol") or "UNKNOWN")
+                    str(position.get("symbol") or "UNKNOWN").upper()
                     for position in positions
-                    if str(position.get("symbol") or "UNKNOWN")
+                    if str(position.get("symbol") or "UNKNOWN").upper()
                     not in managed_symbols
                 )
                 if unmanaged_symbols:
                     submission_blockers.append(
                         "UNMANAGED_PAPER_POSITIONS:" + ",".join(unmanaged_symbols)
                     )
+                for symbol, expected_quantity in expected_positions.items():
+                    actual_quantity = position_quantity_by_symbol.get(symbol, _ZERO)
+                    if actual_quantity != expected_quantity:
+                        submission_blockers.append(
+                            "PAPER_POSITION_QUANTITY_MISMATCH:"
+                            f"{symbol}:{expected_quantity}:{actual_quantity}"
+                        )
                 blocked = bool(submission_blockers)
                 buying_power = _decimal(account.get("buying_power"))
                 open_risk = sum(
-                    max(
-                        _ZERO,
-                        _decimal(order["entry_limit_price"])
-                        - _decimal(order["stop_loss_price"]),
-                    )
-                    * Decimal(int(order["quantity"]))
-                    for order in all_orders
-                    if not bool(order["lifecycle_complete"])
+                    (
+                        max(
+                            _ZERO,
+                            _decimal(order["entry_limit_price"])
+                            - _decimal(order["stop_loss_price"]),
+                        )
+                        * Decimal(int(order["quantity"]))
+                        for order in all_orders
+                        if not bool(order["lifecycle_complete"])
+                    ),
+                    _ZERO,
                 )
                 for order in all_orders:
                     if bool(order["lifecycle_complete"]):
@@ -607,17 +730,27 @@ class PaperTradingRuntime:
                     if payload is not None:
                         self._assert_lease(lease_token)
                         self._apply_broker_order(
-                            str(order["paper_order_id"]), payload, self._now()
+                            str(order["paper_order_id"]),
+                            payload,
+                            self._now(),
+                            position_quantity=position_quantity_by_symbol.get(
+                                str(order["symbol"]).upper(), _ZERO
+                            ),
                         )
                         reconciled += 1
                         current = self._order(str(order["paper_order_id"]))
                         expires_at = _utc(current["plan_expires_at"])
+                        broker_status = str(payload.get("status") or "unknown").lower()
+                        position_quantity = position_quantity_by_symbol.get(
+                            str(order["symbol"]).upper(), _ZERO
+                        )
                         if (
                             expires_at is not None
                             and expires_at <= self._now()
-                            and _decimal(current["filled_quantity"]) == _ZERO
                             and not bool(current["lifecycle_complete"])
                             and current["broker_order_id"] is not None
+                            and broker_status not in _TERMINAL_FAILURES
+                            and broker_status != "filled"
                         ):
                             await broker.cancel_order(
                                 str(current["broker_order_id"])
@@ -625,12 +758,43 @@ class PaperTradingRuntime:
                             cancelled = await broker.fetch_order_by_client_id(
                                 str(current["client_order_id"])
                             )
+                            positions = await broker.fetch_positions()
+                            position_quantity = self._position_quantity(
+                                positions, symbol=str(current["symbol"])
+                            )
                             if cancelled is not None:
                                 self._apply_broker_order(
                                     str(current["paper_order_id"]),
                                     cancelled,
                                     self._now(),
+                                    position_quantity=position_quantity,
                                 )
+                            if position_quantity != _ZERO:
+                                blocker = (
+                                    "POSITION_OPEN_REQUIRES_EXIT:"
+                                    + str(current["symbol"])
+                                )
+                                submission_blockers.append(blocker)
+                                blocked = True
+                                self._mark_submission_blocked(
+                                    str(current["paper_order_id"]),
+                                    (blocker,),
+                                )
+                        elif (
+                            expires_at is not None
+                            and expires_at <= self._now()
+                            and position_quantity != _ZERO
+                        ):
+                            blocker = (
+                                "POSITION_OPEN_REQUIRES_EXIT:"
+                                + str(current["symbol"])
+                            )
+                            submission_blockers.append(blocker)
+                            blocked = True
+                            self._mark_submission_blocked(
+                                str(current["paper_order_id"]),
+                                (blocker,),
+                            )
                         continue
                     if order["broker_order_id"] is not None:
                         submission_blockers.append(
@@ -647,8 +811,26 @@ class PaperTradingRuntime:
                         "PENDING_SUBMISSION",
                         "SUBMITTING",
                         "SUBMISSION_UNKNOWN",
+                        "SUBMISSION_BLOCKED",
                     }
-                    if new_exposure_paused or blocked or not retryable:
+                    if not retryable:
+                        continue
+                    current_blockers = self._submission_blockers(
+                        order,
+                        broker_account_id=broker_account_id,
+                        buying_power=buying_power,
+                        open_risk=open_risk,
+                        now=self._now(),
+                    )
+                    if new_exposure_paused:
+                        current_blockers.insert(0, "GLOBAL_NEW_EXPOSURE_PAUSED")
+                    if blocked:
+                        current_blockers.extend(submission_blockers)
+                    if current_blockers:
+                        self._mark_submission_blocked(
+                            str(order["paper_order_id"]),
+                            tuple(dict.fromkeys(current_blockers)),
+                        )
                         continue
                     required = (
                         _decimal(order["entry_limit_price"])
@@ -657,16 +839,21 @@ class PaperTradingRuntime:
                     )
                     if required > buying_power:
                         continue
-                    if await self._submit_intent(broker, order, lease_token):
+                    if await self._submit_intent(
+                        broker,
+                        order,
+                        lease_token,
+                        position_quantity=position_quantity_by_symbol.get(
+                            str(order["symbol"]).upper(), _ZERO
+                        ),
+                    ):
                         submitted += 1
                         buying_power -= required
                 if not new_exposure_paused and not blocked:
                     for plan in self._eligible_plans(self._now()):
-                        trade_risk = max(
-                            _ZERO,
-                            _decimal(plan["limit_price"])
-                            - _decimal(plan["invalidation"]),
-                        ) * Decimal(int(plan["quantity"]))
+                        entry, target, stop = self._normalized_plan_prices(plan)
+                        quantity = Decimal(int(plan["quantity"]))
+                        trade_risk = (entry - stop) * quantity
                         if trade_risk > _decimal(
                             limits["maximum_trade_risk_usd"]
                         ):
@@ -676,18 +863,38 @@ class PaperTradingRuntime:
                         ):
                             continue
                         required = (
-                            _decimal(plan["limit_price"])
-                            * Decimal(int(plan["quantity"]))
-                            * Decimal("1.05")
+                            entry * quantity * Decimal("1.05")
                         )
                         if required > buying_power:
                             continue
-                        order_id = self._ensure_order_intent(plan)
-                        current = self._order(order_id)
+                        order_id = self._ensure_order_intent(
+                            plan,
+                            broker_account_id=broker_account_id,
+                            normalized_prices=(entry, target, stop),
+                        )
+                        current = self._order_context(order_id)
                         if bool(current["lifecycle_complete"]):
                             continue
+                        current_blockers = self._submission_blockers(
+                            current,
+                            broker_account_id=broker_account_id,
+                            buying_power=buying_power,
+                            open_risk=open_risk + trade_risk,
+                            now=self._now(),
+                        )
+                        if current_blockers:
+                            self._mark_submission_blocked(
+                                order_id,
+                                tuple(dict.fromkeys(current_blockers)),
+                            )
+                            continue
                         if await self._submit_intent(
-                            broker, current, lease_token
+                            broker,
+                            current,
+                            lease_token,
+                            position_quantity=position_quantity_by_symbol.get(
+                                str(current["symbol"]).upper(), _ZERO
+                            ),
                         ):
                             submitted += 1
                             buying_power -= required
@@ -733,6 +940,8 @@ class PaperTradingRuntime:
         broker: PaperBroker,
         order: dict[str, Any],
         lease_token: str,
+        *,
+        position_quantity: Decimal,
     ) -> bool:
         order_id = str(order["paper_order_id"])
         self._increment_submission_attempt(order_id)
@@ -756,7 +965,12 @@ class PaperTradingRuntime:
                 return False
             raise
         self._assert_lease(lease_token)
-        self._apply_broker_order(order_id, payload, self._now())
+        self._apply_broker_order(
+            order_id,
+            payload,
+            self._now(),
+            position_quantity=position_quantity,
+        )
         return True
 
     def _eligible_plans(self, now: datetime) -> list[dict[str, Any]]:
@@ -818,32 +1032,192 @@ class PaperTradingRuntime:
                         .values(status="REVALIDATION_REQUIRED", updated_at=now)
                     )
                 continue
+            execution_contract = dict(
+                deployment.get("execution_contract_json") or {}
+            )
+            if (
+                execution_contract.get("execution_profile")
+                != PAPER_EXECUTION_PROFILE_VERSION
+            ):
+                with self.engine.begin() as connection:
+                    connection.execute(
+                        update(paper_enrollments)
+                        .where(
+                            paper_enrollments.c.paper_enrollment_id
+                            == value["paper_enrollment_id"]
+                        )
+                        .values(status="REVALIDATION_REQUIRED", updated_at=now)
+                    )
+                continue
             eligible.append(value)
         return eligible
 
-    def _ensure_order_intent(self, plan: dict[str, Any]) -> str:
-        targets = list(plan["targets_json"] or [])
-        if str(plan["direction"]).upper() != "LONG" or not targets:
-            raise ValueError("Phase 7 currently supports long bracket plans only")
+    def _submission_blockers(
+        self,
+        order: dict[str, Any],
+        *,
+        broker_account_id: str,
+        buying_power: Decimal,
+        open_risk: Decimal,
+        now: datetime,
+    ) -> list[str]:
+        blockers: list[str] = []
+        if str(order.get("enrollment_status")) != "ACTIVE":
+            blockers.append("PAPER_ENROLLMENT_NOT_ACTIVE")
+        if str(order.get("shadow_status")) != "ACTIVE":
+            blockers.append("SHADOW_DEPLOYMENT_NOT_ACTIVE")
+        if str(order.get("plan_shadow_deployment_id")) != str(
+            order.get("shadow_deployment_id")
+        ):
+            blockers.append("PLAN_ENROLLMENT_MISMATCH")
+        if str(order.get("plan_status")) != "OPEN":
+            blockers.append("SHADOW_PLAN_NOT_OPEN")
+        bound_account = str(order.get("broker_account_id") or "")
+        enrollment_account = str(
+            order.get("enrollment_broker_account_id") or ""
+        )
+        if not bound_account:
+            blockers.append("ORDER_ACCOUNT_NOT_PINNED")
+        elif bound_account != broker_account_id:
+            blockers.append("ORDER_ACCOUNT_MISMATCH")
+        if not enrollment_account:
+            blockers.append("ENROLLMENT_ACCOUNT_NOT_PINNED")
+        elif enrollment_account != broker_account_id:
+            blockers.append("ENROLLMENT_ACCOUNT_MISMATCH")
+        elif bound_account and bound_account != enrollment_account:
+            blockers.append("ORDER_ENROLLMENT_ACCOUNT_MISMATCH")
+        expires_at = _utc(order.get("plan_expires_at"))
+        if expires_at is None or expires_at <= now:
+            blockers.append("SHADOW_PLAN_EXPIRED")
+        try:
+            deployment = self.shadow.deployment(
+                str(order["shadow_deployment_id"])
+            )
+        except ValueError:
+            blockers.append("SHADOW_DEPLOYMENT_NOT_FOUND")
+        else:
+            if deployment.get("contract_status") != "CURRENT":
+                blockers.append("SHADOW_CONTRACT_NOT_CURRENT")
+            contract = dict(deployment.get("execution_contract_json") or {})
+            if contract.get("execution_profile") != PAPER_EXECUTION_PROFILE_VERSION:
+                blockers.append("PAPER_EXECUTION_CONTRACT_NOT_VALIDATED")
+        symbol = str(order["symbol"]).upper()
+        if self.shadow.restrictions.is_restricted(symbol, now.date()):
+            blockers.append("SECURITY_RESTRICTED")
+        limits = self.shadow.virtual_account()
+        trade_risk = max(
+            _ZERO,
+            _decimal(order["entry_limit_price"])
+            - _decimal(order["stop_loss_price"]),
+        ) * Decimal(int(order["quantity"]))
+        if trade_risk > _decimal(limits["maximum_trade_risk_usd"]):
+            blockers.append("PAPER_TRADE_RISK_LIMIT")
+        if open_risk > _decimal(limits["maximum_concurrent_risk_usd"]):
+            blockers.append("PAPER_CONCURRENT_RISK_LIMIT")
+        required = (
+            _decimal(order["entry_limit_price"])
+            * Decimal(int(order["quantity"]))
+            * Decimal("1.05")
+        )
+        if required > buying_power:
+            blockers.append("PAPER_BUYING_POWER")
+        return blockers
+
+    def _mark_submission_blocked(
+        self,
+        order_id: str,
+        blockers: tuple[str, ...],
+    ) -> None:
+        if not blockers:
+            return
+        order = self._order(order_id)
+        message = ";".join(blockers)
+        if (
+            str(order["status"]) == "SUBMISSION_BLOCKED"
+            and str(order.get("error_message") or "") == message
+        ):
+            return
+        now = self._now()
+        with self.engine.begin() as connection:
+            connection.execute(
+                update(paper_orders)
+                .where(paper_orders.c.paper_order_id == order_id)
+                .values(
+                    status="SUBMISSION_BLOCKED",
+                    lifecycle_complete=False,
+                    error_code=blockers[0][:120],
+                    error_message=message[:2_000],
+                    updated_at=now,
+                )
+            )
+        self._append_order_event(
+            order_id,
+            broker_status="SUBMISSION_BLOCKED",
+            filled_quantity=_decimal(order["filled_quantity"]),
+            filled_average_price=(
+                _decimal(order["filled_average_price"])
+                if order["filled_average_price"] is not None
+                else None
+            ),
+            lifecycle_complete=False,
+            payload={"reason_codes": list(blockers)},
+            observed_at=now,
+        )
+
+    @staticmethod
+    def _position_quantity(
+        positions: tuple[dict[str, Any], ...],
+        *,
+        symbol: str,
+    ) -> Decimal:
+        normalized = symbol.upper()
+        return sum(
+            (
+                _decimal(item.get("qty"))
+                for item in positions
+                if str(item.get("symbol") or "").upper() == normalized
+            ),
+            _ZERO,
+        )
+
+    def _ensure_order_intent(
+        self,
+        plan: dict[str, Any],
+        *,
+        broker_account_id: str,
+        normalized_prices: tuple[Decimal, Decimal, Decimal] | None = None,
+    ) -> str:
+        entry, target, stop = (
+            normalized_prices
+            if normalized_prices is not None
+            else self._normalized_plan_prices(plan)
+        )
         plan_id = str(plan["trade_plan_id"])
         client_order_id = "qagent-" + hashlib.sha256(plan_id.encode()).hexdigest()[:32]
         order_id = stable_uuid("paper-order", plan_id)
         now = self._now()
+        risk_per_share = entry - stop
+        reward_risk = (target - entry) / risk_per_share
+        if reward_risk < self.shadow.effective_risk_policy().minimum_reward_risk:
+            raise ValueError(
+                "Rounded Alpaca bracket no longer satisfies minimum reward/risk"
+            )
         values = {
             "paper_order_id": order_id,
             "paper_enrollment_id": plan["paper_enrollment_id"],
             "shadow_trade_plan_id": plan_id,
             "client_order_id": client_order_id,
             "broker_order_id": None,
+            "broker_account_id": broker_account_id,
             "symbol": str(plan["symbol"]).upper(),
             "side": "buy",
             "quantity": int(plan["quantity"]),
             "order_type": "limit",
-            "time_in_force": "gtc",
+            "time_in_force": "day",
             "order_class": "bracket",
-            "entry_limit_price": _decimal(plan["limit_price"]),
-            "take_profit_price": _decimal(targets[0]),
-            "stop_loss_price": _decimal(plan["invalidation"]),
+            "entry_limit_price": entry,
+            "take_profit_price": target,
+            "stop_loss_price": stop,
             "plan_expires_at": plan["expires_at"],
             "status": "PENDING_SUBMISSION",
             "lifecycle_complete": False,
@@ -878,6 +1252,19 @@ class PaperTradingRuntime:
             ).scalar_one()
         return str(existing)
 
+    @staticmethod
+    def _normalized_plan_prices(
+        plan: dict[str, Any],
+    ) -> tuple[Decimal, Decimal, Decimal]:
+        targets = list(plan["targets_json"] or [])
+        if str(plan["direction"]).upper() != "LONG" or not targets:
+            raise ValueError("Phase 7 currently supports long bracket plans only")
+        return normalize_long_bracket_prices(
+            entry_limit_price=_decimal(plan["limit_price"]),
+            take_profit_price=_decimal(targets[0]),
+            stop_loss_price=_decimal(plan["invalidation"]),
+        )
+
     def _order(self, order_id: str) -> dict[str, Any]:
         with self.engine.connect() as connection:
             row = connection.execute(
@@ -886,6 +1273,12 @@ class PaperTradingRuntime:
                 )
             ).one()
         return dict(row._mapping)
+
+    def _order_context(self, order_id: str) -> dict[str, Any]:
+        for order in self.orders(limit=10_000):
+            if str(order["paper_order_id"]) == order_id:
+                return order
+        return self._order(order_id)
 
     def _increment_submission_attempt(self, order_id: str) -> None:
         with self.engine.begin() as connection:
@@ -932,28 +1325,43 @@ class PaperTradingRuntime:
     def _expire_unsubmitted(self, order_id: str) -> None:
         now = self._now()
         order = self._order(order_id)
+        filled_quantity = _decimal(order["filled_quantity"])
+        lifecycle_complete = filled_quantity == _ZERO
+        status = (
+            "EXPIRED_BEFORE_SUBMISSION"
+            if lifecycle_complete
+            else "POSITION_OPEN_REQUIRES_EXIT"
+        )
         with self.engine.begin() as connection:
             connection.execute(
                 update(paper_orders)
                 .where(paper_orders.c.paper_order_id == order_id)
                 .values(
-                    status="EXPIRED_BEFORE_SUBMISSION",
-                    lifecycle_complete=True,
-                    error_code="PLAN_EXPIRED",
-                    error_message="Approved plan expired before broker acknowledgment",
+                    status=status,
+                    lifecycle_complete=lifecycle_complete,
+                    error_code=(
+                        "PLAN_EXPIRED"
+                        if lifecycle_complete
+                        else "POSITION_OPEN_REQUIRES_EXIT"
+                    ),
+                    error_message=(
+                        "Approved plan expired before broker acknowledgment"
+                        if lifecycle_complete
+                        else "Plan expired with a nonzero recorded fill"
+                    ),
                     updated_at=now,
                 )
             )
         self._append_order_event(
             order_id,
-            broker_status="EXPIRED_BEFORE_SUBMISSION",
-            filled_quantity=_decimal(order["filled_quantity"]),
+            broker_status=status,
+            filled_quantity=filled_quantity,
             filled_average_price=(
                 _decimal(order["filled_average_price"])
                 if order["filled_average_price"] is not None
                 else None
             ),
-            lifecycle_complete=True,
+            lifecycle_complete=lifecycle_complete,
             payload={"reason": "PLAN_EXPIRED"},
             observed_at=now,
         )
@@ -963,6 +1371,8 @@ class PaperTradingRuntime:
         order_id: str,
         payload: dict[str, Any],
         observed_at: datetime,
+        *,
+        position_quantity: Decimal = _ZERO,
     ) -> None:
         safe = _safe_payload(payload)
         status = str(safe.get("status") or "unknown").lower()
@@ -972,10 +1382,23 @@ class PaperTradingRuntime:
             if safe.get("filled_avg_price") not in {None, ""}
             else None
         )
-        lifecycle_complete = _order_lifecycle_complete(safe)
+        lifecycle_complete = _order_lifecycle_complete(
+            safe,
+            position_quantity=position_quantity,
+        )
         existing = self._order(order_id)
+        preserve_open_position_block = (
+            str(existing["status"]) == "SUBMISSION_BLOCKED"
+            and "POSITION_OPEN_REQUIRES_EXIT"
+            in str(existing.get("error_message") or "")
+            and position_quantity != _ZERO
+            and (status in _TERMINAL_FAILURES or status == "filled")
+        )
+        persisted_status = (
+            str(existing["status"]) if preserve_open_position_block else status
+        )
         changed = (
-            str(existing["status"]).lower() != status
+            str(existing["status"]).lower() != persisted_status.lower()
             or _decimal(existing["filled_quantity"]) != filled_quantity
             or bool(existing["lifecycle_complete"]) != lifecycle_complete
             or dict(existing["broker_payload_json"] or {}) != safe
@@ -986,13 +1409,21 @@ class PaperTradingRuntime:
                 .where(paper_orders.c.paper_order_id == order_id)
                 .values(
                     broker_order_id=str(safe.get("id") or "") or None,
-                    status=status,
+                    status=persisted_status,
                     lifecycle_complete=lifecycle_complete,
                     filled_quantity=filled_quantity,
                     filled_average_price=filled_average_price,
                     broker_payload_json=safe,
-                    error_code=None,
-                    error_message=None,
+                    error_code=(
+                        existing["error_code"]
+                        if preserve_open_position_block
+                        else None
+                    ),
+                    error_message=(
+                        existing["error_message"]
+                        if preserve_open_position_block
+                        else None
+                    ),
                     submitted_at=existing["submitted_at"] or observed_at,
                     last_reconciled_at=observed_at,
                     updated_at=observed_at,

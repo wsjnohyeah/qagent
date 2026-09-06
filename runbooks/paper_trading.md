@@ -17,6 +17,10 @@ LIVE_TRADING_ENABLED=false
 
 ## Staged activation
 
+Current state: steps 1–4 are available for a paused/read-only deployment. Step 5 intentionally
+fails for existing Shadow certificates because no current validator emits the required
+`alpaca_day_limit_bracket_one_session@0.1.0` execution profile. Do not bypass this gate.
+
 1. Configure the Alpaca credentials in the ignored environment file or approved production
    secret store. Never place them in Git, logs, screenshots, or discussion posts.
 2. Open **Paper trading** in Control Center and run **Test read-only connection**. Confirm the
@@ -24,8 +28,9 @@ LIVE_TRADING_ENABLED=false
 3. Resolve every unexpected existing position. The worker blocks new exposure when it sees a
    position not associated with a tracked open Paper lifecycle.
 4. Complete Strategy validation/adoption and start an active Shadow deployment.
-5. On the Paper page, review and confirm `paper.enroll` for that exact deployment. This does
-   not submit an order; it makes only future plans eligible.
+5. After the Paper-compatible validator and session-close lifecycle are implemented, review
+   and confirm `paper.enroll` for that exact compatible deployment. This does not submit an
+   order; it makes only future plans eligible.
 6. Change the worker environment to `TRADING_MODE=paper` and
    `PAPER_TRADING_ENABLED=true`, restart it, and verify the `paper` heartbeat. Keep global
    new exposure paused.
@@ -39,10 +44,11 @@ LIVE_TRADING_ENABLED=false
   `client_order_id`.
 - Before POST, and after every uncertain response, the worker queries Alpaca by that client
   ID. It never creates a replacement identity for the same plan.
-- Entry is a whole-share GTC limit order capped at the validated plan price. Stop-loss and
+- Entry is a whole-share DAY limit order capped at the validated plan price. Stop-loss and
   take-profit legs are attached as a bracket.
-- The worker cancels a still-unfilled entry after the plan expires. Filled positions remain
-  protected and continue reconciling until the bracket lifecycle is complete.
+- The worker cancels an unfilled or partially filled entry remainder after plan expiry. A
+  nonzero broker position keeps the lifecycle open as `POSITION_OPEN_REQUIRES_EXIT`, blocks
+  expansion, and requires operator resolution. Automatic close is not yet implemented.
 - New exposure requires an active exact contract, unblocked broker account, adequate buying
   power, account floor and daily-loss headroom, per-trade and portfolio-risk headroom, no
   unmanaged positions, enabled pipeline, and resumed global switch.
@@ -72,8 +78,9 @@ are `paper.enroll`, `paper.pause`, `paper.resume`, `paper.retire`, `paper.tick`,
 1. Confirm global pause. Do not assume pause cancels existing orders.
 2. Inspect Paper orders, lifecycle journal, account, and positions.
 3. If cancellation is required, review and confirm `paper.cancel_order` for the exact order.
-4. If the broker account ID changes, enrollments become `ACCOUNT_MISMATCH`; verify the new
-   account, then explicitly resume to repin it.
+4. If the broker account ID changes, enrollments become `ACCOUNT_MISMATCH`; old intents stay
+   bound to the original account and cannot be forwarded. Verify and resolve the old account
+   before creating any future enrollment.
 5. Preserve all database rows and broker payload snapshots. Never repair an incident by
    deleting order history.
 
