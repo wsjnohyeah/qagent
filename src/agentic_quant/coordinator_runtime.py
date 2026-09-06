@@ -9,6 +9,7 @@ from agentic_quant.config import AppEnvironment, Settings
 from agentic_quant.control_plane import SystemObjectStore
 from agentic_quant.domain import BacktestCostModel, ResearchAnalysisStatus, WorkflowJob
 from agentic_quant.intelligence import (
+    ANALYSIS_PROMPT_VERSION,
     EvidenceBoundResearchAnalyst,
     ResearchEvidenceRetriever,
 )
@@ -23,6 +24,7 @@ from agentic_quant.ml import (
     MLPolicy,
     MLStore,
     WalkForwardMLTrainer,
+    ml_dataset_sha256,
 )
 from agentic_quant.providers.alpaca import AlpacaMarketDataProvider
 from agentic_quant.providers.base import EventPublisher, StockBarsRequest
@@ -188,6 +190,7 @@ class ResearchCoordinatorHandler:
                 as_of_end=snapshot.as_of,
                 horizon_bars=1,
                 policy=self.ml_policy,
+                feature_set_version=FEATURE_SET_VERSION,
             )
         except ValueError as exc:
             return {
@@ -201,6 +204,7 @@ class ResearchCoordinatorHandler:
                 "sample_count": len(examples),
                 "required_samples": self.ml_policy.validation.minimum_samples,
             }
+        dataset_sha256 = ml_dataset_sha256(examples)
         existing = next(
             (
                 item
@@ -208,7 +212,8 @@ class ResearchCoordinatorHandler:
                 if item["symbol"] == snapshot.symbol
                 and item["timeframe"] == snapshot.timeframe
                 and int(item["horizon_bars"]) == 1
-                and item["training_end"] == examples[-1].as_of
+                and item["feature_set_version"] == FEATURE_SET_VERSION
+                and item["dataset_sha256"] == dataset_sha256
             ),
             None,
         )
@@ -259,12 +264,20 @@ class ResearchCoordinatorHandler:
         forecast = self.ml.forecast(str(context.get("forecast_id", "")))
         if snapshot is None or forecast is None:
             return {"outcome": "WAITING_HYBRID_EVIDENCE"}
+        bundle = self.evidence.retrieve(
+            feature_snapshot=snapshot,
+            as_of=snapshot.as_of,
+            forecast=forecast,
+        )
         prior = next(
             (
                 item
                 for item in self.analyst.store.recent(limit=500)
                 if item["feature_snapshot_id"] == snapshot.feature_snapshot_id
                 and item.get("forecast_id") == forecast.forecast_id
+                and item["prompt_version"] == ANALYSIS_PROMPT_VERSION
+                and item["evidence_bundle"]["evidence_bundle_hash"]
+                == bundle.evidence_bundle_hash
             ),
             None,
         )
@@ -278,13 +291,11 @@ class ResearchCoordinatorHandler:
                 "analysis_id": str(prior["analysis_id"]),
                 "analysis_status": str(prior["status"]),
             }
-        bundle = self.evidence.retrieve(
-            feature_snapshot=snapshot,
-            as_of=snapshot.as_of,
-            forecast=forecast,
-        )
         try:
-            analysis = await self.analyst.analyze(bundle)
+            # Keep the qualitative judgment on the same forecast horizon. A
+            # hard-coded multi-day horizon makes a valid one-bar model look
+            # contradictory and forces otherwise healthy hybrid runs to abstain.
+            analysis = await self.analyst.analyze(bundle, horizon=forecast.horizon)
         except LLMBudgetExceededError as exc:
             return {"outcome": "WAITING_LLM_BUDGET", "detail": str(exc)}
         except LLMConfigurationError as exc:

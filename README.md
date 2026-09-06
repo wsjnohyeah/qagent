@@ -565,7 +565,9 @@ in `docs/DEPLOYMENT.md`.
 ## GitHub and cloud path
 
 Current delivery order: the four pre-cloud hardening tasks and Phase 7 Alpaca Paper adapter
-are implemented and fixture-tested locally. Cloud bootstrap, a read-only production Paper
+are implemented and locally release-tested. A real bounded AAPL ML + Research LLM run is
+documented in `docs/E2E_DEPLOYMENT_READINESS_AUDIT_2026-09-06.md`; it correctly abstained on
+weak evidence and did not generate, adopt, or trade a strategy. Cloud bootstrap, a read-only production Paper
 account probe, production-scale backfill, statistical promotion evidence, and continuous
 shadow/paper observation follow on the remote data plane. No Paper order has been sent as
 part of local build verification.

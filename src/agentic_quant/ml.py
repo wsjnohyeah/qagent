@@ -105,6 +105,11 @@ def _canonical_hash(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def ml_dataset_sha256(examples: tuple[MLTrainingExample, ...]) -> str:
+    """Return the stable identity used for an exact point-in-time training set."""
+    return _canonical_hash([item.model_dump(mode="json") for item in examples])
+
+
 def _utc(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
@@ -155,6 +160,7 @@ class MLDatasetBuilder:
         as_of_end: datetime,
         horizon_bars: int,
         policy: MLPolicy,
+        feature_set_version: str | None = None,
     ) -> tuple[MLTrainingExample, ...]:
         if horizon_bars < 1:
             raise ValueError("ML horizon_bars must be positive")
@@ -162,6 +168,7 @@ class MLDatasetBuilder:
             symbol=symbol,
             timeframe=timeframe,
             as_of_end=as_of_end,
+            feature_set_version=feature_set_version,
         )
         if len(snapshots) <= horizon_bars:
             raise ValueError("Not enough feature snapshots to construct ML labels")
@@ -900,9 +907,7 @@ class WalkForwardMLTrainer:
             len(examples),
             embargo_bars=effective_embargo,
         )
-        dataset_sha256 = _canonical_hash(
-            [item.model_dump(mode="json") for item in examples]
-        )
+        dataset_sha256 = ml_dataset_sha256(examples)
         drift = _population_stability(examples, self.policy.features)
         drafts: list[dict[str, Any]] = []
         for kind in (MLModelKind.LOGISTIC_REGRESSION, MLModelKind.BOOSTED_STUMPS):
@@ -1255,7 +1260,11 @@ class MLPredictor:
             forecast_id=uuid7(),
             symbol=snapshot.symbol,
             as_of=snapshot.as_of,
-            horizon=f"{model.horizon_bars} bars",
+            horizon=(
+                "1 bar"
+                if model.horizon_bars == 1
+                else f"{model.horizon_bars} bars"
+            ),
             expected_return=Decimal(str(expected_return)),
             probability_up=Decimal(str(probability)),
             uncertainty=Decimal(str(1.0 - abs(probability - 0.5) * 2.0)),
@@ -1276,4 +1285,5 @@ __all__ = [
     "MLTrainingResult",
     "WalkForwardMLTrainer",
     "load_ml_policy",
+    "ml_dataset_sha256",
 ]

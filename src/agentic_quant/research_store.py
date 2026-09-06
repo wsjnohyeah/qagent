@@ -333,17 +333,21 @@ class ResearchStore:
         symbol: str,
         timeframe: str,
         as_of_end: datetime,
+        feature_set_version: str | None = None,
     ) -> tuple[PointInTimeFeatureSnapshot, ...]:
+        predicates = [
+            feature_snapshots.c.symbol == symbol.upper(),
+            feature_snapshots.c.timeframe == timeframe,
+            feature_snapshots.c.as_of <= as_of_end,
+            feature_snapshots.c.source_max_available_from <= as_of_end,
+        ]
+        if feature_set_version is not None:
+            predicates.append(
+                feature_snapshots.c.feature_set_version == feature_set_version
+            )
         statement = (
             select(feature_snapshots)
-            .where(
-                and_(
-                    feature_snapshots.c.symbol == symbol.upper(),
-                    feature_snapshots.c.timeframe == timeframe,
-                    feature_snapshots.c.as_of <= as_of_end,
-                    feature_snapshots.c.source_max_available_from <= as_of_end,
-                )
-            )
+            .where(and_(*predicates))
             .order_by(
                 feature_snapshots.c.as_of.asc(),
                 feature_snapshots.c.created_at.asc(),

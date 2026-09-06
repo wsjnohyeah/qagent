@@ -34,7 +34,7 @@ from agentic_quant.domain import LLMWorkload
 
 
 ANALYSIS_SCHEMA_VERSION = "research_analysis@0.2.0"
-ANALYSIS_PROMPT_VERSION = "evidence_bound_analyst@0.1.0"
+ANALYSIS_PROMPT_VERSION = "evidence_bound_analyst@0.2.0"
 AI_GRAPH_VERSION = "ai_infrastructure_graph@0.1.0"
 
 
@@ -133,7 +133,14 @@ class ResearchEvidenceRetriever:
                     event_time=forecast.as_of,
                     available_from=forecast.as_of,
                     source=forecast.model_version,
-                    text=json.dumps(forecast.model_dump(mode="json"), sort_keys=True),
+                    # The model can be computed later while replaying a historical
+                    # cutoff. Its wall-clock creation timestamp is lineage metadata,
+                    # not evidence from the future and must not be interpreted as
+                    # such by the analyst.
+                    text=json.dumps(
+                        forecast.model_dump(mode="json", exclude={"created_at"}),
+                        sort_keys=True,
+                    ),
                 )
             )
         ordered = tuple(
@@ -455,7 +462,9 @@ class EvidenceBoundResearchAnalyst:
                     ensure_ascii=False,
                     sort_keys=True,
                 ),
-                max_output_tokens=1_800,
+                # Reasoning tokens count against this Responses API ceiling. Keep
+                # enough headroom for high-effort reasoning plus the JSON answer.
+                max_output_tokens=4_096,
                 timeout_seconds=180,
             )
         )

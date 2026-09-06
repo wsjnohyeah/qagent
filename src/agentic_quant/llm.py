@@ -41,6 +41,8 @@ class LLMProviderError(RuntimeError):
         provider: LLMProviderName,
         code: str,
         status_code: int | None = None,
+        usage: LLMUsage | None = None,
+        response_id: str | None = None,
     ) -> None:
         message = f"{provider.value} LLM request failed: {code}"
         if status_code is not None:
@@ -49,6 +51,8 @@ class LLMProviderError(RuntimeError):
         self.provider = provider
         self.code = code
         self.status_code = status_code
+        self.usage = usage
+        self.response_id = response_id
 
 
 class LLMProviderConfig(FrozenModel):
@@ -218,12 +222,18 @@ class ResponsesAPIProvider:
                 code="invalid_response_shape",
                 status_code=response.status_code,
             )
+        usage = self._usage(body, status_code=response.status_code)
+        response_id = str(
+            body.get("id") or response.headers.get("x-request-id") or "UNKNOWN"
+        )
         response_status = body.get("status")
         if response_status not in {None, "completed"}:
             raise LLMProviderError(
                 provider=self.name,
                 code=f"response_status_{response_status}",
                 status_code=response.status_code,
+                usage=usage,
+                response_id=response_id,
             )
         output_text = self._output_text(body)
         if not output_text:
@@ -231,7 +241,17 @@ class ResponsesAPIProvider:
                 provider=self.name,
                 code="missing_output_text",
                 status_code=response.status_code,
+                usage=usage,
+                response_id=response_id,
             )
+
+        return LLMProviderResult(
+            response_id=response_id,
+            output_text=output_text,
+            usage=usage,
+        )
+
+    def _usage(self, body: dict[str, Any], *, status_code: int) -> LLMUsage:
         raw_usage = body.get("usage") or {}
         usage_payload = raw_usage if isinstance(raw_usage, dict) else {}
         raw_output_details = usage_payload.get("output_tokens_details") or {}
@@ -249,17 +269,13 @@ class ResponsesAPIProvider:
             raise LLMProviderError(
                 provider=self.name,
                 code="invalid_usage_shape",
-                status_code=response.status_code,
+                status_code=status_code,
             ) from exc
-        return LLMProviderResult(
-            response_id=str(body.get("id") or response.headers.get("x-request-id") or "UNKNOWN"),
-            output_text=output_text,
-            usage=LLMUsage(
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                total_tokens=total_tokens,
-                reasoning_tokens=reasoning_tokens,
-            ),
+        return LLMUsage(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            reasoning_tokens=reasoning_tokens,
         )
 
     async def _post(
@@ -557,7 +573,14 @@ class LLMGateway:
             result = await provider.complete(request)
         except LLMProviderError as exc:
             if self.budget_manager is not None:
-                self.budget_manager.release(invocation_id=invocation_id)
+                if exc.usage is not None:
+                    self.budget_manager.settle(
+                        invocation_id=invocation_id,
+                        usage=exc.usage,
+                        now=datetime.now(UTC),
+                    )
+                else:
+                    self.budget_manager.release(invocation_id=invocation_id)
             invocation = self._failed_invocation(
                 invocation_id=invocation_id,
                 request=request,
@@ -574,6 +597,8 @@ class LLMGateway:
                     if exc.status_code is not None
                     else exc.code
                 ),
+                usage=exc.usage,
+                response_id=exc.response_id,
                 routing_version=routing_version,
                 routing_sha256=routing_sha256,
             )
@@ -629,6 +654,8 @@ class LLMGateway:
         created_at: datetime,
         started: float,
         error_code: str,
+        usage: LLMUsage | None = None,
+        response_id: str | None = None,
         routing_version: str,
         routing_sha256: str,
     ) -> LLMInvocation:
@@ -645,6 +672,8 @@ class LLMGateway:
             request_sha256=request_sha256,
             input_sha256=input_sha256,
             request_envelope=request_envelope,
+            response_id=response_id,
+            usage=usage or LLMUsage(),
             latency_ms=max(0, int((monotonic() - started) * 1_000)),
             status=LLMInvocationStatus.FAILED,
             error_code=error_code,

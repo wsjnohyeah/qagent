@@ -1685,6 +1685,7 @@ def create_app(
         )
         if not snapshots:
             raise HTTPException(status_code=422, detail="no feature snapshots found")
+        training_feature_version = snapshots[-1].feature_set_version
         try:
             examples = MLDatasetBuilder(research_store).build(
                 symbol=request.symbol,
@@ -1692,6 +1693,7 @@ def create_app(
                 as_of_end=request.as_of_end,
                 horizon_bars=request.horizon_bars,
                 policy=ml_policy,
+                feature_set_version=training_feature_version,
             )
             result = WalkForwardMLTrainer(
                 ml_store,
@@ -1702,7 +1704,7 @@ def create_app(
                 symbol=request.symbol,
                 timeframe=request.timeframe,
                 horizon_bars=request.horizon_bars,
-                feature_set_version=snapshots[0].feature_set_version,
+                feature_set_version=training_feature_version,
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc

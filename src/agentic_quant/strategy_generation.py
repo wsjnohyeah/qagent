@@ -159,7 +159,7 @@ class HybridStrategyGenerator:
                     prompt_version="hybrid_strategy_generation@0.1.0",
                     instructions=self._generation_instructions(),
                     input_text=json.dumps(source, sort_keys=True, default=str),
-                    max_output_tokens=900,
+                    max_output_tokens=4_096,
                 ),
                 provider_override=provider_override,
             )
@@ -186,7 +186,7 @@ class HybridStrategyGenerator:
                     prompt_version="hybrid_strategy_critique@0.1.0",
                     instructions=self._critique_instructions(),
                     input_text=json.dumps(critique_input, sort_keys=True, default=str),
-                    max_output_tokens=700,
+                    max_output_tokens=4_096,
                 ),
                 provider_override=provider_override,
             )

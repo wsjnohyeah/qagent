@@ -2589,7 +2589,7 @@ order was used as a build test.
 
 ### C032 — `Build guarded Alpaca paper execution`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `c6a8020`.
 - Date: 2026-09-06 PDT.
 - User intent: implement Paper trading after completing the pre-cloud and review work.
 - Scope:
@@ -2628,6 +2628,52 @@ order was used as a build test.
   - Phase 7 Paper code is ready for guarded deployment and a read-only account probe. No Paper
     order or live-money operation has occurred. Cloud infrastructure inputs and real elapsed
     Paper/statistical evidence remain open.
+
+### C033 — `Harden the real ML plus LLM research loop`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-06 PDT.
+- User intent: re-audit local readiness end to end instead of equating deployable source with
+  a proven research loop, repair every reproduced blocker, and run a bounded real ML + LLM
+  experiment without sending Paper orders.
+- Scope:
+  - Pinned ML datasets to one explicit feature-set version so legacy PIT snapshots cannot
+    contaminate a current training run.
+  - Added Alembic `20260906_0029` to accommodate the real descriptive ML selection metric in
+    PostgreSQL, and replaced the broken nonexistent-`training_end` reuse check with exact
+    dataset-hash reuse.
+  - Increased high-effort research/generation/critique output headroom to the configured
+    4,096-token ceiling and made incomplete provider responses retain reported usage and
+    settle their USD budget reservation.
+  - Aligned the Research LLM horizon to the ML forecast, excluded wall-clock forecast creation
+    metadata from market evidence, and bound reusable analyses to the current prompt version
+    and exact evidence-bundle hash.
+  - Added adverse regression tests and the evidence-backed audit report
+    `docs/E2E_DEPLOYMENT_READINESS_AUDIT_2026-09-06.md`.
+- Architecture/decision impact:
+  - “Source-ready to bootstrap,” “operationally deployed,” and “statistically proven strategy”
+    are separate states. Passing the first never implies the latter two.
+  - A real LLM abstention is a successful fail-closed research outcome. It must not be changed
+    into a candidate merely to demonstrate downstream UI or execution.
+  - Feature/prompt/data identities now govern reuse; old artifacts remain immutable and
+    inspectable without silently controlling a newer research cycle.
+- Validation:
+  - A real AAPL run processed 755 bars, 735 current snapshots, 734 ML examples, two candidates,
+    one forecast, and 14 feature/forecast/document evidence items. `gpt-5.6-sol` returned a
+    citation-valid `ABSTAIN` at 0.90 confidence because the selected candidate was weak (final
+    holdout AUC 0.4711, Brier 0.2606) and evidence conflicted.
+  - The final successful research call used 6,386 tokens and an estimated `$0.070045`; three
+    successful audit calls totaled 16,689 tokens and `$0.193455`. No Paper order was sent.
+  - `make release-check` passed with Flake8, strict mypy across 58 source files, 124 tests,
+    authenticated doctors, secret scan, Docker rebuild, PostgreSQL schema drift, and Alembic
+    head `20260906_0029`.
+  - A fresh SQLite database passed base-to-head upgrade, downgrade to `0028`, re-upgrade, and
+    zero-drift checks. Production Compose rendering and deploy-script shell validation passed.
+- Expected global state after commit:
+  - The local implementation is source-ready for a guarded cloud bootstrap, and the real
+    research path is verified through a safe LLM abstention. Cloud infrastructure/TLS/secrets/
+    backup/monitoring, production-scale statistical evidence, a naturally accepted live-model
+    generation/critique path, and elapsed Shadow/Paper observation remain open.
 
 ## Template for future commit entries
 

@@ -187,6 +187,7 @@ def test_walk_forward_training_calibration_drift_and_forecast(
     forecast = MLPredictor(store).predict(model=selected, snapshot=snapshots[-1])
     replay = MLPredictor(store).predict(model=selected, snapshot=snapshots[-1])
     assert Decimal("0") <= forecast.probability_up <= Decimal("1")
+    assert forecast.horizon == "1 bar"
     assert replay.forecast_id == forecast.forecast_id
     assert store.forecast(forecast.forecast_id) == forecast
     evidence = ResearchEvidenceRetriever(DocumentStore(ledger.engine)).retrieve(
@@ -244,6 +245,41 @@ def test_walk_forward_training_calibration_drift_and_forecast(
             approved_by="human-reviewer",
             reason="test promotion",
         )
+
+
+def test_training_can_pin_one_feature_version_when_legacy_rows_remain(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    research = ResearchStore(EventLedger(settings.database_url).engine)
+    snapshots = _seed_snapshots(research, count=40)
+    legacy_as_of = snapshots[10].as_of - timedelta(minutes=1)
+    legacy = research.record_feature_snapshot(
+        snapshots[10].model_copy(
+            update={
+                "feature_snapshot_id": uuid7(),
+                "as_of": legacy_as_of,
+                "feature_set_version": "price_event_pit@0.1.0",
+                "source_max_available_from": legacy_as_of,
+                "data_hash": hashlib.sha256(b"legacy-feature-row").hexdigest(),
+                "created_at": legacy_as_of,
+            }
+        )
+    )
+
+    examples = MLDatasetBuilder(research).build(
+        symbol="AAPL",
+        timeframe="1Day",
+        as_of_end=snapshots[-1].as_of,
+        horizon_bars=1,
+        policy=load_ml_policy(ROOT / "configs/ml_policy.yaml"),
+        feature_set_version="price_event_pit@0.2.0",
+    )
+
+    assert examples
+    assert legacy.feature_snapshot_id not in {
+        item.feature_snapshot_id for item in examples
+    }
 
 
 def test_ml_labels_follow_executable_bars_and_ignore_sparse_snapshot_spacing(

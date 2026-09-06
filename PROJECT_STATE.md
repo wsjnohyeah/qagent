@@ -40,7 +40,7 @@
 - Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
   experiment runs, backtest trades, corporate actions, historical universe membership,
   feature parity checks, and walk-forward reports are stored through Alembic revision
-  `20260906_0028`, including exact validation contracts, shadow risk lineage, fenced workflow
+  `20260906_0029`, including exact validation contracts, shadow risk lineage, fenced workflow
   attempts, generation-attempt audit, runtime leases, and the event outbox.
 - The Phase 3 runner provides buy-and-hold, long/cash momentum, and long/cash
   mean-reversion baselines with next-bar execution, commission, slippage, metrics, hashes,
@@ -117,11 +117,17 @@
   were synchronized at `3b3926e` before this implementation iteration.
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases.
-- The prior corrected baseline passed 106 tests; the Phase 7 implementation passes 121 tests,
-  strict typing across 58 source files, authenticated local
+- The current end-to-end audit passes 124 tests, strict typing across 58 source files,
+  authenticated local
   and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, schema migration checks, zero
-  PostgreSQL schema drift, and the repository secret scan. Paid providers were not called
-  during this remediation.
+  PostgreSQL schema drift, and the repository secret scan.
+- A real bounded AAPL coordinator run trained 734 point-in-time examples, persisted two ML
+  candidates and a one-bar forecast, supplied 14 time-safe feature/forecast/document items to
+  `gpt-5.6-sol`, and received a citation-valid `ABSTAIN` at 0.90 confidence. The selected ML
+  candidate failed its promotion gates (final-holdout ROC AUC 0.4711, Brier 0.2606), so no
+  strategy, adoption, Shadow trade, or Paper order was produced. The final call cost estimate
+  was `$0.070045`; the complete audit is in
+  `docs/E2E_DEPLOYMENT_READINESS_AUDIT_2026-09-06.md`.
 - The independent review of `3b3926e` is dispositioned in
   `docs/REVIEW_REMEDIATION_3B3926E_2026-09-06.md`. Its N01–N07 counterexamples now have
   subject-aware admission, actual-time forward guards, calendar-correct ML labels,

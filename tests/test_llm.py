@@ -28,6 +28,7 @@ from agentic_quant.llm import (
     ResponsesAPIProvider,
     load_llm_routing_config,
 )
+from agentic_quant.llm_budget import LLMBudgetManager, load_llm_budget_policy
 from agentic_quant.llm_store import LLMStore
 from agentic_quant.migrations import upgrade_database
 
@@ -243,6 +244,56 @@ def test_responses_api_provider_retries_rate_limit_once() -> None:
     assert result.response_id == "resp_retry"
 
 
+def test_responses_api_provider_preserves_usage_on_incomplete_response() -> None:
+    async def scenario() -> None:
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "id": "resp_incomplete",
+                    "status": "incomplete",
+                    "output": [],
+                    "usage": {
+                        "input_tokens": 120,
+                        "output_tokens": 80,
+                        "total_tokens": 200,
+                        "output_tokens_details": {"reasoning_tokens": 80},
+                    },
+                },
+            )
+
+        client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url="https://example.invalid/v1",
+        )
+        provider = ResponsesAPIProvider(
+            name=LLMProviderName.OPENAI,
+            api_key="test-key",
+            config=_provider_config(model="gpt-5.6-sol", send_store_false=True),
+            client=client,
+        )
+        with pytest.raises(LLMProviderError) as exc_info:
+            await provider.complete(
+                LLMRequest(
+                    workload=LLMWorkload.CRITICAL_RESEARCH,
+                    prompt_version="test@0.1.0",
+                    instructions="Return JSON.",
+                    input_text="Evidence.",
+                )
+            )
+        await client.aclose()
+        assert exc_info.value.code == "response_status_incomplete"
+        assert exc_info.value.response_id == "resp_incomplete"
+        assert exc_info.value.usage == LLMUsage(
+            input_tokens=120,
+            output_tokens=80,
+            total_tokens=200,
+            reasoning_tokens=80,
+        )
+
+    asyncio.run(scenario())
+
+
 class FakeProvider:
     def __init__(self, name: LLMProviderName, config: LLMProviderConfig) -> None:
         self.name = name
@@ -259,6 +310,23 @@ class FakeProvider:
 
     async def aclose(self) -> None:
         return None
+
+
+class IncompleteProvider(FakeProvider):
+    async def complete(self, request: LLMRequest) -> LLMProviderResult:
+        self.calls += 1
+        raise LLMProviderError(
+            provider=self.name,
+            code="response_status_incomplete",
+            status_code=200,
+            usage=LLMUsage(
+                input_tokens=120,
+                output_tokens=80,
+                total_tokens=200,
+                reasoning_tokens=80,
+            ),
+            response_id="resp_incomplete",
+        )
 
 
 def test_gateway_routes_and_persists_immutable_audit(
@@ -325,6 +393,46 @@ def test_gateway_routes_and_persists_immutable_audit(
     events = ledger.by_correlation_id(invocation.invocation_id)
     assert events[-1]["event_type"] == "llm.invocation.recorded.v1"
     assert "input_text" not in events[-1]["payload"]
+
+
+def test_gateway_settles_budget_for_billed_incomplete_response(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    store = LLMStore(ledger.engine)
+    routing = load_llm_routing_config(_routing_path())
+    provider = IncompleteProvider(
+        LLMProviderName.OPENAI,
+        routing.providers[LLMProviderName.OPENAI],
+    )
+    budget = LLMBudgetManager(
+        ledger.engine,
+        load_llm_budget_policy(Path(__file__).parents[1] / "configs/llm_budget.yaml"),
+    )
+    gateway = LLMGateway(
+        routing=routing,
+        providers={LLMProviderName.OPENAI: provider},
+        store=store,
+        budget_manager=budget,
+    )
+
+    with pytest.raises(LLMProviderError, match="response_status_incomplete"):
+        asyncio.run(
+            gateway.complete(
+                LLMRequest(
+                    workload=LLMWorkload.CRITICAL_RESEARCH,
+                    prompt_version="test@0.1.0",
+                    instructions="Return JSON.",
+                    input_text="Evidence.",
+                )
+            )
+        )
+
+    invocation = store.recent(limit=1)[0]
+    assert invocation["status"] == "FAILED"
+    assert invocation["usage"]["total_tokens"] == 200
+    assert budget.summary()["reservation_counts"] == {"SETTLED": 1}
 
 
 def test_gateway_fails_closed_and_audits_missing_credentials(

@@ -907,7 +907,7 @@ ml_training_runs = Table(
     Column("embargo_bars", Integer, nullable=False),
     Column("model_ids_json", JSON, nullable=False),
     Column("selected_model_id", String(36), nullable=False),
-    Column("selection_metric", String(80), nullable=False),
+    Column("selection_metric", String(160), nullable=False),
     Column("status", String(24), nullable=False, index=True),
     Column("code_git_sha", String(64), nullable=False),
     Column("started_at", DateTime(timezone=True), nullable=False),

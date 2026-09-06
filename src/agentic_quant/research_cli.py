@@ -389,6 +389,7 @@ def _ml_train(settings: Settings, args: argparse.Namespace) -> None:
     )
     if not snapshots:
         raise ValueError("No feature snapshots found for ML training")
+    training_feature_version = snapshots[-1].feature_set_version
     policy = load_ml_policy(settings.ml_policy_path)
     examples = MLDatasetBuilder(research_store).build(
         symbol=args.symbol.upper(),
@@ -396,6 +397,7 @@ def _ml_train(settings: Settings, args: argparse.Namespace) -> None:
         as_of_end=args.end,
         horizon_bars=args.horizon_bars,
         policy=policy,
+        feature_set_version=training_feature_version,
     )
     result = WalkForwardMLTrainer(
         MLStore(ledger.engine, ledger),
@@ -406,7 +408,7 @@ def _ml_train(settings: Settings, args: argparse.Namespace) -> None:
         symbol=args.symbol.upper(),
         timeframe=args.timeframe,
         horizon_bars=args.horizon_bars,
-        feature_set_version=snapshots[0].feature_set_version,
+        feature_set_version=training_feature_version,
     )
     print(json.dumps(result.model_dump(mode="json"), indent=2))
 
