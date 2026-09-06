@@ -7,7 +7,7 @@ Context format: v1
 Current phase: implementation foundations through Phase 6 are locally verified; Phase 5
 statistical promotion and Phase 6 production/runtime exit criteria remain open
 
-Current documented baseline: C026 — `Update CI actions to Node 24 runtimes`
+Current documented baseline: C027 — `Pin current Node 24 CI actions`
 
 ## Purpose and authority
 
@@ -121,8 +121,8 @@ A Git commit cannot contain its own content-derived hash without changing that h
 - Local repository root: `/Users/ethanhqc/Documents/Codex/2026-09-03/files-mentioned-by-the-user-readme`
 - Default branch: `main`
 - GitHub remote: `https://github.com/wsjnohyeah/qagent.git`
-- CI uses `actions/checkout@v7` and `astral-sh/setup-uv@v10`, avoiding the deprecated Node
-  20 action runtime warning.
+- CI uses `actions/checkout@v7.0.1` and `astral-sh/setup-uv@v10.0.1`, avoiding the deprecated
+  Node 20 action runtime warning.
 - First commit: `5374c1b Bootstrap safety-first Phase 0 environment`
 - Local runtime artifacts and secrets are excluded through `.gitignore`.
 - CI is defined for lint, strict typing, tests, a secret-pattern scan, and Docker image build.
@@ -2126,10 +2126,27 @@ The Compose stack is currently intended to remain running for local inspection. 
 - Validation:
   - The preceding C025 GitHub CI run passed every code/test/build step and exposed only the
     Node 20 deprecation warning.
-  - The C026 GitHub CI run is verified after push.
+  - The C026 GitHub CI run failed before checkout because `astral-sh/setup-uv` publishes
+    exact `v10.0.1` releases but no floating `v10` ref. C027 corrects the reference.
 - Expected global state after commit:
   - CI retains the same locked Python 3.12/uv test and Docker build workflow without the
     deprecated action-runtime warning.
+
+### C027 — `Pin current Node 24 CI actions`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-05 PDT.
+- User intent: correct the CI dependency update discovered by repository-side validation.
+- Scope:
+  - Replaced the unavailable floating action refs with the verified release tags
+    `actions/checkout@v7.0.1` and `astral-sh/setup-uv@v10.0.1`.
+- Architecture/decision impact:
+  - None; the workflow behavior and locked application dependencies are unchanged.
+- Validation:
+  - GitHub's release API confirmed both tags as the current official releases.
+  - GitHub CI is rerun after push and must pass before this review is considered complete.
+- Expected global state after commit:
+  - CI runs on supported Node 24 action runtimes without an unresolved action reference.
 
 ## Open work
 
