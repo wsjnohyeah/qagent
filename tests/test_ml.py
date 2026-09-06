@@ -28,6 +28,7 @@ from agentic_quant.ids import uuid7
 from agentic_quant.intelligence import IntelligenceStore, ResearchEvidenceRetriever
 from agentic_quant.ledger import EventLedger
 from agentic_quant.market_store import MarketDataStore
+from agentic_quant.market_calendar import MarketSessionClock
 from agentic_quant.migrations import upgrade_database
 from agentic_quant.ml import (
     MLDatasetBuilder,
@@ -49,9 +50,18 @@ def _seed_snapshots(
 ) -> tuple[PointInTimeFeatureSnapshot, ...]:
     snapshots = []
     bars = []
+    clock = MarketSessionClock("XNYS")
+    sessions = clock.calendar.sessions_in_range("2025-01-02", "2025-12-31")[
+        :count
+    ]
     closes = [100.0 + 4.0 * math.sin(index / 3.0) + index * 0.04 for index in range(count)]
-    for index, close in enumerate(closes):
-        as_of = datetime(2025, 1, 1, tzinfo=UTC) + timedelta(days=index)
+    for index, (close, session) in enumerate(zip(closes, sessions, strict=True)):
+        event_time = datetime.combine(
+            session.date(),
+            datetime.min.time(),
+            tzinfo=UTC,
+        )
+        as_of = clock.daily_bar_available_from(event_time)
         digest = hashlib.sha256(f"snapshot-{index}".encode()).hexdigest()
         packet = store.record_evidence_packet(
             EvidencePacket(
@@ -104,7 +114,7 @@ def _seed_snapshots(
                 bar_id=f"bar-{index}",
                 symbol="AAPL",
                 timeframe="1Day",
-                event_time=as_of - timedelta(hours=7),
+                event_time=event_time,
                 available_from=as_of,
                 open=Decimal(str(close - 0.25)),
                 high=Decimal(str(close + 0.5)),
@@ -295,6 +305,7 @@ def test_ml_label_does_not_apply_split_that_precedes_next_open(
         as_of_end=snapshots[-1].as_of,
     )
     builder = MLDatasetBuilder(research)
+    entry_open = builder.session_clock.daily_bar_session_open(bars[1].event_time)
 
     class PreEntrySplitStore:
         @staticmethod
@@ -304,7 +315,7 @@ def test_ml_label_does_not_apply_split_that_precedes_next_open(
                     action_type=CorporateActionType.SPLIT,
                     split_ratio=Decimal("2"),
                     cash_amount=None,
-                    effective_at=bars[1].event_time - timedelta(hours=1),
+                    effective_at=entry_open - timedelta(minutes=1),
                 ),
             )
 
@@ -313,11 +324,11 @@ def test_ml_label_does_not_apply_split_that_precedes_next_open(
         symbol="AAPL",
         timeframe="1Day",
         as_of_end=snapshots[-1].as_of,
-        horizon_bars=1,
+        horizon_bars=2,
         policy=load_ml_policy(ROOT / "configs/ml_policy.yaml"),
     )
     assert examples[0].forward_return == pytest.approx(
-        float(bars[1].close / bars[1].open - Decimal("1"))
+        float(bars[2].close / bars[1].open - Decimal("1"))
     )
 
 

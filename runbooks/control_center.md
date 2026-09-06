@@ -46,6 +46,13 @@ threads. List changes append a numbered revision; restriction-list edits remain 
 changes and cannot be made in the UI. Raw previews are size-bounded and may read only the
 configured archive root/bucket.
 
+The Strategy page is intentionally narrative-first. It labels deterministic baseline specs
+as having no LLM participation. For a hybrid candidate it shows the point-in-time feature
+snapshot, ML model/forecast, the Research LLM thesis and cited claims, generator proposal,
+critic verdict, immutable rule, exact validation, replay trades, and separate forward-shadow
+evidence. Provider/model/cost inspection is linked from each recorded LLM step. Raw JSON is
+kept only in the collapsed Advanced diagnostics section.
+
 The initial lists are:
 
 - `trading-universe`: governed scan scope;

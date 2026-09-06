@@ -46,7 +46,7 @@ research:
     selection_failure_diagnostic: selected_oos_below_median_rate
     probability_of_backtest_overfitting: required
     deflated_sharpe: required
-    promotion_policy: research_gate@0.1.0
+    promotion_policy: research_gate@0.2.0
     automatic_promotion: false
     regimes: [up, down, sideways]
   universe_membership:
@@ -71,4 +71,4 @@ machine_learning:
   drift_metric: population_stability_index
   registry_states: [CANDIDATE, CHALLENGER, CHAMPION, RETIRED, REJECTED]
   automatic_promotion: false
-  downstream_strategy_gate: research_gate@0.1.0
+  downstream_strategy_gate: research_gate@0.2.0

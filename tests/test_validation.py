@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agentic_quant.api import create_app
+from agentic_quant.control_plane import SystemObjectStore
 from agentic_quant.domain import BacktestCostModel, StockBar
 from agentic_quant.ids import uuid7
 from agentic_quant.ledger import EventLedger
@@ -23,6 +24,8 @@ from agentic_quant.validation import (
     combinatorial_purged_diagnostics,
     deflated_sharpe_diagnostics,
 )
+from agentic_quant.risk import RestrictionRegistry, RiskPolicy
+from agentic_quant.shadow import ShadowRuntime
 
 
 def test_continuous_oos_drawdown_keeps_intrafold_loss_and_cross_fold_peak() -> None:
@@ -128,6 +131,8 @@ def test_walk_forward_validation_preserves_embargo_and_all_candidates(
         "1"
     )
     assert report.robustness_metrics["deflated_sharpe"]["sample_size"] == 3
+    assert report.robustness_metrics["deflated_sharpe"]["number_of_trials"] == 2
+    assert report.robustness_metrics["selection_search_trial_count"] == 2
     assert report.gate_assessment["status"] == "INSUFFICIENT_EVIDENCE"
     assert report.gate_assessment["automatic_promotion"] is False
     assert len(report.report_hash) == 64
@@ -197,6 +202,82 @@ def test_api_validates_the_exact_generated_strategy_spec_id(
         "momentum": spec.strategy_spec_id
     }
     assert payload["gate_assessment"]["status"] == "INSUFFICIENT_EVIDENCE"
+
+
+def test_real_static_validation_can_reach_adoption_and_shadow_start(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    market = MarketDataStore(ledger.engine)
+    store = ResearchStore(ledger.engine)
+    bars = _regime_bars(count=75)
+    market.insert_bars(bars, raw_object_id="TEST_RAW")
+    spec = store.record_strategy_spec(
+        default_strategy_spec(
+            "momentum",
+            timeframe="1Day",
+            code_sha256=research_code_sha256(),
+        )
+    )
+    permissive_test_policy = PromotionGatePolicy(
+        version="research_gate@0.2.0",
+        minimum_oos_folds=4,
+        minimum_candidate_count=3,
+        minimum_regime_count=1,
+        maximum_probability_of_backtest_overfitting=Decimal("0.20"),
+        minimum_deflated_sharpe_probability=Decimal("0"),
+        minimum_positive_oos_fold_rate=Decimal("0"),
+        maximum_allowed_drawdown=Decimal("-1"),
+    )
+    validator = WalkForwardValidator(
+        store,
+        ledger,
+        promotion_policy=permissive_test_policy,
+        risk_policy=RiskPolicy.from_yaml(settings.risk_policy_path),
+        restrictions=RestrictionRegistry.from_yaml(
+            settings.restricted_securities_path
+        ),
+    )
+    report = validator.run(
+        symbol="AAPL",
+        timeframe="1Day",
+        as_of_start=bars[20].available_from,
+        as_of_end=bars[-1].available_from,
+        code_git_sha="test-git-sha",
+        strategy_spec=spec,
+        train_bars=22,
+        test_bars=5,
+        step_bars=5,
+        embargo_bars=1,
+    )
+    assert report.gate_assessment["status"] == "ELIGIBLE_FOR_HUMAN_REVIEW"
+    objects = SystemObjectStore(ledger.engine, ledger)
+    objects.ensure_defaults()
+    shadow = ShadowRuntime(
+        ledger.engine,
+        store,
+        objects,
+        risk_policy=RiskPolicy.from_yaml(settings.risk_policy_path),
+        restrictions=RestrictionRegistry.from_yaml(
+            settings.restricted_securities_path
+        ),
+    )
+    shadow.initialize_virtual_account()
+    adoption = shadow.adopt_strategy(
+        strategy_spec_id=spec.strategy_spec_id,
+        validation_report_id=report.validation_report_id,
+        reason="Tested real exact-spec validation path",
+        approved_by="test-admin",
+    )
+    deployment = shadow.start_deployment(
+        strategy_spec_id=spec.strategy_spec_id,
+        symbol="AAPL",
+        initial_cash=Decimal("100000"),
+        requested_by="test-admin",
+    )
+    assert adoption["status"] == "ADOPTED_FOR_SHADOW"
+    assert deployment["status"] == "ACTIVE"
 
 
 def test_pbo_and_deflated_sharpe_diagnostics_are_bounded_and_deterministic() -> None:
@@ -291,3 +372,33 @@ def test_research_gate_never_auto_promotes_and_requires_enough_evidence() -> Non
     assert eligible["status"] == "ELIGIBLE_FOR_HUMAN_REVIEW"
     assert eligible["automatic_promotion"] is False
     assert insufficient["status"] == "INSUFFICIENT_EVIDENCE"
+
+
+def test_static_strategy_gate_treats_candidate_count_and_pbo_as_not_applicable() -> None:
+    policy = PromotionGatePolicy(
+        version="research_gate@0.2.0",
+        minimum_oos_folds=4,
+        minimum_candidate_count=3,
+        minimum_regime_count=2,
+        maximum_probability_of_backtest_overfitting=Decimal("0.20"),
+        minimum_deflated_sharpe_probability=Decimal("0.90"),
+        minimum_positive_oos_fold_rate=Decimal("0.50"),
+        maximum_allowed_drawdown=Decimal("-0.20"),
+    )
+    result = assess_research_gate(
+        policy=policy,
+        fold_count=12,
+        candidate_count=1,
+        regime_count=3,
+        positive_fold_rate=Decimal("0.75"),
+        worst_drawdown=Decimal("-0.10"),
+        probability_of_backtest_overfitting=Decimal("0"),
+        deflated_sharpe_probability=Decimal("0.97"),
+        pbo_applicable=False,
+        validation_subject="static_strategy",
+    )
+
+    assert result["status"] == "ELIGIBLE_FOR_HUMAN_REVIEW"
+    assert result["eligible_for_human_review"] is True
+    assert result["pbo_applicable"] is False
+    assert result["evidence_shortfalls"] == []

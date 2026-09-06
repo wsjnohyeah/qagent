@@ -80,14 +80,25 @@ class MarketDataIngestionService:
                 raw_object_id = self.store.register_raw_object(archived)
                 inserted_ids = self.store.insert_bars(page.bars, raw_object_id)
                 records_inserted += len(inserted_ids)
+                canonical_bars = self.store.canonical_bars(page.bars)
                 events = tuple(
                     self._bar_event(
-                        bar.model_copy(update={"raw_object_id": raw_object_id}),
+                        bar,
                         run_id=run_id,
                     )
-                    for bar in page.bars
+                    for bar in canonical_bars
                 )
-                enqueued = self.ledger.append_batch(events)
+                enqueued = self.ledger.append_batch(
+                    events,
+                    reconcile_business_ids=any(
+                        incoming.bar_id != stored.bar_id
+                        for incoming, stored in zip(
+                            page.bars,
+                            canonical_bars,
+                            strict=True,
+                        )
+                    ),
+                )
                 self.ledger.deliver_batch(
                     events,
                     self.publisher,

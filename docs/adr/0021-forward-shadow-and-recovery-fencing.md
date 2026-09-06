@@ -1,6 +1,6 @@
 # ADR 0021: Forward shadow execution and recovery fencing
 
-- Status: accepted
+- Status: superseded in part by ADR 0022 and ADR 0023
 - Date: 2026-09-06
 
 ## Context

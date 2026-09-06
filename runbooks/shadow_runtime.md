@@ -38,12 +38,25 @@ No override can convert an insufficient/rejected validation report into an adopt
   shadow risk profile, and becomes a `TradePlan` only on approval. Account floor, daily loss,
   concurrent risk, restriction, data health, liquidity, duplicate intent, expiry, reward/risk,
   and position sizing are evaluated before any virtual order is recorded.
+- `SignalCandidate.created_at`, `RiskDecision.evaluated_at`, and
+  `TradePlan.created_at` are actual runtime observation/approval/persistence times; the
+  candidate `as_of` remains the market-information cutoff. A plan cannot fill unless it was
+  durably persisted before the simulated market open. Delayed historical arrivals therefore
+  cannot enter the forward P&L ledger.
+- The plan is a conditional market-on-open instruction under
+  `next_open_market_revalidated_bracket_one_bar@0.2.0`. Its stop/target remain fixed from the
+  decision bar, while the actual open triggers a second reward/risk and quantity check. The
+  result is recorded as `EXECUTION_RISK_REVIEW`; an adverse gap cancels or downsizes rather
+  than silently exceeding the approved risk.
 - Every deployment is an attribution sleeve under one `SHARED_MASTER` virtual account.
   Approved plans atomically reserve account cash and risk; fills/cancellations release the
   reservation, and realized P&L settles once into the master account. Strategies therefore
   cannot each spend a duplicate copy of the same capital.
 - Account limits are immutable revisions changed through `account.risk.update`. A new risk
   revision changes the execution contract, so old validation certificates fail closed.
+- Every active deployment rechecks that certificate before a tick. A mismatch moves it to
+  `REVALIDATION_REQUIRED`, cancels any open plan without erasing account history, and cannot
+  be resumed until a current exact validation has been adopted.
 - Virtual fills model commission, half-spread, slippage, fixed impact, and maximum bar-volume
   participation through the deterministic event-driven portfolio engine. Entry sizing uses
   only the completed decision bar's volume; the future execution bar's final volume is never

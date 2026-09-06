@@ -194,6 +194,42 @@ def test_cost_aware_backtest_uses_next_bar_and_records_immutable_run(
     assert events[-1]["event_type"] == "research.experiment.completed.v1"
 
 
+def test_next_open_gap_is_revalidated_before_backtest_entry(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    ledger, market_store, research_store = _stores(settings)
+    values = list(_daily_bars(count=24))
+    reference = values[20].close
+    open_price = reference * Decimal("1.03")
+    values[21] = values[21].model_copy(
+        update={
+            "open": open_price,
+            "high": open_price * Decimal("1.001"),
+            "low": open_price * Decimal("0.999"),
+            "close": open_price,
+            "vwap": open_price,
+        }
+    )
+    bars = tuple(values)
+    market_store.insert_bars(bars, raw_object_id="TEST_RAW")
+    spec = default_strategy_spec(
+        "momentum",
+        timeframe="1Day",
+        code_sha256=research_code_sha256(),
+    )
+
+    result = ResearchBacktester(research_store, ledger).run(
+        spec=spec,
+        symbol="AAPL",
+        as_of_start=bars[20].available_from,
+        as_of_end=bars[21].available_from,
+        code_git_sha="test-git-sha",
+    )
+
+    assert result.trades == ()
+    assert result.experiment.metrics.trade_count == 0
+
+
 def test_research_store_refuses_future_market_bar(settings) -> None:  # type: ignore[no-untyped-def]
     _, _, research_store = _stores(settings)
     bars = _daily_bars(count=21)

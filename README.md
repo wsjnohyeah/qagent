@@ -73,6 +73,11 @@ Deflated Sharpe, and a versioned research gate. The gate may only mark a result 
 human review; it never promotes a strategy automatically, and bounded synthetic evidence is
 expected to fail its minimum-sample requirements.
 
+`research_gate@0.2.0` separates candidate-selection evidence from exact frozen-strategy
+evidence. PBO and minimum candidate breadth apply to an adaptive selector; they are explicitly
+N/A for one static spec, which must still pass fold, regime, positive-OOS, drawdown, and
+search-trial-adjusted Deflated Sharpe requirements.
+
 Phase 5A adds fail-closed market-data checks, explicit half-spread fill cost, governed
 corporate-action/universe imports, and durable resumable backfill partitions. These are
 scale-independent workflow guarantees; they do not require a large local dataset.
@@ -107,8 +112,11 @@ an exact execution-contract validation certificate. Each attempted exposure pers
 signal candidate, deterministic risk decision, approved plan, and virtual order/fill lineage,
 including the account and evidence used by the gate. It models commission, spread, slippage,
 impact, known-liquidity limits, the versioned protective-stop/target rule, cash, and realized
-P&L. A plan must be durable before a later bar can create a fill; missed runtime bars are not
-backfilled as forward trades. It contains no broker client or order-submission path. Bounded
+P&L. Actual observation, approval, and persistence times are distinct from market signal
+time. A plan must be durable before its market open, and both quantity and reward/risk are
+rechecked at that open; missed or late bars are not backfilled as forward trades. An active
+deployment whose exact execution contract changed enters `REVALIDATION_REQUIRED` before it
+can create new exposure. It contains no broker client or order-submission path. Bounded
 local data validates the workflow; production can run the same partitionable contracts over
 longer history.
 
@@ -405,8 +413,10 @@ The web application is organized around system objects rather than a fixed dashb
   shadow-active symbols, benchmarks, and read-only restriction list with immutable revisions.
 - **Data explorer** exposes clickable dataset types, date groups, pagination, normalized rows,
   documents/facts, and collapsed bounded raw payloads with provenance.
-- **Strategies** explains each immutable specification's origin and links experiments,
-  replay trades, validation evidence, shadow deployments, and discussion.
+- **Strategies** identifies deterministic baselines versus ML + LLM candidates and presents
+  the complete creation chain: point-in-time inputs, ML forecast/model, cited Research LLM
+  comment, generator proposal, independent critique, exact spec, validation, replay trades,
+  and forward shadow results. Raw IDs and hashes are collapsed under Advanced diagnostics.
 - **Shadow** explains the broker-free boundary and exposes candidate → risk → plan → fill
   lineage, virtual cash/P&L, alerts, reports, diagnostic ticks, and pause/retire controls.
 - **Pipelines, Models, Audit, and Steward code work** expose worker liveness, jobs, quality
@@ -422,7 +432,10 @@ produce a diff and passing test record before a separate commit approval can be 
 
 See `runbooks/control_center.md`, `runbooks/shadow_runtime.md`, ADR 0017, and ADR 0018.
 Coordinator operation is documented in `runbooks/autonomous_coordinator.md`; shared-account
-and environment-isolation decisions are recorded in ADR 0022.
+and environment-isolation decisions are recorded in ADR 0022. Subject-aware validation and
+open-price execution review are recorded in ADR 0023. The independent review of
+`3b3926e` and its current disposition are recorded in
+`docs/REVIEW_REMEDIATION_3B3926E_2026-09-06.md`.
 
 ## Repository map
 

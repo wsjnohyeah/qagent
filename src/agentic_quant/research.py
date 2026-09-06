@@ -49,7 +49,7 @@ from agentic_quant.config import TradingMode
 
 
 FEATURE_SET_VERSION = "price_event_pit@0.3.0"
-BACKTEST_ENGINE_VERSION = "event_driven_portfolio@0.3.0"
+BACKTEST_ENGINE_VERSION = "event_driven_portfolio@0.4.0"
 SUPPORTED_STRATEGIES = ("buy_and_hold", "momentum", "mean_reversion")
 _MINIMUM_HISTORY = 21
 _ZERO = Decimal("0")
@@ -327,7 +327,10 @@ def default_strategy_spec(
         parameters=parameters,
         data_requirements={
             "minimum_bars": _MINIMUM_HISTORY + 1,
-            "execution": "signal available at t; earliest fill is next bar open",
+            "execution": (
+                "signal available at t; conditional market-on-open at the next "
+                "bar with open-price risk revalidation"
+            ),
             "holding_period": (
                 "backtest_end" if strategy_type == "buy_and_hold" else "one_bar"
             ),
@@ -601,6 +604,10 @@ class ResearchBacktester:
                     bars[index].close,
                     self.risk_policy,
                 )
+                # The bracket is committed from the completed decision bar, but
+                # quantity and reward/risk are approved again at the observable
+                # next-open price. This models a pre-authorized market-on-open
+                # instruction with an execution-time risk guard.
                 candidate = SignalCandidate(
                     candidate_id=uuid7(),
                     symbol=symbol,
@@ -610,7 +617,7 @@ class ResearchBacktester:
                     as_of=snapshot.as_of,
                     feature_snapshot_id=snapshot.feature_snapshot_id,
                     catalyst_id="NOT_APPLICABLE_BASELINE",
-                    planned_entry=bars[index].close,
+                    planned_entry=execution_bar.open,
                     invalidation=invalidation,
                     targets=(target,),
                     expires_at=execution_bar.available_from,

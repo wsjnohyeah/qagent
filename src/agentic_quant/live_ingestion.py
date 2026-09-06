@@ -90,20 +90,34 @@ class LiveMarketDataService:
         inserted_trade_ids = self.store.insert_trades(trades, raw_object_id)
         inserted_quote_ids = self.store.insert_quotes(quotes, raw_object_id)
         inserted_ids = set(inserted_bar_ids + inserted_trade_ids + inserted_quote_ids)
+        canonical: tuple[StockBar | StockTrade | StockQuote, ...] = (
+            *self.store.canonical_bars(bars),
+            *self.store.canonical_trades(trades),
+            *self.store.canonical_quotes(quotes),
+        )
         events = tuple(
             [
                 self._record_event(
                     item,
                     event_type=self._identity_and_event_type(item)[1],
                 )
-                for item in normalized
+                for item in canonical
             ]
             + [
                 self._record_gap_event(gap, raw_object_id=raw_object_id)
                 for gap in gaps
             ]
         )
-        enqueued = self.ledger.append_batch(events)
+        incoming_ids = {
+            self._identity_and_event_type(item)[0] for item in normalized
+        }
+        canonical_ids = {
+            self._identity_and_event_type(item)[0] for item in canonical
+        }
+        enqueued = self.ledger.append_batch(
+            events,
+            reconcile_business_ids=incoming_ids != canonical_ids,
+        )
         self.ledger.deliver_batch(
             events,
             self.publisher,

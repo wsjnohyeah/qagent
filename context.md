@@ -5,10 +5,11 @@ Last updated: 2026-09-06 PDT
 Context format: v1
 
 Current phase: implementation foundations through Phase 6.1 plus the four pre-cloud
-hardening milestones are locally implemented; Phase 7 paper integration is next, before
-cloud deployment, while statistical/elapsed production evidence remains open
+hardening milestones and the `3b3926e` correctness-review remediation are locally
+implemented; Phase 7 paper integration is next, before cloud deployment, while
+statistical/elapsed production evidence remains open
 
-Current documented baseline: C030 — `Build shared account and autonomous bootstrap`
+Current documented baseline: C031 — `Explain strategy lineage and harden evidence contracts`
 
 ## Purpose and authority
 
@@ -94,6 +95,12 @@ A Git commit cannot contain its own content-derived hash without changing that h
   experiment/trade/validation provenance, complete shadow decision lineage, worker/job/
   quality details, activity, Steward code work, and per-object discussion timelines remain
   available through the left navigation.
+- Strategy pages are narrative-first. Every version is labeled deterministic baseline or
+  hybrid ML + LLM. Hybrid pages expose the exact point-in-time snapshot, ML forecast/model,
+  cited Research LLM thesis/claims/risks, generator proposal, independent critic verdict,
+  validation evidence, historical trades, and separate shadow observations. Baselines state
+  explicitly that no LLM participated. Raw IDs and hashes are collapsed under Advanced
+  diagnostics, and recorded LLM calls link to sanitized prompt/usage/cost inspection.
 - Overview displays current UTC daily/monthly estimated-USD spend against configured project
   limits, with provider/workload breakdowns and in-flight reservations from the durable
   budget ledger. Token totals are only optional per-invocation diagnostics.
@@ -108,10 +115,14 @@ A Git commit cannot contain its own content-derived hash without changing that h
   after 15 minutes unless the administrator submits its exact single-use confirmation phrase.
 - The broker-free shadow runtime admits only the exact static strategy and execution contract
   covered by a gate-eligible report and separate human confirmations. Every attempted
-  exposure persists candidate → deterministic risk decision → approved plan → virtual order/
-  fill lineage, including account context and known decision-bar liquidity. A plan is durable
-  before a later bar can fill it; missed worker-time bars are recorded and never fabricated as
-  forward fills. Every strategy/symbol deployment is now an attribution sleeve under one
+  exposure persists candidate → deterministic risk decision → approved plan → open-price
+  risk review → virtual order/fill lineage, including account context and known decision-bar
+  liquidity. Observation, approval and persistence use actual runtime timestamps; a plan must
+  be durable before its market open, and reward/risk plus quantity are recalculated from that
+  open. Missed or late bars are recorded/cancelled and never fabricated as forward fills.
+  Active deployments recheck their exact contract before every tick and move to
+  `REVALIDATION_REQUIRED` after an engine/config mismatch. Every strategy/symbol deployment is
+  now an attribution sleeve under one
   `SHARED_MASTER` virtual account; open plans atomically reserve shared cash and concurrent
   risk and settle P&L once. It processes each stored bar idempotently. The literal multi-session buy-
   and-hold benchmark is research-only. No broker order path exists.
@@ -119,7 +130,7 @@ A Git commit cannot contain its own content-derived hash without changing that h
   shell; a trusted external coding worker must produce a diff and passing test record before
   a separate local-commit approval. Push and deployment remain external actions.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; this iteration starts from
-  synchronized commit `3b3926e`. No cloud host is configured yet.
+  synchronized commit `c221891`. No cloud host is configured yet.
 - The independent `06b6853` fix verification is mapped item-by-item in
   `docs/REVIEW_REMEDIATION_2026-09-05.md`. The deterministic F01–F11 counterexamples are
   followed by the corrections from the `56bb979` review in
@@ -141,6 +152,15 @@ A Git commit cannot contain its own content-derived hash without changing that h
   Research LLM, constrained strategy generation, exact validation, and human-gated shadow
   readiness. Completed stages are not repeated after restart. Data/budget/human prerequisites
   are explicit `WAITING_*` outcomes; infrastructure failures use fenced bounded retries.
+- Static exact-spec validation now has a subject-specific gate: multi-candidate breadth and
+  PBO are N/A rather than impossible requirements, while folds, regimes, drawdown, positive
+  OOS rate and Deflated Sharpe remain enforced. Deflated Sharpe uses the recorded market-
+  contract search count, including failed/rejected hybrid attempts, rather than the size of
+  the submitted candidate list.
+- Daily ML labels use the real exchange-session entry open and exit availability boundary.
+  Corporate-action accounting tracks the held share count through ordered splits and
+  dividends. Ingestion resolves natural-key conflicts to the actual persisted business ID,
+  so replay of pre-stable-ID data cannot emit a second logical event or a dangling reference.
 - Production Compose separates the authenticated API, shadow scheduler, and research
   coordinator into dedicated processes so research CPU/provider latency cannot delay shadow.
   SQL runtime controls and worker heartbeats are shared across processes; workflow jobs use
@@ -206,7 +226,7 @@ Development service ports bind only to loopback. The local Compose credentials a
 - `make check`: passed.
 - Flake8: passed.
 - Strict mypy: passed for 56 source files.
-- Pytest: 113 passed for the completed pre-cloud implementation.
+- Pytest: 118 passed for the review-remediated pre-cloud implementation.
 - `make doctor`: passed against the local-lite SQLite profile.
 - `make docker-doctor`: passed against the PostgreSQL-backed Compose profile.
 - PostgreSQL query: passed; the first container replay stored six lineage events.
@@ -216,6 +236,13 @@ Development service ports bind only to loopback. The local Compose credentials a
 - Container vertical slice: risk verdict `APPROVE`; order state `RECORDED_NOT_SUBMITTED`.
 - Phase 6.1 validation: 106 tests passed at C029. Shared-account, coordinator, environment-
   isolation, and recovery tests were added in C030.
+- C031 local release gate passed 118 tests, Flake8, strict mypy across 56 source files,
+  authenticated local doctor, repository secret scan, Docker rebuild/doctor, and PostgreSQL
+  Alembic zero-drift. The rebuilt page served all new Strategy/Shadow/Coordinator labels.
+- The current local PostgreSQL Strategy registry contains nine historical deterministic
+  baseline versions and no hybrid ML + LLM strategy yet. The revised UI now states this
+  explicitly instead of implying missing lineage; a hybrid lineage will appear only after a
+  paid research/generation cycle completes and its critic accepts the proposal.
 - A live Meta `muse-spark-1.3` System Steward request read the bounded system snapshot,
   returned only the valid `SYSTEM:summary` citation, proposed no action, persisted both
   messages, and logged out successfully.
@@ -512,7 +539,7 @@ flowchart LR
     ACCOUNT["Shared virtual master account"] --> SLEEVE
     SLEEVE --> SHRUNTIME["Persistent broker-free shadow runtime"]
     PITFEATURES --> SHRUNTIME
-    SHRUNTIME --> SHLINEAGE["Candidate → risk → plan"]
+    SHRUNTIME --> SHLINEAGE["Candidate → risk → persisted plan → open-price review"]
     SHLINEAGE --> SHEVENTS["Virtual event journal + P&L"]
     SHEVENTS --> DB
     WORKER["Dedicated worker + SQL heartbeat"] --> SHRUNTIME
@@ -543,7 +570,7 @@ only training metrics, while every test result is retained for rank and selectio
 analysis. Realized test returns define transparent up/down/sideways report buckets; they do
 not feed the strategy. Phase 3D resamples selection across the already embargoed,
 non-overlapping OOS folds, records PBO and Deflated Sharpe diagnostics, and applies the
-versioned `research_gate@0.1.0` policy. The gate is advisory eligibility only and cannot
+versioned `research_gate@0.2.0` policy. The gate is advisory eligibility only and cannot
 promote a candidate.
 
 The front-loaded Phase 4A gateway gives OpenAI and Meta one internal Responses-style
@@ -1217,7 +1244,7 @@ The Compose stack is currently intended to remain running for local inspection. 
   an explicit human approver/reason and produces an immutable registry event. LLM output can
   neither change registry status nor substitute for these checks.
 - Model champion is a serving designation only. Any strategy using its forecast still needs
-  independent `research_gate@0.1.0` eligibility, human review, and later runtime risk checks.
+  independent current research-gate eligibility, human review, and later runtime risk checks.
 - Formal record: `docs/adr/0015-calibrated-ml-and-human-gated-model-registry.md`.
 
 ### D026 — Phase 1B requires real lineage and half-open repair semantics
@@ -1402,6 +1429,24 @@ The Compose stack is currently intended to remain running for local inspection. 
   inherit local runtime records through Git.
 - ADR 0022 supersedes D036's temporary isolated-account/operator-scheduled boundary while
   retaining its human-adoption, deterministic-risk, and no-broker guarantees.
+
+### D038 — Strategy explainability and reviewed evidence contracts
+
+- Date: 2026-09-06 PDT.
+- The user reported that a Strategy detail page made neither the strategy itself nor its
+  origin understandable: the UI exposed raw JSON without showing how ML and LLM reasoning
+  contributed. The required operator model is now a single readable chain from evidence to
+  forecast, research comment, proposal, critique, validation, adoption, and shadow outcome.
+- Deterministic baseline strategies must say explicitly that no LLM participated. Hybrid
+  strategies must show the actual Research LLM thesis/claims and generator/critic outputs;
+  the UI must never imply that every pre-existing baseline was LLM-generated.
+- The attached independent review of `3b3926e` was evidence, not authority. Reproduction
+  against `c221891` confirmed that N01–N07 still applied even though the later coordinator and
+  shared-account product gaps were already implemented. ADR 0023 and
+  `docs/REVIEW_REMEDIATION_3B3926E_2026-09-06.md` record the corrections.
+- Search-trial correction is conservatively scoped to the whole symbol/timeframe contract
+  until explicit research campaigns are introduced. This may reject too much evidence but
+  cannot make an over-searched strategy look safer.
 
 ## Iteration and commit ledger
 
@@ -2461,6 +2506,54 @@ hardening milestones and before cloud deployment.
 - Expected global state after commit:
   - The four pre-cloud implementation tasks are complete locally. Phase 7 paper adapter is
     next; real cloud provisioning still needs user-selected infrastructure inputs.
+
+### C031 — `Explain strategy lineage and harden evidence contracts`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-06 PDT.
+- User intent: make each Strategy page understandable without reading raw JSON, show exactly
+  how ML and LLMs participated, reflect the new coordinator/shared-account functions in the
+  Phase 6 UI, and assess the independent review of `3b3926e` before moving to Phase 7.
+- Scope:
+  - Added a first-class strategy lineage projection joining the immutable spec to its
+    point-in-time feature snapshot, ML forecast/model, cited Research LLM analysis,
+    generator proposal, critic verdict, and sanitized invocation metadata.
+  - Rebuilt Strategy list/detail views around plain-language origin, rule, research,
+    validation, historical replay, and forward-shadow sections; JSON moved to collapsed
+    diagnostics. Expanded Shadow contract/timing visibility and coordinator stage views.
+  - Fixed review findings N01–N07: subject-aware static admission; real-time plan boundaries;
+    exchange-session corporate-action labels; next-open risk/size revalidation; active
+    contract quarantine; legacy persisted-ID event reconciliation; and DSR search-trial use.
+  - Bumped the research gate to `research_gate@0.2.0`, backtest engine to
+    `event_driven_portfolio@0.4.0`, and shadow execution profile to
+    `next_open_market_revalidated_bracket_one_bar@0.2.0`. Older exact validation contracts
+    intentionally require revalidation.
+  - Added the itemized disposition
+    `docs/REVIEW_REMEDIATION_3B3926E_2026-09-06.md` and adverse regression coverage.
+- Architecture/decision impact:
+  - Strategy creation, empirical validation, human adoption, and forward observation are
+    distinct stages in both the API and UI. A baseline correctly displays “no LLM used”; a
+    hybrid candidate exposes both ML and LLM contributions without giving either execution
+    authority.
+  - The bar simulator now represents a pre-persisted, conditional market-on-open instruction
+    with deterministic open-price risk review. It remains a broker-free Phase 6 harness;
+    exchange order lifecycle and reconciliation remain Phase 7.
+  - Research search accounting is conservative at symbol/timeframe scope until explicit
+    campaign isolation is added; this can penalize evidence but cannot inflate eligibility.
+- Validation:
+  - `make release-check` passed: Flake8, strict mypy across 56 source files, all 118 tests,
+    authenticated local doctor, secret scan, Docker rebuild/doctor, and PostgreSQL Alembic
+    zero-drift.
+  - The updated browser JavaScript parsed in the macOS JavaScript runtime. An authenticated
+    request against the rebuilt local API returned all nine stored strategies with explicit
+    `DETERMINISTIC_BASELINE` origins; the served page contained the new lineage, execution-
+    review, and strategy-reading UI.
+  - GitHub CI is verified after push; until then it is the only pending validation item.
+- Expected global state after commit:
+  - All seven concrete findings in the independent `3b3926e` review have code-level
+    mitigations and regression coverage. The Control Center explains existing baseline versus
+    hybrid strategies and exposes the new autonomous/shared-account state. Phase 7 paper
+    integration remains the next implementation milestone.
 
 ## Template for future commit entries
 

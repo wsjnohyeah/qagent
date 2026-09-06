@@ -62,6 +62,7 @@ class RiskEvaluationContext(FrozenModel):
     nearest_major_macro_event_at: datetime | None = None
     macro_event_strategy_approved: bool = False
     duplicate_order_detected: bool = False
+    decision_before_execution: bool = True
     evaluation_profile: str = Field(
         default="tactical_intraday",
         pattern=r"^(tactical_intraday|baseline_shadow)$",

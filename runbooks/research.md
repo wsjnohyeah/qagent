@@ -128,6 +128,14 @@ The versioned thresholds live in `configs/research_promotion_policy.yaml`. The a
 only return `INSUFFICIENT_EVIDENCE`, `REJECTED`, or `ELIGIBLE_FOR_HUMAN_REVIEW`; it never
 promotes automatically. The bounded smoke sample is intentionally too small for eligibility.
 
+`research_gate@0.2.0` distinguishes two subjects. An `adaptive_selector` must satisfy the
+configured candidate breadth and PBO threshold. A frozen `static_strategy` has no within-
+report selection contest, so candidate count and PBO are explicitly N/A; it must still pass
+the fold, regime, drawdown, positive-OOS, and Deflated Sharpe requirements. Deflated Sharpe
+uses the recorded search-trial count for the symbol/timeframe, including rejected and failed
+hybrid attempts. This scope is intentionally conservative until explicit research-campaign
+isolation is implemented.
+
 This is a bias-detection baseline, not a claim that the selected strategy generalizes.
 Inspect reports with:
 
@@ -142,7 +150,9 @@ curl -fsS \
 - `event_time <= as_of` and `available_from <= as_of` for every evidence reference.
 - The snapshot records its maximum source availability time and rejects a later value.
 - A completed bar may produce a signal only after its `available_from` timestamp.
-- Entry may occur no earlier than the next bar open.
+- Entry may occur no earlier than the next bar open. One-bar strategies retain their bracket
+  from the decision bar but recalculate reward/risk and quantity against the actual open;
+  gaps that violate policy do not enter.
 - Daily entry and exit records use the exchange session open and close, not the provider's
   midnight bar label.
 - Every signal, submitted order, fill, portfolio mark, split, and cash dividend is stored in

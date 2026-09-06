@@ -34,6 +34,7 @@ from agentic_quant.domain import (
 )
 from agentic_quant.ids import uuid7
 from agentic_quant.ledger import EventLedger
+from agentic_quant.market_calendar import MarketSessionClock
 from agentic_quant.reference_data import ReferenceDataStore
 from agentic_quant.research_store import ResearchStore
 
@@ -136,9 +137,15 @@ def _quantile(values: list[float], quantile: float) -> float:
 
 
 class MLDatasetBuilder:
-    def __init__(self, store: ResearchStore) -> None:
+    def __init__(
+        self,
+        store: ResearchStore,
+        *,
+        calendar_name: str = "XNYS",
+    ) -> None:
         self.store = store
         self.reference_data = ReferenceDataStore(store.engine)
+        self.session_clock = MarketSessionClock(calendar_name)
 
     def build(
         self,
@@ -196,27 +203,40 @@ class MLDatasetBuilder:
             if future.available_from > as_of_end:
                 continue
             entry_open = float(entry.open)
-            adjusted_future = float(future.close)
+            entry_time = (
+                self.session_clock.daily_bar_session_open(entry.event_time)
+                if entry.timeframe == "1Day"
+                else entry.event_time
+            )
+            exit_time = future.available_from
+            share_quantity = 1.0
             cash_distributions = 0.0
             for action in actions:
                 # The position starts at the next bar's open. Actions between the
                 # decision close and that open belong to the prior holder; entry
                 # prices already reflect them. Only actions effective strictly
                 # after entry and no later than the exit event belong in the label.
-                if not entry.event_time < action.effective_at <= future.event_time:
+                if not entry_time < action.effective_at <= exit_time:
                     continue
                 if (
                     action.action_type == CorporateActionType.SPLIT
                     and action.split_ratio is not None
                 ):
-                    adjusted_future *= float(action.split_ratio)
+                    share_quantity *= float(action.split_ratio)
                 elif (
                     action.action_type == CorporateActionType.CASH_DIVIDEND
                     and action.cash_amount is not None
                 ):
-                    cash_distributions += float(action.cash_amount)
+                    cash_distributions += (
+                        float(action.cash_amount) * share_quantity
+                    )
             forward_return = (
-                (adjusted_future + cash_distributions) / entry_open - 1.0
+                (
+                    float(future.close) * share_quantity
+                    + cash_distributions
+                )
+                / entry_open
+                - 1.0
             )
             values = tuple(
                 self._numeric(snapshot.values.get(name)) for name in policy.features

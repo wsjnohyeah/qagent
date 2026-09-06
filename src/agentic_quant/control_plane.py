@@ -18,10 +18,14 @@ from agentic_quant.database import (
     feature_snapshots,
     ingestion_runs,
     ledger_events,
+    llm_budget_reservations,
+    llm_invocations,
     market_bars,
     market_quotes,
     market_trades,
+    ml_forecasts,
     ml_models,
+    ml_training_runs,
     object_threads,
     raw_objects,
     research_analyses,
@@ -31,6 +35,7 @@ from agentic_quant.database import (
     source_documents,
     corporate_facts,
     strategy_adoptions,
+    strategy_generation_attempts,
     strategy_specs,
     steward_conversations,
     steward_messages,
@@ -698,6 +703,18 @@ class SystemObjectStore:
                     .limit(1)
                 ).scalar_one_or_none()
                 item["latest_metrics"] = latest
+                item["origin_kind"] = (
+                    "HYBRID_ML_LLM"
+                    if connection.execute(
+                        select(func.count())
+                        .select_from(strategy_generation_attempts)
+                        .where(
+                            strategy_generation_attempts.c.strategy_spec_id
+                            == item["strategy_spec_id"]
+                        )
+                    ).scalar_one()
+                    else "DETERMINISTIC_BASELINE"
+                )
                 values.append(item)
             return values
 
@@ -763,11 +780,260 @@ class SystemObjectStore:
                     .order_by(shadow_deployments.c.updated_at.desc())
                 )
             ]
+            lineage = self._strategy_lineage(connection, item)
         item["experiments"] = experiments
         item["trades"] = trades
         item["validations"] = reports
         item["shadow_deployments"] = deployments
+        item["lineage"] = lineage
         return item
+
+    def _strategy_lineage(
+        self,
+        connection: Any,
+        strategy: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return a compact, user-facing chain from evidence to executable spec."""
+        strategy_spec_id = str(strategy["strategy_spec_id"])
+        attempt_row = connection.execute(
+            select(strategy_generation_attempts)
+            .where(
+                strategy_generation_attempts.c.strategy_spec_id
+                == strategy_spec_id
+            )
+            .order_by(strategy_generation_attempts.c.updated_at.desc())
+            .limit(1)
+        ).one_or_none()
+        requirements = dict(strategy.get("data_requirements_json") or {})
+        if attempt_row is None:
+            return {
+                "origin_kind": "DETERMINISTIC_BASELINE",
+                "origin_label": "Deterministic baseline",
+                "summary": (
+                    "This specification was created by versioned application code, "
+                    "not proposed by an LLM. ML and Research LLM therefore did not "
+                    "participate in this strategy version."
+                ),
+                "created_at": strategy.get("created_at"),
+                "feature_snapshot": None,
+                "ml_forecast": None,
+                "research_llm": None,
+                "generation": None,
+                "critique": None,
+                "advanced": {
+                    "strategy_spec_id": strategy_spec_id,
+                    "origin": requirements.get("origin", "deterministic_baseline"),
+                    "feature_set_version": strategy.get("feature_set_version"),
+                    "code_sha256": strategy.get("code_sha256"),
+                },
+            }
+
+        attempt = self._normalize_times(
+            dict(attempt_row._mapping),
+            ("created_at", "updated_at"),
+        )
+        snapshot_row = connection.execute(
+            select(feature_snapshots).where(
+                feature_snapshots.c.feature_snapshot_id
+                == attempt["feature_snapshot_id"]
+            )
+        ).one_or_none()
+        forecast_row = connection.execute(
+            select(ml_forecasts).where(
+                ml_forecasts.c.forecast_id == attempt["forecast_id"]
+            )
+        ).one_or_none()
+        analysis_row = connection.execute(
+            select(research_analyses).where(
+                research_analyses.c.analysis_id == attempt["analysis_id"]
+            )
+        ).one_or_none()
+
+        snapshot = None
+        if snapshot_row is not None:
+            raw_snapshot = self._normalize_times(
+                dict(snapshot_row._mapping),
+                ("as_of", "source_max_available_from", "created_at"),
+            )
+            snapshot = {
+                "feature_snapshot_id": raw_snapshot["feature_snapshot_id"],
+                "symbol": raw_snapshot["symbol"],
+                "timeframe": raw_snapshot["timeframe"],
+                "as_of": raw_snapshot["as_of"],
+                "feature_set_version": raw_snapshot["feature_set_version"],
+                "values": raw_snapshot["feature_values"],
+                "source_max_available_from": raw_snapshot[
+                    "source_max_available_from"
+                ],
+                "data_hash": raw_snapshot["data_hash"],
+            }
+
+        forecast = None
+        if forecast_row is not None:
+            raw_forecast = self._normalize_times(
+                dict(forecast_row._mapping),
+                ("as_of", "training_data_cutoff", "created_at"),
+            )
+            model_row = connection.execute(
+                select(ml_models, ml_training_runs.c.sample_count)
+                .join(
+                    ml_training_runs,
+                    ml_training_runs.c.training_run_id
+                    == ml_models.c.training_run_id,
+                )
+                .where(ml_models.c.model_id == raw_forecast["model_id"])
+            ).one_or_none()
+            model = None
+            if model_row is not None:
+                raw_model = self._normalize_times(
+                    dict(model_row._mapping),
+                    (
+                        "training_start",
+                        "training_end",
+                        "training_data_cutoff",
+                        "created_at",
+                    ),
+                )
+                model = {
+                    "model_id": raw_model["model_id"],
+                    "model_name": raw_model["model_name"],
+                    "model_version": raw_model["model_version"],
+                    "kind": raw_model["kind"],
+                    "sample_count": raw_model["sample_count"],
+                    "metrics": raw_model["metrics_json"],
+                    "training_data_cutoff": raw_model["training_data_cutoff"],
+                }
+            forecast = {
+                "forecast_id": raw_forecast["forecast_id"],
+                "symbol": raw_forecast["symbol"],
+                "as_of": raw_forecast["as_of"],
+                "horizon": raw_forecast["horizon"],
+                "expected_return": raw_forecast["expected_return"],
+                "probability_up": raw_forecast["probability_up"],
+                "uncertainty": raw_forecast["uncertainty"],
+                "model_version": raw_forecast["model_version"],
+                "training_data_cutoff": raw_forecast["training_data_cutoff"],
+                "model": model,
+            }
+
+        analysis = None
+        if analysis_row is not None:
+            raw_analysis = self._normalize_times(
+                dict(analysis_row._mapping),
+                ("as_of", "created_at"),
+            )
+            bundle = dict(raw_analysis.get("evidence_bundle_json") or {})
+            items = list(bundle.get("items") or [])
+            analysis = {
+                "analysis_id": raw_analysis["analysis_id"],
+                "status": raw_analysis["status"],
+                "symbol": raw_analysis["symbol"],
+                "as_of": raw_analysis["as_of"],
+                "analysis": raw_analysis["analysis_json"],
+                "citation_validation": raw_analysis["citation_validation_json"],
+                "rejection_reason": raw_analysis["rejection_reason"],
+                "evidence_summary": {
+                    "count": len(items),
+                    "citation_ids": [item.get("citation_id") for item in items],
+                    "types": sorted(
+                        {
+                            str(item.get("evidence_type"))
+                            for item in items
+                            if item.get("evidence_type")
+                        }
+                    ),
+                    "bundle_hash": raw_analysis["evidence_bundle_hash"],
+                },
+                "invocation": self._llm_invocation_summary(
+                    connection,
+                    raw_analysis.get("llm_invocation_id"),
+                ),
+            }
+
+        return {
+            "origin_kind": "HYBRID_ML_LLM",
+            "origin_label": "ML + Research LLM",
+            "summary": (
+                "A point-in-time feature snapshot fed a trained ML forecast and "
+                "a cited Research LLM analysis. A generation LLM proposed bounded "
+                "parameters and a second LLM critique had to accept them before "
+                "this immutable executable specification was compiled."
+            ),
+            "created_at": strategy.get("created_at"),
+            "feature_snapshot": snapshot,
+            "ml_forecast": forecast,
+            "research_llm": analysis,
+            "generation": {
+                "generation_attempt_id": attempt["generation_attempt_id"],
+                "status": attempt["status"],
+                "proposal": attempt["proposal_json"],
+                "invocation": self._llm_invocation_summary(
+                    connection,
+                    attempt.get("generation_invocation_id"),
+                ),
+            },
+            "critique": {
+                "result": attempt["critique_json"],
+                "invocation": self._llm_invocation_summary(
+                    connection,
+                    attempt.get("critique_invocation_id"),
+                ),
+            },
+            "advanced": {
+                "strategy_spec_id": strategy_spec_id,
+                "generation_attempt_id": attempt["generation_attempt_id"],
+                "feature_snapshot_id": attempt["feature_snapshot_id"],
+                "analysis_id": attempt["analysis_id"],
+                "forecast_id": attempt["forecast_id"],
+                "feature_set_version": strategy.get("feature_set_version"),
+                "code_sha256": strategy.get("code_sha256"),
+            },
+        }
+
+    @staticmethod
+    def _llm_invocation_summary(
+        connection: Any,
+        invocation_id: str | None,
+    ) -> dict[str, Any] | None:
+        if not invocation_id:
+            return None
+        row = connection.execute(
+            select(
+                llm_invocations.c.invocation_id,
+                llm_invocations.c.workload,
+                llm_invocations.c.provider,
+                llm_invocations.c.model,
+                llm_invocations.c.reasoning_effort,
+                llm_invocations.c.prompt_version,
+                llm_invocations.c.usage_json,
+                llm_invocations.c.status,
+                llm_invocations.c.created_at,
+                llm_invocations.c.completed_at,
+                llm_budget_reservations.c.actual_cost_microusd,
+                llm_budget_reservations.c.reserved_cost_microusd,
+            )
+            .outerjoin(
+                llm_budget_reservations,
+                llm_budget_reservations.c.invocation_id
+                == llm_invocations.c.invocation_id,
+            )
+            .where(llm_invocations.c.invocation_id == invocation_id)
+        ).one_or_none()
+        if row is None:
+            return {
+                "invocation_id": invocation_id,
+                "status": "NOT_RECORDED",
+            }
+        value = dict(row._mapping)
+        actual = value.pop("actual_cost_microusd")
+        reserved = value.pop("reserved_cost_microusd")
+        value["estimated_cost_usd"] = str(
+            (actual if actual is not None else reserved or 0) / 1_000_000
+        )
+        return SystemObjectStore._normalize_times(
+            value,
+            ("created_at", "completed_at"),
+        )
 
     def object_summary(self) -> dict[str, Any]:
         counts = {

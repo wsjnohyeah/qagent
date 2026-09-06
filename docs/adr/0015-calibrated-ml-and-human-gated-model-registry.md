@@ -26,4 +26,5 @@ statistical edge.
 - A model becomes `CHALLENGER` only after deterministic ML thresholds pass and becomes
   `CHAMPION` only through an explicit human registry action. No LLM may promote a model.
 - `CHAMPION` is only a serving designation. Any downstream strategy still must pass
-  `research_gate@0.1.0` and later runtime risk controls before Phase 6 or paper use.
+  the current versioned research gate and later runtime risk controls before Phase 6 or
+  paper use.

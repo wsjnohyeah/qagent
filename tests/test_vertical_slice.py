@@ -44,6 +44,7 @@ def test_vertical_slice_records_complete_lineage(settings: Settings) -> None:
         "nearest_major_macro_event_at": None,
         "macro_event_strategy_approved": False,
         "duplicate_order_detected": False,
+        "decision_before_execution": True,
         "evaluation_profile": "tactical_intraday",
     }
 

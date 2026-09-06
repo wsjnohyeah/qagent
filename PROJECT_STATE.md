@@ -79,14 +79,19 @@
   execute them; a separate exact confirmation is required.
 - The persistent broker-free shadow runtime admits only the exact static strategy ID and
   execution contract covered by a gate-eligible, human-confirmed validation certificate.
-  It records candidate → deterministic risk decision → approved plan → modeled virtual
-  order/fill lineage, cash, and P&L. A plan is persisted on one completed bar and can execute
-  only on a later bar; missed bars are never synthesized into forward fills. Research-only
-  buy-and-hold cannot be shadow-adopted. No broker adapter exists.
+  It records candidate → deterministic risk decision → approved plan → execution-price risk
+  review → modeled virtual order/fill lineage, cash, and P&L. Actual observation, approval,
+  and persistence timestamps are separate from the market-data cutoff; a plan must exist
+  before its market open. The next open rechecks reward/risk and quantity, and missed/late
+  bars never become forward fills. Research-only buy-and-hold cannot be shadow-adopted. No
+  broker adapter exists.
 - All shadow deployments are attribution sleeves of one shared virtual master account. Open
   plans atomically reserve its cash and concurrent risk; fills/cancellations settle once.
   Account risk is an administrator-confirmed immutable revision, and changing it invalidates
   older exact validation contracts.
+- Active deployments recheck the exact execution contract on every tick. Engine, cost, risk,
+  feature, or restriction changes move stale deployments to `REVALIDATION_REQUIRED` and
+  cancel reserved plans without resetting account history.
 - A persistent hourly coordinator owns the market-data → feature → ML → forecast → Research
   LLM → constrained strategy → exact-validation → shadow-readiness DAG. It resumes fenced
   jobs after failure, records `WAITING_*` business gates, defaults paid research off, and
@@ -103,10 +108,16 @@
   were synchronized at `3b3926e` before this implementation iteration.
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases.
-- The prior corrected baseline passed 106 tests; the current pre-cloud implementation passes
-  113 tests, strict typing across 56 source files, authenticated local and PostgreSQL/MinIO/Redis
-  doctors, JavaScript parsing, schema migration checks, zero PostgreSQL schema drift, and the
-  repository secret scan. Paid providers were not called during this remediation.
+- The prior corrected baseline passed 106 tests; the current review-remediated pre-cloud
+  implementation passes 118 tests, strict typing across 56 source files, authenticated local
+  and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, schema migration checks, zero
+  PostgreSQL schema drift, and the repository secret scan. Paid providers were not called
+  during this remediation.
+- The independent review of `3b3926e` is dispositioned in
+  `docs/REVIEW_REMEDIATION_3B3926E_2026-09-06.md`. Its N01–N07 counterexamples now have
+  subject-aware admission, actual-time forward guards, calendar-correct ML labels,
+  execution-price revalidation, active-contract quarantine, legacy event reconciliation,
+  and search-trial accounting.
 - Phase 4 adds point-in-time document retrieval, `research_analysis@0.2.0`, exact quotation
   validation, deterministic abstention, atomic estimated-USD reservations, and Decision
   Inspector graph `ai_infrastructure_graph@0.1.0`.
@@ -130,9 +141,11 @@
   coordinator workers with SQL heartbeats. Workflow jobs have dependency-aware leases and ownership checks; ledger
   events have a retryable SQL outbox with stable event IDs and dead-letter visibility.
 - Phase 6.1 data pages support dataset-specific drill-down, date grouping, pagination,
-  normalized-object views, and collapsed raw payloads. Strategy pages explain provenance and
-  expose exact validation, experiments, trades, and shadow state. Pipeline jobs and quality
-  reports are individually inspectable.
+  normalized-object views, and collapsed raw payloads. Strategy pages now explicitly
+  distinguish deterministic baselines from hybrid candidates and show the full point-in-time
+  data → ML → Research LLM → generator → critic → exact spec → validation → shadow chain in
+  readable cards; JSON is relegated to Advanced diagnostics. Pipeline jobs and quality
+  reports are individually inspectable, and coordinator cycles show all eight stage states.
 - The guarded deploy command now migrates once, runs an idempotent production bootstrap,
   registers a non-reusable environment identity, creates account/list defaults, forces the
   global pause, and then verifies API/worker health. Development runtime data is never copied
@@ -146,7 +159,8 @@
    existing one-command bootstrap on a fresh production data plane.
 3. Run production-scale backfill, enable paid coordinator stages only after budget review,
    and collect Phase 5 statistical plus continuous-shadow evidence.
-4. Continue interactive Phase 6.1 UI review with real operator navigation and refine labels.
+4. Continue interactive Phase 6.1 UI review with real operator navigation and refine labels;
+   the Strategy lineage redesign is implemented locally and awaits operator feedback.
 5. Extend fill realism with multi-bar partial fills, order cancellation, quote-derived
    rather than configured spread, and symbol-change/delisting replay.
 6. Add operator-driven dead-letter replay and provider-lag/sequence-gap notification channels.
@@ -197,3 +211,6 @@
   reconciliation, and attempt-level workflow/runtime fencing.
 - ADR 0022: use one shared virtual account, a persistent autonomous research DAG, and immutable
   development/production environment identities.
+- ADR 0023: separate static and selector validation semantics, require actual-time persisted
+  plans and next-open risk review, quarantine stale execution contracts, and reconcile legacy
+  ingestion IDs without rewriting immutable events.

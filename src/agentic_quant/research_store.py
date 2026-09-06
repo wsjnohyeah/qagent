@@ -584,15 +584,39 @@ class ResearchStore:
             )
 
     def strategy_trial_count(self, *, symbol: str, timeframe: str) -> int:
-        """Count every distinct executable spec tried for this market contract."""
+        """Count explored specs and rejected/failed hybrid attempts for this contract.
+
+        This is deliberately conservative until first-class research campaigns are
+        introduced: every search against the same symbol/timeframe contributes to
+        selection-bias correction, while an accepted hybrid attempt is not counted
+        twice merely because its compiled spec was subsequently backtested.
+        """
         with self.engine.connect() as connection:
-            return int(
+            generated_ids = select(
+                strategy_generation_attempts.c.strategy_spec_id
+            ).where(strategy_generation_attempts.c.strategy_spec_id.is_not(None))
+            non_generated_specs = int(
                 connection.execute(
                     select(func.count(func.distinct(experiment_runs.c.strategy_spec_id)))
                     .where(experiment_runs.c.symbol == symbol.upper())
                     .where(experiment_runs.c.timeframe == timeframe)
+                    .where(experiment_runs.c.strategy_spec_id.not_in(generated_ids))
                 ).scalar_one()
             )
+            hybrid_attempts = int(
+                connection.execute(
+                    select(func.count())
+                    .select_from(strategy_generation_attempts)
+                    .join(
+                        feature_snapshots,
+                        feature_snapshots.c.feature_snapshot_id
+                        == strategy_generation_attempts.c.feature_snapshot_id,
+                    )
+                    .where(feature_snapshots.c.symbol == symbol.upper())
+                    .where(feature_snapshots.c.timeframe == timeframe)
+                ).scalar_one()
+            )
+        return max(1, non_generated_specs + hybrid_attempts)
 
     def recent_experiments(self, *, limit: int = 50) -> list[dict[str, Any]]:
         statement = (

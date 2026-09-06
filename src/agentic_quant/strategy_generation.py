@@ -286,7 +286,10 @@ class HybridStrategyGenerator:
             parameters=parameters,
             data_requirements={
                 "minimum_bars": 22,
-                "execution": "signal available at t; earliest fill is next bar open",
+                "execution": (
+                    "signal available at t; conditional market-on-open at the next "
+                    "bar with open-price risk revalidation"
+                ),
                 "holding_period": "one_bar",
                 "entry_liquidity_source": "latest completed decision bar volume",
                 "point_in_time_required": True,

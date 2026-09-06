@@ -66,7 +66,7 @@ class PromotionGatePolicy(FrozenModel):
 
 
 DEFAULT_PROMOTION_GATE_POLICY = PromotionGatePolicy(
-    version="research_gate@0.1.0",
+    version="research_gate@0.2.0",
     minimum_oos_folds=12,
     minimum_candidate_count=3,
     minimum_regime_count=2,
@@ -273,14 +273,18 @@ def assess_research_gate(
     probability_of_backtest_overfitting: Decimal,
     deflated_sharpe_probability: Decimal,
     pbo_applicable: bool = True,
+    validation_subject: str = "adaptive_selector",
 ) -> dict[str, Any]:
+    if validation_subject not in {"static_strategy", "adaptive_selector"}:
+        raise ValueError("Unsupported validation subject")
+    static_strategy = validation_subject == "static_strategy"
     evidence_shortfalls: list[str] = []
     threshold_failures: list[str] = []
     if fold_count < policy.minimum_oos_folds:
         evidence_shortfalls.append(
             f"oos_folds {fold_count} < {policy.minimum_oos_folds}"
         )
-    if candidate_count < policy.minimum_candidate_count:
+    if not static_strategy and candidate_count < policy.minimum_candidate_count:
         evidence_shortfalls.append(
             f"candidates {candidate_count} < {policy.minimum_candidate_count}"
         )
@@ -288,7 +292,7 @@ def assess_research_gate(
         evidence_shortfalls.append(
             f"regimes {regime_count} < {policy.minimum_regime_count}"
         )
-    if not pbo_applicable:
+    if not pbo_applicable and not static_strategy:
         evidence_shortfalls.append(
             "probability_of_backtest_overfitting is not applicable to one candidate"
         )
@@ -317,6 +321,8 @@ def assess_research_gate(
         "status": status,
         "eligible_for_human_review": status == "ELIGIBLE_FOR_HUMAN_REVIEW",
         "automatic_promotion": False,
+        "validation_subject": validation_subject,
+        "pbo_applicable": pbo_applicable,
         "evidence_shortfalls": evidence_shortfalls,
         "threshold_failures": threshold_failures,
     }
@@ -699,12 +705,13 @@ class WalkForwardValidator:
         }
         regime_metrics = self._regime_metrics(folds)
         pbo_metrics = combinatorial_purged_diagnostics(candidate_oos_scores)
-        dsr_metrics = deflated_sharpe_diagnostics(
-            tuple(test_returns),
-            number_of_trials=len(strategy_types),
-        )
         validation_subject = (
             "static_strategy" if len(strategy_types) == 1 else "adaptive_selector"
+        )
+        search_trial_count = max(len(strategy_types), trial_count)
+        dsr_metrics = deflated_sharpe_diagnostics(
+            tuple(test_returns),
+            number_of_trials=search_trial_count,
         )
         execution_contract = {
             "subject": validation_subject,
@@ -725,6 +732,7 @@ class WalkForwardValidator:
                 str(value) for value in continuous_oos_equity
             ],
             "historical_trial_count_diagnostic": trial_count,
+            "selection_search_trial_count": search_trial_count,
         }
         gate_assessment = assess_research_gate(
             policy=self.promotion_policy,
@@ -744,6 +752,7 @@ class WalkForwardValidator:
                 str(dsr_metrics["deflated_sharpe_probability"])
             ),
             pbo_applicable=not bool(pbo_metrics.get("not_applicable", False)),
+            validation_subject=validation_subject,
         )
         report_material = {
             "symbol": symbol.upper(),

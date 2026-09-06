@@ -33,6 +33,14 @@ class MarketSessionClock:
             raise TypeError("Exchange calendar returned a non-datetime session open")
         return session_open
 
+    def next_daily_session_open(self, event_time: datetime) -> datetime:
+        session = self._session_for_daily_bar(event_time)
+        next_session = self.calendar.next_session(session)
+        session_open = self.calendar.session_open(next_session).to_pydatetime()
+        if not isinstance(session_open, datetime):
+            raise TypeError("Exchange calendar returned a non-datetime session open")
+        return session_open
+
     def _session_for_daily_bar(self, event_time: datetime):  # type: ignore[no-untyped-def]
         if event_time.tzinfo is None:
             raise ValueError("Daily bar event_time must be timezone-aware")

@@ -77,6 +77,9 @@ class OptionDataIngestionService:
                 raw_object_id = self.store.register_raw_object(archived)
                 inserted_ids = self.store.insert_option_snapshots(page.snapshots, raw_object_id)
                 records_inserted += len(inserted_ids)
+                canonical_snapshots = self.store.canonical_option_snapshots(
+                    page.snapshots
+                )
                 events = tuple(
                     EventEnvelope(
                         event_id=self.ledger.stable_event_id(
@@ -95,9 +98,20 @@ class OptionDataIngestionService:
                             update={"raw_object_id": raw_object_id}
                         ).model_dump(mode="json"),
                     )
-                    for snapshot in page.snapshots
+                    for snapshot in canonical_snapshots
                 )
-                enqueued = self.ledger.append_batch(events)
+                enqueued = self.ledger.append_batch(
+                    events,
+                    reconcile_business_ids=any(
+                        incoming.option_snapshot_id
+                        != stored.option_snapshot_id
+                        for incoming, stored in zip(
+                            page.snapshots,
+                            canonical_snapshots,
+                            strict=True,
+                        )
+                    ),
+                )
                 self.ledger.deliver_batch(
                     events,
                     self.publisher,

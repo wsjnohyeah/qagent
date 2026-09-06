@@ -32,7 +32,12 @@ class EventLedger:
     def append(self, event: EventEnvelope) -> bool:
         return bool(self.append_batch((event,)))
 
-    def append_batch(self, events: tuple[EventEnvelope, ...]) -> tuple[str, ...]:
+    def append_batch(
+        self,
+        events: tuple[EventEnvelope, ...],
+        *,
+        reconcile_business_ids: bool = False,
+    ) -> tuple[str, ...]:
         """Atomically ensure all event intents before any network delivery.
 
         Existing ledger rows are reconciled with a missing outbox row, so replaying
@@ -54,25 +59,41 @@ class EventLedger:
         enqueued: list[str] = []
         with self.engine.begin() as connection:
             for event in unique_events:
-                connection.execute(
-                    dialect_insert(ledger_events)
-                    .values(**event.model_dump())
-                    .on_conflict_do_nothing(index_elements=["event_id"])
+                existing_id = self._existing_business_event_id(
+                    connection,
+                    event,
+                    reconcile_business_ids=reconcile_business_ids,
                 )
+                effective = event
+                if existing_id is None:
+                    connection.execute(
+                        dialect_insert(ledger_events)
+                        .values(**event.model_dump())
+                        .on_conflict_do_nothing(index_elements=["event_id"])
+                    )
+                    effective_id = event.event_id
+                else:
+                    effective_id = existing_id
+                    row = connection.execute(
+                        select(ledger_events).where(
+                            ledger_events.c.event_id == effective_id
+                        )
+                    ).one()
+                    effective = self._event_from_row(dict(row._mapping))
                 inserted = connection.execute(
                     dialect_insert(event_outbox)
                     .values(
-                        event_id=event.event_id,
-                        event_type=event.event_type,
-                        envelope_json=event.model_dump_json(),
+                        event_id=effective_id,
+                        event_type=effective.event_type,
+                        envelope_json=effective.model_dump_json(),
                         status="PENDING",
                         attempt_count=0,
                         lease_owner=None,
                         lease_expires_at=None,
-                        next_attempt_at=event.emitted_at,
+                        next_attempt_at=effective.emitted_at,
                         last_error=None,
-                        created_at=event.emitted_at,
-                        updated_at=event.emitted_at,
+                        created_at=effective.emitted_at,
+                        updated_at=effective.emitted_at,
                         published_at=None,
                     )
                     .on_conflict_do_nothing(index_elements=["event_id"])
@@ -81,6 +102,52 @@ class EventLedger:
                 if inserted is not None:
                     enqueued.append(str(inserted))
         return tuple(enqueued)
+
+    @staticmethod
+    def _event_from_row(row: dict[str, Any]) -> EventEnvelope:
+        for field in ("event_time", "emitted_at"):
+            value = row[field]
+            if value.tzinfo is None:
+                row[field] = value.replace(tzinfo=UTC)
+        return EventEnvelope.model_validate(row)
+
+    @staticmethod
+    def _existing_business_event_id(
+        connection: Any,
+        event: EventEnvelope,
+        *,
+        reconcile_business_ids: bool,
+    ) -> str | None:
+        exact = connection.execute(
+            select(ledger_events.c.event_id).where(
+                ledger_events.c.event_id == event.event_id
+            )
+        ).scalar_one_or_none()
+        if exact is not None:
+            return str(exact)
+        if not reconcile_business_ids:
+            return None
+        identity_fields = {
+            "market.bar.closed.v1": "bar_id",
+            "market.trade.received.v1": "trade_id",
+            "market.quote.received.v1": "quote_id",
+            "option.snapshot.received.v1": "option_snapshot_id",
+        }
+        identity_field = identity_fields.get(event.event_type)
+        identity_value = event.payload.get(identity_field) if identity_field else None
+        if not identity_field or not identity_value:
+            return None
+        legacy = connection.execute(
+            select(ledger_events.c.event_id)
+            .where(ledger_events.c.event_type == event.event_type)
+            .where(
+                ledger_events.c.payload[identity_field].as_string()
+                == str(identity_value)
+            )
+            .order_by(ledger_events.c.sequence.asc())
+            .limit(1)
+        ).scalar_one_or_none()
+        return str(legacy) if legacy is not None else None
 
     @staticmethod
     def stable_event_id(event_type: str, business_key: str) -> str:
@@ -100,11 +167,19 @@ class EventLedger:
     ) -> None:
         """Attempt every newly enqueued delivery before surfacing a failure."""
         pending = set(enqueued_event_ids)
+        events_by_id = {event.event_id: event for event in events}
         first_error: Exception | None = None
-        for event in events:
-            if event.event_id not in pending:
-                continue
-            pending.remove(event.event_id)
+        for event_id in enqueued_event_ids:
+            event = events_by_id.get(event_id)
+            if event is None:
+                with self.engine.connect() as connection:
+                    row = connection.execute(
+                        select(ledger_events).where(
+                            ledger_events.c.event_id == event_id
+                        )
+                    ).one()
+                event = self._event_from_row(dict(row._mapping))
+            pending.discard(event_id)
             try:
                 self.deliver(event, publisher)
             except Exception as exc:  # durable outbox already exists

@@ -248,6 +248,19 @@ def test_restricted_symbol_always_rejected(settings: Settings) -> None:
     assert result.max_quantity == 0
 
 
+def test_decision_created_after_earliest_execution_is_rejected(
+    settings: Settings,
+) -> None:
+    result = evaluate(
+        settings,
+        candidate(),
+        context=risk_context(decision_before_execution=False),
+    )
+
+    assert result.verdict == Verdict.REJECT
+    assert "DECISION_TOO_LATE_FOR_EARLIEST_EXECUTION" in result.reason_codes
+
+
 @given(st.decimals(min_value="15.00", max_value="16.60", places=2))
 @hypothesis_settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
 def test_increasing_risk_distance_cannot_increase_quantity(

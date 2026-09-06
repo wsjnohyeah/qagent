@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 import time
 
@@ -52,7 +52,10 @@ def test_admin_session_is_required_and_csrf_protects_writes(
         }
     )
     with TestClient(create_app(secured)) as client:
-        assert client.get("/").status_code == 200
+        page = client.get("/")
+        assert page.status_code == 200
+        assert "ML + Research LLM decision chain" in page.text
+        assert "EXECUTION_RISK_REVIEW" in page.text
         assert client.get("/health/live").status_code == 200
         assert client.get("/v1/system/status").status_code == 401
         assert client.post(
@@ -442,7 +445,10 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
                 created_at=datetime.now(UTC),
             )
         )
-    with TestClient(create_app(settings)) as client:
+    shadow_now = [bars[-3].available_from + timedelta(minutes=1)]
+    with TestClient(
+        create_app(settings, shadow_now_provider=lambda: shadow_now[0])
+    ) as client:
         altered = research.record_strategy_spec(
             spec.model_copy(
                 update={
@@ -566,7 +572,12 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
         assert not any(
             event["event_type"] == "VIRTUAL_FILL" for event in planned_events
         )
+        planned_lineage = client.get("/v1/shadow/decisions").json()[0]
+        assert datetime.fromisoformat(planned_lineage["plan_persisted_at"]) < (
+            clock.daily_bar_session_open(bars[-2].event_time)
+        )
         market.insert_bars((bars[-2],), raw_object_id="TEST_RAW")
+        shadow_now[0] = bars[-2].available_from + timedelta(minutes=1)
         forward_tick = client.post(
             "/v1/actions",
             json={
@@ -590,6 +601,7 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
             "TRADE_PLAN",
             "VIRTUAL_ORDER",
             "VIRTUAL_FILL",
+            "EXECUTION_RISK_REVIEW",
         }
         decisions = client.get("/v1/shadow/decisions").json()
         assert decisions[0]["verdict"] == "APPROVE"
@@ -630,6 +642,7 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
                 .values(cash_balance=Decimal("30000"))
             )
         market.insert_bars((bars[-1],), raw_object_id="TEST_RAW")
+        shadow_now[0] = bars[-1].available_from + timedelta(minutes=1)
         floor_tick = client.post(
             "/v1/actions",
             json={
@@ -675,6 +688,22 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
             json={"confirmation_phrase": second_tick["confirmation_phrase"]},
         ).status_code == 200
         assert len(client.get("/v1/shadow/events").json()) == len(after_floor)
+
+        client.app.state.shadow.risk_policy = current_policy.model_copy(
+            update={
+                "version": "risk_policy@0.3.1",
+                "maximum_trade_risk_usd": Decimal("80"),
+            }
+        )
+        asyncio.run(
+            client.app.state.shadow.tick(
+                trigger="contract-change-test",
+                new_exposure_paused=False,
+            )
+        )
+        quarantined = client.get("/v1/shadow/deployments").json()[0]
+        assert quarantined["status"] == "REVALIDATION_REQUIRED"
+        assert quarantined["contract_status"] == "REVALIDATION_REQUIRED"
 
 
 def test_system_steward_cites_snapshot_and_only_proposes_actions(

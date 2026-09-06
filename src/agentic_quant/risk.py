@@ -53,7 +53,9 @@ class RiskPolicy(BaseModel):
         return self
 
 
-BASELINE_EXECUTION_PROFILE_VERSION = "next_open_bracket_one_bar@0.1.0"
+BASELINE_EXECUTION_PROFILE_VERSION = (
+    "next_open_market_revalidated_bracket_one_bar@0.2.0"
+)
 
 
 def baseline_long_geometry(
@@ -179,6 +181,8 @@ def evaluate_candidate(
         reasons.append("MACRO_EVENT_BLACKOUT")
     if context.duplicate_order_detected:
         reasons.append("DUPLICATE_ORDER")
+    if not context.decision_before_execution:
+        reasons.append("DECISION_TOO_LATE_FOR_EARLIEST_EXECUTION")
     if account.equity <= policy.account_floor_usd:
         reasons.append("ACCOUNT_FLOOR_REACHED")
     if account.daily_pnl <= -policy.daily_loss_stop_usd:

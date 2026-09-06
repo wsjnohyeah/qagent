@@ -1,4 +1,4 @@
-version: research_gate@0.1.0
+version: research_gate@0.2.0
 
 # These gates only determine eligibility for later human review. They never promote a
 # strategy or authorize shadow/paper execution automatically.

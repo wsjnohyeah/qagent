@@ -7,7 +7,7 @@ from decimal import Decimal
 import hmac
 import json
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -267,6 +267,7 @@ def create_app(
     settings: Settings | None = None,
     *,
     process_role: str = "api",
+    shadow_now_provider: Callable[[], datetime] | None = None,
 ) -> FastAPI:
     app_settings = settings or Settings()
     if process_role not in {"api", "worker", "coordinator"}:
@@ -332,6 +333,7 @@ def create_app(
         risk_policy=risk_policy,
         restrictions=restrictions,
         calendar_name=app_settings.market_calendar,
+        now_provider=shadow_now_provider,
     )
     application: FastAPI
 

@@ -4,7 +4,7 @@ import asyncio
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, Callable
 
 from sqlalchemy import Engine, delete, func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
@@ -84,6 +84,7 @@ class ShadowRuntime:
         risk_policy: RiskPolicy,
         restrictions: RestrictionRegistry,
         calendar_name: str = "XNYS",
+        now_provider: Callable[[], datetime] | None = None,
     ) -> None:
         self.engine = engine
         self.research_store = research_store
@@ -98,7 +99,14 @@ class ShadowRuntime:
         )
         self.costs = BacktestCostModel()
         self.accounts = VirtualAccountStore(engine)
+        self._now_provider = now_provider or (lambda: datetime.now(UTC))
         self._tick_lock = asyncio.Lock()
+
+    def _now(self) -> datetime:
+        value = self._now_provider()
+        if value.tzinfo is None:
+            raise ValueError("Shadow runtime clock must be timezone-aware")
+        return value.astimezone(UTC)
 
     def initialize_virtual_account(
         self,
@@ -520,13 +528,20 @@ class ShadowRuntime:
             if row.status == "RETIRED":
                 raise ValueError("Retired shadow deployments cannot be changed")
             if status == "ACTIVE":
-                adoption_status = connection.execute(
-                    select(strategy_adoptions.c.status).where(
+                adoption_row = connection.execute(
+                    select(
+                        strategy_adoptions.c.status,
+                        strategy_adoptions.c.validation_report_id,
+                    ).where(
                         strategy_adoptions.c.strategy_spec_id == row.strategy_spec_id
                     )
-                ).scalar_one_or_none()
-                if adoption_status != "ADOPTED_FOR_SHADOW":
+                ).one_or_none()
+                if adoption_row is None or adoption_row.status != "ADOPTED_FOR_SHADOW":
                     raise ValueError("Strategy adoption is not active")
+                self.adoption_preview(
+                    strategy_spec_id=str(row.strategy_spec_id),
+                    validation_report_id=str(adoption_row.validation_report_id),
+                )
             connection.execute(
                 update(shadow_deployments)
                 .where(shadow_deployments.c.shadow_deployment_id == deployment_id)
@@ -635,6 +650,17 @@ class ShadowRuntime:
             value["account_realized_pnl"] = master["realized_pnl"]
             value["account_reserved_cash"] = master["reserved_cash"]
             value["account_reserved_risk_usd"] = master["reserved_risk_usd"]
+            try:
+                self.adoption_preview(
+                    strategy_spec_id=str(value["strategy_spec_id"]),
+                    validation_report_id=str(value["validation_report_id"]),
+                )
+            except ValueError as exc:
+                value["contract_status"] = "REVALIDATION_REQUIRED"
+                value["contract_message"] = str(exc)
+            else:
+                value["contract_status"] = "CURRENT"
+                value["contract_message"] = "Approved execution contract is current"
         return values
 
     def deployment(self, deployment_id: str) -> dict[str, Any]:
@@ -676,6 +702,7 @@ class ShadowRuntime:
                 shadow_trade_plans.c.trade_plan_id,
                 shadow_trade_plans.c.quantity.label("planned_quantity"),
                 shadow_trade_plans.c.status.label("plan_status"),
+                shadow_trade_plans.c.created_at.label("plan_persisted_at"),
                 shadow_trade_plans.c.closed_at,
             )
             .join(
@@ -697,7 +724,18 @@ class ShadowRuntime:
             shadow_signal_candidates.c.created_at.desc()
         ).limit(limit)
         with self.engine.connect() as connection:
-            return [dict(row._mapping) for row in connection.execute(statement)]
+            values = [dict(row._mapping) for row in connection.execute(statement)]
+        for value in values:
+            for field in (
+                "as_of",
+                "expires_at",
+                "created_at",
+                "evaluated_at",
+                "plan_persisted_at",
+                "closed_at",
+            ):
+                value[field] = _utc(value.get(field))
+        return values
 
     def events(
         self,
@@ -997,10 +1035,22 @@ class ShadowRuntime:
         run_id: str,
         lease_token: str,
     ) -> tuple[int, int]:
+        try:
+            self.adoption_preview(
+                strategy_spec_id=str(deployment["strategy_spec_id"]),
+                validation_report_id=str(deployment["validation_report_id"]),
+            )
+        except ValueError as exc:
+            self._require_revalidation(
+                deployment,
+                reason=str(exc),
+            )
+            return 0, 0
+        observed_at = self._now()
         bars = self.research_store.load_bars(
             symbol=str(deployment["symbol"]),
             timeframe=str(deployment["timeframe"]),
-            as_of_end=datetime.now(UTC),
+            as_of_end=observed_at,
         )
         if len(bars) < 22:
             return 0, 0
@@ -1041,6 +1091,11 @@ class ShadowRuntime:
         candidate = decision = plan = evaluation_context = None
         lineage_values: list[dict[str, Any]] = []
         if action == SignalAction.LONG:
+            earliest_execution_at = (
+                self.session_clock.next_daily_session_open(decision_bar.event_time)
+                if decision_bar.timeframe == "1Day"
+                else decision_bar.available_from
+            )
             expiry = snapshot.as_of + (
                 timedelta(days=7)
                 if decision_bar.timeframe == "1Day"
@@ -1059,7 +1114,8 @@ class ShadowRuntime:
                 snapshot_id=snapshot.feature_snapshot_id,
                 snapshot_values=snapshot.values,
                 signal_time=snapshot.as_of,
-                entry_time=snapshot.as_of,
+                evaluation_time=observed_at,
+                earliest_execution_at=earliest_execution_at,
                 exit_time=expiry,
                 planned_entry=decision_bar.close,
                 known_liquidity_volume=decision_bar.volume,
@@ -1103,7 +1159,7 @@ class ShadowRuntime:
                         execution_contract_sha256=refreshed[
                             "execution_contract_sha256"
                         ],
-                        created_at=datetime.now(UTC),
+                        created_at=observed_at,
                     )
                 )
                 account = self._account_state(refreshed, snapshot.as_of)
@@ -1166,7 +1222,7 @@ class ShadowRuntime:
                                 targets_json=[str(value) for value in plan.targets],
                                 expires_at=plan.expires_at,
                                 status="OPEN",
-                                created_at=snapshot.as_of,
+                                created_at=observed_at,
                                 closed_at=None,
                             )
                         )
@@ -1205,10 +1261,37 @@ class ShadowRuntime:
                 .values(
                     last_price=decision_bar.close,
                     last_processed_bar_time=decision_bar.event_time,
-                    updated_at=datetime.now(UTC),
+                    updated_at=observed_at,
                 )
             )
         return 1, created + len(lineage_values)
+
+    def _require_revalidation(
+        self,
+        deployment: dict[str, Any],
+        *,
+        reason: str,
+    ) -> None:
+        """Quarantine an active sleeve when its approved contract is obsolete."""
+        now = self._now()
+        deployment_id = str(deployment["shadow_deployment_id"])
+        with self.engine.begin() as connection:
+            changed = connection.execute(
+                update(shadow_deployments)
+                .where(
+                    (shadow_deployments.c.shadow_deployment_id == deployment_id)
+                    & (shadow_deployments.c.status == "ACTIVE")
+                )
+                .values(status="REVALIDATION_REQUIRED", updated_at=now)
+            )
+            if int(changed.rowcount or 0) == 1:
+                self._cancel_open_plans(
+                    connection,
+                    deployment_ids=(deployment_id,),
+                    closed_at=now,
+                )
+        deployment["status"] = "REVALIDATION_REQUIRED"
+        deployment["revalidation_reason"] = reason
 
     def _execute_open_plan(
         self,
@@ -1262,8 +1345,12 @@ class ShadowRuntime:
         assert expires_at is not None
         signal_as_of = _utc(pending["signal_as_of"])
         assert signal_as_of is not None
+        persisted_at = _utc(pending["created_at"])
+        assert persisted_at is not None
         if entry_time < signal_as_of:
             rejection_reasons.append("EXECUTION_PRECEDES_SIGNAL")
+        if persisted_at >= entry_time:
+            rejection_reasons.append("PLAN_NOT_PERSISTED_BEFORE_EXECUTION")
         if missed_bar_count:
             rejection_reasons.append("MISSED_EARLIEST_FILL_BAR")
         if entry_time > expires_at:
@@ -1279,8 +1366,127 @@ class ShadowRuntime:
             rejection_reasons.append("SECURITY_RESTRICTED_AT_EXECUTION")
         if not market_data_healthy:
             rejection_reasons.append("MARKET_DATA_UNHEALTHY_AT_EXECUTION")
+        execution_review: RiskDecision | None = None
+        execution_quantity = 0
+        if not rejection_reasons:
+            context = dict(pending["evaluation_context_json"] or {})
+            own_risk = Decimal(str(pending["reserved_risk_usd"]))
+            review_account = account.model_copy(
+                update={
+                    "concurrent_planned_risk": max(
+                        _ZERO,
+                        account.concurrent_planned_risk - own_risk,
+                    )
+                }
+            )
+            execution_candidate = SignalCandidate(
+                candidate_id=str(pending["candidate_id"]),
+                symbol=str(pending["symbol"]),
+                direction=Direction.LONG,
+                setup_type="baseline_shadow:execution_revalidation",
+                strategy_version=str(deployment["strategy_version"]),
+                as_of=signal_as_of,
+                feature_snapshot_id=str(pending["feature_snapshot_id"]),
+                catalyst_id="NOT_APPLICABLE_BASELINE",
+                planned_entry=Decimal(str(execution_bar.open)),
+                invalidation=Decimal(str(pending["invalidation"])),
+                targets=tuple(
+                    Decimal(str(value)) for value in pending["targets_json"]
+                ),
+                expires_at=expires_at,
+            )
+            execution_review = evaluate_candidate(
+                candidate=execution_candidate,
+                features=FeatureSnapshot(
+                    feature_snapshot_id=str(pending["feature_snapshot_id"]),
+                    as_of=signal_as_of,
+                    relative_volume=Decimal("0"),
+                    vwap_confirmed=False,
+                    opening_range_confirmed=False,
+                    sector_compatible=False,
+                    quote_age_seconds=0,
+                ),
+                account=review_account,
+                mode=TradingMode.SHADOW,
+                policy=policy,
+                restrictions=self.restrictions,
+                context=RiskEvaluationContext(
+                    catalyst_required=False,
+                    catalyst_verified=False,
+                    restriction_status_known=True,
+                    liquidity_confirmed=int(
+                        context.get("liquidity_source_volume") or 0
+                    )
+                    > 0,
+                    market_data_healthy=market_data_healthy,
+                    macro_calendar_status_known=False,
+                    duplicate_order_detected=False,
+                    evaluation_profile="baseline_shadow",
+                ),
+                evaluated_at=entry_time,
+                new_exposure_paused=False,
+            )
+            if execution_review.verdict != Verdict.APPROVE:
+                rejection_reasons.extend(execution_review.reason_codes)
+            else:
+                cash_limit = int(
+                    Decimal(str(pending["reserved_cash"]))
+                    // Decimal(str(execution_bar.open))
+                )
+                execution_quantity = min(
+                    int(pending["quantity"]),
+                    execution_review.max_quantity,
+                    cash_limit,
+                )
+                if execution_quantity < 1:
+                    rejection_reasons.append("EXECUTION_SIZE_ROUNDS_TO_ZERO")
+        review_event = self._operational_event(
+            deployment=deployment,
+            run_id=run_id,
+            bar_id=execution_bar.bar_id,
+            event_type="EXECUTION_RISK_REVIEW",
+            event_time=entry_time,
+            payload={
+                "trade_plan_id": pending["trade_plan_id"],
+                "execution_risk_decision_id": (
+                    execution_review.risk_decision_id
+                    if execution_review is not None
+                    else None
+                ),
+                "reference_price": str(pending["limit_price"]),
+                "open_price": str(execution_bar.open),
+                "original_quantity": int(pending["quantity"]),
+                "approved_quantity": execution_quantity,
+                "risk_budget_usd": (
+                    str(execution_review.risk_budget_usd)
+                    if execution_review is not None
+                    else "0"
+                ),
+                "reward_risk_at_open": (
+                    str(execution_review.planned_r_multiple_to_t1)
+                    if execution_review is not None
+                    and execution_review.planned_r_multiple_to_t1 is not None
+                    else None
+                ),
+                "verdict": (
+                    execution_review.verdict.value
+                    if execution_review is not None
+                    else "REJECT"
+                ),
+                "reason_codes": (
+                    list(rejection_reasons)
+                    if rejection_reasons
+                    else list(execution_review.reason_codes)
+                    if execution_review is not None
+                    else []
+                ),
+                "execution_profile": BASELINE_EXECUTION_PROFILE_VERSION,
+                "virtual_only": True,
+            },
+        )
         if rejection_reasons:
             events = [
+                review_event,
                 self._operational_event(
                     deployment=deployment,
                     run_id=run_id,
@@ -1303,7 +1509,7 @@ class ShadowRuntime:
                 **deployment,
                 "cash_balance": account.equity,
             }
-            events, cash, realized = self._simulate_one_bar(
+            simulated_events, cash, realized = self._simulate_one_bar(
                 deployment=simulation_deployment,
                 run_id=run_id,
                 decision_bar_id=execution_bar.bar_id,
@@ -1318,7 +1524,7 @@ class ShadowRuntime:
                 close_price=execution_bar.close,
                 volume=int(context.get("liquidity_source_volume") or 0),
                 exit_volume=execution_bar.volume,
-                quantity_limit=int(pending["quantity"]),
+                quantity_limit=execution_quantity,
                 invalidation=Decimal(str(pending["invalidation"])),
                 target=Decimal(str(list(pending["targets_json"])[0])),
                 lineage={
@@ -1327,8 +1533,9 @@ class ShadowRuntime:
                     "trade_plan_id": pending["trade_plan_id"],
                 },
             )
+            events = [review_event, *simulated_events]
             status = "CLOSED"
-        if events and events[0]["sequence"] == 0:
+        if events:
             next_sequence = self._next_event_sequence(
                 str(deployment["shadow_deployment_id"])
             )
@@ -1344,7 +1551,7 @@ class ShadowRuntime:
                 )
                 .values(
                     status=status,
-                    closed_at=execution_bar.available_from,
+                    closed_at=self._now(),
                 )
             )
             realized_delta = cash - account.equity if status == "CLOSED" else _ZERO
@@ -1489,7 +1696,8 @@ class ShadowRuntime:
         snapshot_id: str,
         snapshot_values: dict[str, Any],
         signal_time: datetime,
-        entry_time: datetime,
+        evaluation_time: datetime,
+        earliest_execution_at: datetime,
         exit_time: datetime,
         planned_entry: Decimal,
         known_liquidity_volume: int,
@@ -1518,9 +1726,9 @@ class ShadowRuntime:
             planned_entry=planned_entry,
             invalidation=invalidation,
             targets=(target,),
-            expires_at=max(exit_time, entry_time + timedelta(microseconds=1)),
+            expires_at=max(exit_time, signal_time + timedelta(microseconds=1)),
         )
-        account = self._account_state(deployment, entry_time)
+        account = self._account_state(deployment, evaluation_time)
         risk_features = FeatureSnapshot(
             feature_snapshot_id=snapshot_id,
             as_of=signal_time,
@@ -1540,6 +1748,7 @@ class ShadowRuntime:
             market_data_healthy=market_data_healthy,
             macro_calendar_status_known=False,
             duplicate_order_detected=False,
+            decision_before_execution=evaluation_time < earliest_execution_at,
             evaluation_profile="baseline_shadow",
         )
         decision = evaluate_candidate(
@@ -1550,7 +1759,7 @@ class ShadowRuntime:
             policy=policy,
             restrictions=self.restrictions,
             context=context,
-            evaluated_at=entry_time,
+            evaluated_at=evaluation_time,
             new_exposure_paused=False,
         )
         plan = None
@@ -1576,7 +1785,7 @@ class ShadowRuntime:
             "position_quantity": _ZERO,
             "price": planned_entry,
             "realized_pnl_delta": _ZERO,
-            "created_at": datetime.now(UTC),
+            "created_at": evaluation_time,
         }
         events = [
             {
@@ -1595,10 +1804,11 @@ class ShadowRuntime:
                 "shadow_event_id": uuid7(),
                 "sequence": 0,
                 "event_type": "RISK_DECISION",
-                "event_time": entry_time,
+                "event_time": evaluation_time,
                 "payload_json": {
                     **decision.model_dump(mode="json"),
                     "evaluation_context": context.model_dump(mode="json"),
+                    "earliest_execution_at": earliest_execution_at.isoformat(),
                     "virtual_only": True,
                 },
             },
@@ -1610,9 +1820,12 @@ class ShadowRuntime:
                     "shadow_event_id": uuid7(),
                     "sequence": 0,
                     "event_type": "TRADE_PLAN",
-                    "event_time": entry_time,
+                    "event_time": evaluation_time,
                     "payload_json": {
                         **plan.model_dump(mode="json"),
+                        "approved_at": evaluation_time.isoformat(),
+                        "persisted_at": evaluation_time.isoformat(),
+                        "earliest_execution_at": earliest_execution_at.isoformat(),
                         "virtual_only": True,
                     },
                 }

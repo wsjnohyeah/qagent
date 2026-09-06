@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
+from agentic_quant.control_plane import SystemObjectStore
 from agentic_quant.domain import (
     AnalystClaim,
     EvidencePacket,
@@ -226,6 +227,19 @@ def test_hybrid_generator_compiles_only_a_bounded_research_spec(
     assert len(attempts) == 2
     assert {attempt["status"] for attempt in attempts} == {"ACCEPT"}
     assert len({attempt["generation_invocation_id"] for attempt in attempts}) == 2
+    detail = SystemObjectStore(ledger.engine).strategy(spec["strategy_spec_id"])
+    assert detail is not None
+    assert detail["lineage"]["origin_kind"] == "HYBRID_ML_LLM"
+    assert detail["lineage"]["research_llm"]["analysis"]["thesis"] == (
+        "Evidence and ML agree directionally."
+    )
+    assert detail["lineage"]["ml_forecast"]["probability_up"] == Decimal(
+        "0.640000000000"
+    )
+    assert detail["lineage"]["generation"]["proposal"]["thesis"] == (
+        "Use corroborated trend and evidence as a research candidate."
+    )
+    assert detail["lineage"]["critique"]["result"]["verdict"] == "ACCEPT"
     assert ledger.by_correlation_id(spec["strategy_spec_id"])[-1][
         "event_type"
     ] == "research.strategy_candidate.compiled.v1"

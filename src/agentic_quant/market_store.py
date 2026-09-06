@@ -148,6 +148,26 @@ class MarketDataStore:
                 raise RuntimeError(f"Unsupported SQL dialect: {self.engine.dialect.name}")
             return tuple(str(value) for value in connection.execute(statement).scalars().all())
 
+    def canonical_bars(self, bars: tuple[StockBar, ...]) -> tuple[StockBar, ...]:
+        """Resolve provider rows to the IDs actually persisted under natural keys."""
+        values: list[StockBar] = []
+        with self.engine.connect() as connection:
+            for bar in bars:
+                row = connection.execute(
+                    select(market_bars).where(
+                        (market_bars.c.symbol == bar.symbol)
+                        & (market_bars.c.timeframe == bar.timeframe)
+                        & (market_bars.c.event_time == bar.event_time)
+                        & (market_bars.c.source == bar.source)
+                        & (market_bars.c.feed == bar.feed)
+                    )
+                ).one()
+                item = dict(row._mapping)
+                for field in ("event_time", "available_from", "ingested_at"):
+                    item[field] = _utc(item[field])
+                values.append(StockBar.model_validate(item))
+        return tuple(values)
+
     def bars_between(
         self,
         *,
@@ -214,6 +234,53 @@ class MarketDataStore:
             returning_column=market_quotes.c.quote_id,
         )
 
+    def canonical_trades(
+        self,
+        trades: tuple[StockTrade, ...],
+    ) -> tuple[StockTrade, ...]:
+        values: list[StockTrade] = []
+        with self.engine.connect() as connection:
+            for trade in trades:
+                row = connection.execute(
+                    select(market_trades).where(
+                        (market_trades.c.source == trade.source)
+                        & (market_trades.c.feed == trade.feed)
+                        & (market_trades.c.symbol == trade.symbol)
+                        & (
+                            market_trades.c.provider_trade_id
+                            == trade.provider_trade_id
+                        )
+                    )
+                ).one()
+                item = dict(row._mapping)
+                for field in ("event_time", "available_from", "ingested_at"):
+                    item[field] = _utc(item[field])
+                values.append(StockTrade.model_validate(item))
+        return tuple(values)
+
+    def canonical_quotes(
+        self,
+        quotes: tuple[StockQuote, ...],
+    ) -> tuple[StockQuote, ...]:
+        values: list[StockQuote] = []
+        with self.engine.connect() as connection:
+            for quote in quotes:
+                row = connection.execute(
+                    select(market_quotes).where(
+                        (market_quotes.c.source == quote.source)
+                        & (market_quotes.c.feed == quote.feed)
+                        & (
+                            market_quotes.c.quote_fingerprint
+                            == quote.quote_fingerprint
+                        )
+                    )
+                ).one()
+                item = dict(row._mapping)
+                for field in ("event_time", "available_from", "ingested_at"):
+                    item[field] = _utc(item[field])
+                values.append(StockQuote.model_validate(item))
+        return tuple(values)
+
     def insert_option_snapshots(
         self, snapshots: tuple[OptionSnapshot, ...], raw_object_id: str
     ) -> tuple[str, ...]:
@@ -227,6 +294,30 @@ class MarketDataStore:
             identity_columns=["source", "feed", "contract_symbol", "as_of"],
             returning_column=option_snapshots.c.option_snapshot_id,
         )
+
+    def canonical_option_snapshots(
+        self,
+        snapshots: tuple[OptionSnapshot, ...],
+    ) -> tuple[OptionSnapshot, ...]:
+        values: list[OptionSnapshot] = []
+        with self.engine.connect() as connection:
+            for snapshot in snapshots:
+                row = connection.execute(
+                    select(option_snapshots).where(
+                        (option_snapshots.c.source == snapshot.source)
+                        & (option_snapshots.c.feed == snapshot.feed)
+                        & (
+                            option_snapshots.c.contract_symbol
+                            == snapshot.contract_symbol
+                        )
+                        & (option_snapshots.c.as_of == snapshot.as_of)
+                    )
+                ).one()
+                item = dict(row._mapping)
+                for field in ("as_of", "available_from", "ingested_at"):
+                    item[field] = _utc(item[field])
+                values.append(OptionSnapshot.model_validate(item))
+        return tuple(values)
 
     def _insert_market_records(
         self,

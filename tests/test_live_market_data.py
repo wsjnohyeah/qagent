@@ -7,12 +7,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 import agentic_quant.providers.alpaca_stream as alpaca_stream_module
 from agentic_quant.archive import FileRawArchive
 from agentic_quant.config import Settings
-from agentic_quant.database import event_outbox
+from agentic_quant.database import event_outbox, market_bars
+from agentic_quant.domain import EventEnvelope, StockBar
+from agentic_quant.ids import uuid7
 from agentic_quant.ledger import EventLedger
 from agentic_quant.live_ingestion import LiveMarketDataService
 from agentic_quant.market_calendar import MarketGapDetector
@@ -176,6 +178,59 @@ def test_live_batch_delivery_failure_leaves_every_business_event_recoverable(
     assert ledger.publish_pending(replay, worker_id="recovery")["published"] == 1
     assert len(ledger.recent()) == 3
     assert ledger.outbox_health()["event_outbox_published"] == 3
+
+
+def test_live_replay_reuses_legacy_business_id_and_event(
+    tmp_path: Path,
+    settings: Settings,
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    store = MarketDataStore(ledger.engine)
+    received_at = datetime(2026, 9, 3, 14, 31, tzinfo=UTC)
+    current = normalize_stream_message(
+        live_messages()[2],
+        feed="sip",
+        raw_object_id="LEGACY_RAW",
+        received_at=received_at,
+    )
+    assert isinstance(current, StockBar)
+    legacy = current.model_copy(update={"bar_id": uuid7()})
+    store.insert_bars((legacy,), raw_object_id="LEGACY_RAW")
+    old_event = EventEnvelope(
+        event_id=uuid7(),
+        event_type="market.bar.closed.v1",
+        event_time=legacy.event_time,
+        emitted_at=received_at,
+        producer="legacy-collector",
+        correlation_id="LEGACY_RAW",
+        payload=legacy.model_dump(mode="json"),
+    )
+    publisher = RecordingPublisher()
+    ledger.append(old_event)
+    ledger.deliver(old_event, publisher)
+
+    service = LiveMarketDataService(
+        archive=FileRawArchive(tmp_path / "raw"),
+        store=store,
+        ledger=ledger,
+        publisher=publisher,
+        feed="sip",
+    )
+    replay = service.ingest_frame([live_messages()[2]], received_at=received_at)
+
+    assert replay.records_inserted == 0
+    events = [
+        value
+        for value in ledger.recent()
+        if value["event_type"] == "market.bar.closed.v1"
+    ]
+    assert len(events) == 1
+    with ledger.engine.connect() as connection:
+        persisted_ids = set(
+            connection.execute(select(market_bars.c.bar_id)).scalars()
+        )
+    assert events[0]["payload"]["bar_id"] in persisted_ids
 
 
 def test_gap_detector_uses_exchange_sessions() -> None:
