@@ -47,6 +47,10 @@ def test_production_worker_healthchecks_allow_cold_import_latency() -> None:
         assert healthcheck["timeout"] == "20s"
         assert healthcheck["retries"] == 3
     coordinator_environment = compose["services"]["coordinator"]["environment"]
+    api_environment = compose["services"]["api"]["environment"]
+    assert api_environment["SHADOW_RUNTIME_ENABLED"].endswith(":-true}")
+    assert api_environment["PAPER_TRADING_ENABLED"].endswith(":-false}")
+    assert api_environment["AUTONOMOUS_COORDINATOR_ENABLED"].endswith(":-true}")
     assert coordinator_environment["MARKET_SCANNER_ENABLED"].endswith(":-false}")
     assert coordinator_environment["MARKET_SCANNER_LLM_ENABLED"].endswith(
         ":-false}"

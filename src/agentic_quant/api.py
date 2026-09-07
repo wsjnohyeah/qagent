@@ -643,6 +643,10 @@ def create_app(
         shadow_task = (
             asyncio.create_task(shadow_loop(), name="shadow-runtime")
             if app_settings.shadow_runtime_enabled
+            and (
+                process_role == "worker"
+                or app_settings.app_env == AppEnvironment.DEVELOPMENT
+            )
             else None
         )
         application.state.shadow_task = shadow_task
@@ -791,6 +795,10 @@ def create_app(
         coordinator_task = (
             asyncio.create_task(coordinator_loop(), name="research-coordinator")
             if app_settings.autonomous_coordinator_enabled
+            and (
+                process_role == "coordinator"
+                or app_settings.app_env == AppEnvironment.DEVELOPMENT
+            )
             else None
         )
         application.state.coordinator_task = coordinator_task

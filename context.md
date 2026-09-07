@@ -3382,6 +3382,29 @@ lifecycle. No Paper order was used as a build or deployment test.
   next entry; do not claim a strategy or Paper order unless the deterministic evidence gates
   actually produce one.
 
+### C047 — `Report dedicated production runtimes accurately`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-07 PDT.
+- User intent: finish production activation and review the result repeatedly rather than
+  accepting superficially healthy flags.
+- Scope:
+  - Corrected production API configuration so system/UI status reflects that Shadow, Paper,
+    and the autonomous coordinator are enabled.
+  - Kept scheduler ownership role-aware: in production only the dedicated worker runs
+    Shadow/Paper and only the coordinator process runs research; development retains its
+    convenient in-process schedulers.
+  - Added Compose regression assertions for all three API-visible runtime flags.
+- Architecture/decision impact:
+  - Configuration truth and process ownership are now separate. The API can accurately
+    describe enabled capabilities without creating duplicate production scheduler loops.
+- Validation: focused tests, lint, mypy, and a final release gate are required before the
+  corrective immutable deploy.
+- Expected global state after commit: replace C046 in production after CI while preserving
+  its migrated database, paused exposure, and zero-order state.
+- Corrections/follow-ups: correction to C046 production status reporting found during its
+  post-deploy authenticated verification.
+
 ## Template for future commit entries
 
 Copy this section before making a commit:
