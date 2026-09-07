@@ -10,7 +10,7 @@ present, but order authorization remains code-blocked until a separately validat
 execution lifecycle exists; paid research, off-site backup/alerting, and statistical/elapsed
 production evidence remain open
 
-Current documented baseline: C041 — `Normalize suspended-session VWAP placeholders`
+Current documented baseline: C042 — `Allow audited LLM trading-pool admission`
 
 ## Purpose and authority
 
@@ -3174,6 +3174,52 @@ lifecycle. No Paper order was used as a build or deployment test.
   - Source is ready for full release verification, GitHub CI, immutable-image deployment, and
     automatic retry of the recoverable NBIS coordinator job. Production remains on C039 until
     that exact functional image is verified and deployed.
+- Corrections/follow-ups: none.
+
+### D045 — Scanner/LLM may govern a bounded pool, but not a strategy or order
+
+- Date: 2026-09-07 PDT.
+- The user authorized the scanner and LLM to add stocks to the trading pool autonomously as
+  long as every decision remains visible.
+- Decision: keep the manual `trading-universe` separate and add a scanner-owned dynamic pool.
+  Only deterministic-eligible names from a successfully completed budgeted LLM re-rank may
+  refresh it. Skipped or failed review keeps the last reviewed pool and adds nothing new.
+- Every scan records the pool revision, admitted/add/remove sets, scan ID, and LLM invocation.
+  Final-stage authority requires that exact scan evidence and the still-current list revision.
+- Strategy validation, adoption, Shadow start, Paper enablement, and any order remain outside
+  this authority and retain their existing gates.
+- Formal record: ADR 0031.
+
+### C042 — `Allow audited LLM trading-pool admission`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-07 PDT.
+- User intent: let the scanner and LLM autonomously add eligible stocks to the trading pool,
+  with a complete record visible in the product.
+- Scope:
+  - Added an opt-in `scanner-trading-pool`, configuration guard, and scanner policy v0.2.0.
+  - A completed constrained LLM re-rank refreshes the pool; interval skips and failures retain
+    the last reviewed revision and cannot introduce a symbol.
+  - Bound the final research gate to the workflow scan, exact current pool revision, admitted
+    membership, and LLM invocation; manual Trading Universe membership remains independent.
+  - Added scanner-page admission state, per-symbol pool badges, additions/removals, list
+    revision, basis scan, and invocation evidence.
+  - Updated configuration, deployment/operator guidance, safety checks, and ADR 0031.
+- Architecture/decision impact:
+  - Symbol-level autonomous admission is now distinct from human strategy adoption and all
+    broker authority. The scanner owns a replaceable bounded slice instead of modifying or
+    accumulating the administrator's manual universe.
+- Validation:
+  - `make release-check` passed: Flake8, strict mypy across 59 source files, all 164 tests,
+    authenticated local doctor, secret scan, Docker rebuild/doctor, and PostgreSQL Alembic
+    zero-drift at `20260907_0031`.
+  - Browser JavaScript parsed under Node 24. Focused tests prove successful admission, exact
+    scan/list/LLM lineage, held prior membership during interval skips, invented-symbol
+    rejection, default-off configuration, and continued human Shadow confirmation.
+- Expected global state after commit:
+  - The capability defaults off. After an immutable deploy and explicit production flag, a
+    fresh successful LLM-reviewed scan may populate the Scanner Trading Pool while new exposure,
+    Paper submission, and live money remain disabled.
 - Corrections/follow-ups: none.
 
 ## Template for future commit entries

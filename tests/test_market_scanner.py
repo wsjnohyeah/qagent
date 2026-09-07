@@ -12,6 +12,7 @@ from agentic_quant.archive import FileRawArchive
 from agentic_quant.config import Settings
 from agentic_quant.control_plane import SystemObjectStore
 from agentic_quant.coordinator import AutonomousCoordinator
+from agentic_quant.coordinator_runtime import ResearchCoordinatorHandler
 from agentic_quant.domain import (
     LLMInvocation,
     LLMInvocationStatus,
@@ -194,11 +195,15 @@ def _build_scanner(
     provider: FakeScannerProvider,
     llm: FakeLLMGateway,
     llm_enabled: bool,
+    auto_trading_pool_enabled: bool = False,
 ) -> tuple[MarketUniverseScanner, SystemObjectStore]:
     configured = settings.model_copy(
         update={
             "market_scanner_enabled": True,
             "market_scanner_llm_enabled": llm_enabled,
+            "market_scanner_auto_trading_pool_enabled": (
+                auto_trading_pool_enabled
+            ),
             "market_scanner_policy_path": Path("configs/market_scanner.yaml"),
             "alpaca_api_key": SecretStr("test-key"),
             "alpaca_api_secret": SecretStr("test-secret"),
@@ -284,6 +289,67 @@ def test_market_scanner_uses_bounded_llm_rerank_then_respects_interval(
     assert llm.calls == 1
 
 
+def test_llm_reviewed_scan_refreshes_audited_trading_pool(
+    settings: Settings,
+) -> None:
+    llm = FakeLLMGateway(
+        '{"picks":['
+        '{"symbol":"SNDK","priority_score":10,"attention_class":"HOT",'
+        '"thesis":"storage momentum","risks":["gap reversal"]},'
+        '{"symbol":"NVDA","priority_score":8,"attention_class":"EMERGING",'
+        '"thesis":"compute follow-through","risks":["crowding"]}'
+        "]}"
+    )
+    scanner, objects = _build_scanner(
+        settings,
+        provider=FakeScannerProvider(),
+        llm=llm,
+        llm_enabled=True,
+        auto_trading_pool_enabled=True,
+    )
+
+    first = asyncio.run(scanner.run_once(as_of=NOW))
+    admission = first["trading_pool_admission"]
+    pool = objects.get_list("scanner-trading-pool")
+
+    assert pool is not None
+    assert admission["status"] == "UPDATED"
+    assert admission["basis_scan_id"] == first["scan_id"]
+    assert admission["basis_llm_invocation_id"] == first["llm_invocation_id"]
+    assert admission["admitted_symbols"] == pool["members"]
+    assert admission["added_symbols"] == pool["members"]
+    assert admission["removed_symbols"] == []
+    assert pool["revision_created_by"] == "market-universe-scanner"
+    assert first["automatic_execution"] is False
+
+    handler = ResearchCoordinatorHandler.__new__(ResearchCoordinatorHandler)
+    handler.settings = scanner.settings
+    handler.ledger = scanner.ledger
+    handler.objects = objects
+    ready = asyncio.run(
+        handler._await_shadow_adoption(
+            {
+                "symbol": "SNDK",
+                "validation_report_id": "validation-id",
+                "eligible_for_human_review": True,
+                "universe_scan_id": first["scan_id"],
+            }
+        )
+    )
+    assert ready["outcome"] == "WAITING_HUMAN_CONFIRMATION"
+    assert ready["trading_pool_authority"] == "SCANNER_LLM_TRADING_POOL"
+    assert ready["scanner_admission"]["basis_llm_invocation_id"] == (
+        first["llm_invocation_id"]
+    )
+
+    second = asyncio.run(scanner.run_once(as_of=NOW + timedelta(hours=1)))
+    assert second["llm_status"] == "SKIPPED_INTERVAL"
+    assert second["trading_pool_admission"]["status"] == (
+        "HELD_PREVIOUS_LLM_REVIEW"
+    )
+    assert second["trading_pool_admission"]["admitted_symbols"] == pool["members"]
+
+
 def test_market_scanner_rejects_llm_symbol_invention_and_falls_back(
     settings: Settings,
 ) -> None:
@@ -296,6 +362,7 @@ def test_market_scanner_rejects_llm_symbol_invention_and_falls_back(
         provider=FakeScannerProvider(),
         llm=llm,
         llm_enabled=True,
+        auto_trading_pool_enabled=True,
     )
 
     result = asyncio.run(scanner.run_once(as_of=NOW))
@@ -306,11 +373,14 @@ def test_market_scanner_rejects_llm_symbol_invention_and_falls_back(
     assert result["llm_invocation_id"] is not None
     assert "INVENTED" not in result["selected_symbols"]
     assert result["selected_symbols"][0] == "SNDK"
+    assert result["trading_pool_admission"]["status"] == "WAITING_LLM_REVIEW"
+    assert result["trading_pool_admission"]["admitted_symbols"] == []
 
 
 def test_market_scanner_policy_preserves_yaml_keyword_ticker() -> None:
     policy = load_market_scanner_policy(Path("configs/market_scanner.yaml"))
 
+    assert policy.version == "market_scanner@0.2.0"
     assert policy.seed_themes["SNDK"] == "ai_compute_semiconductors"
     assert policy.seed_themes["ON"] == "ai_compute_semiconductors"
     assert "META" not in policy.seed_themes

@@ -16,11 +16,13 @@ response; fetches snapshots in batches; and applies deterministic price, dollar-
 restriction, and benchmark filters. It retains 40 review candidates and selects at most 20.
 
 When `MARKET_SCANNER_LLM_ENABLED=true`, the `routine_pipeline` model may re-rank only those 40
-symbols, at most once every four hours. It cannot add symbols. Budget exhaustion, incomplete
+symbols, at most once every four hours. It cannot invent symbols. Budget exhaustion, incomplete
 provider output, invalid JSON, or an invented symbol yields `FAILED_FALLBACK` and preserves
-the deterministic result. The scan updates only the dynamic `candidate-list`. A candidate
-must separately enter `trading-universe` before the last coordinator stage can offer Shadow
-adoption, and adoption/start still require explicit confirmations.
+the deterministic result. When `MARKET_SCANNER_AUTO_TRADING_POOL_ENABLED=true`, a completed
+LLM-reviewed scan also refreshes the bounded `scanner-trading-pool`; an interval skip or failed
+review holds the previous pool and admits nothing new. Every pool revision records additions,
+removals, scan ID, and LLM invocation. Exact validation and explicit strategy-adoption/Shadow
+confirmations still apply, and neither candidate nor pool membership can submit an order.
 
 ## Stages
 
@@ -54,6 +56,7 @@ COORDINATOR_INITIAL_LOOKBACK_DAYS=1826
 COORDINATOR_PAID_RESEARCH_ENABLED=false
 MARKET_SCANNER_ENABLED=false
 MARKET_SCANNER_LLM_ENABLED=false
+MARKET_SCANNER_AUTO_TRADING_POOL_ENABLED=false
 MARKET_SCANNER_POLICY_PATH=./configs/market_scanner.yaml
 ```
 
@@ -63,7 +66,8 @@ worker permits the two LLM stages. The LLM still cannot adopt or execute a strat
 
 ## Inspection and recovery
 
-Use `GET /v1/market-scanner/status`, the Market Scanner page,
+Use `GET /v1/market-scanner/status`, the Market Scanner page, and the Scanner Trading Pool's
+revision history to inspect each admitted/added/removed symbol and its basis invocation. Also use
 `GET /v1/coordinator/status`, `GET /v1/workflow-jobs`, and the Pipelines page. Each job
 has dependency IDs, attempt count, owner/token lease, result, and error code. A process crash
 leaves a lease that is reclaimed after ten minutes. A provider exception marks only that

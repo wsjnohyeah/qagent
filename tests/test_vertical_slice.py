@@ -69,9 +69,11 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert system_status["meta_model_configured"] is False
         assert system_status["market_scanner_enabled"] is False
         assert system_status["market_scanner_llm_enabled"] is False
+        assert system_status["market_scanner_auto_trading_pool_enabled"] is False
         scanner = client.get("/v1/market-scanner/status").json()
-        assert scanner["policy_version"] == "market_scanner@0.1.0"
+        assert scanner["policy_version"] == "market_scanner@0.2.0"
         assert scanner["latest_run"] is None
+        assert scanner["auto_trading_pool_enabled"] is False
         assert scanner["execution_authority"] is False
         paper = client.get("/v1/paper/status").json()
         assert paper["provider"] == "alpaca_paper"

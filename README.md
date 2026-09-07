@@ -150,8 +150,10 @@ Watchlist, applies deterministic price/liquidity/restriction/benchmark filters, 
 most 20 deep-research candidates. A budgeted LLM may re-rank only the deterministic top 40 at
 most once every four hours; invalid output, provider failure, or exhausted budget falls back
 to deterministic ranking. Scan evidence, scores, reasons, LLM comments, and coordinator
-lineage are persisted. The resulting Candidate List has no execution authority: explicit
-Trading Universe admission and the existing validation/adoption/Shadow gates still apply.
+lineage are persisted. When separately enabled, only a successfully completed LLM-reviewed
+scan refreshes a bounded Scanner Trading Pool; skipped or failed LLM review cannot admit a new
+symbol. Exact validation and separate strategy-adoption/Shadow confirmations still apply, and
+pool membership has no broker-order authority.
 
 ## Commands
 
@@ -201,6 +203,7 @@ COORDINATOR_DOCUMENT_LOOKBACK_DAYS=90
 COORDINATOR_DOCUMENT_MAX_PAGES=10
 MARKET_SCANNER_ENABLED=false
 MARKET_SCANNER_LLM_ENABLED=false
+MARKET_SCANNER_AUTO_TRADING_POOL_ENABLED=false
 MARKET_SCANNER_POLICY_PATH=./configs/market_scanner.yaml
 LLM_OPENAI_API_KEY=
 LLM_META_API_KEY=
@@ -443,7 +446,8 @@ The web application is organized around system objects rather than a fixed dashb
   shadow-active symbols, benchmarks, and read-only restriction list with immutable revisions.
 - **Market scanner** explains the discovery funnel and shows the latest ranked candidates,
   activity/liquidity metrics, deterministic reasons, optional LLM thesis/risks, and immutable
-  source payloads. Candidate selection is visibly separate from Trading Universe permission.
+  source payloads. It also shows the Scanner Trading Pool revision, additions, removals, and
+  exact scan/LLM evidence that authorized autonomous membership.
 - **Data explorer** exposes clickable dataset types, date groups, pagination, normalized rows,
   documents/facts, and collapsed bounded raw payloads with provenance.
 - **Strategies** identifies deterministic baselines versus ML + LLM candidates and presents

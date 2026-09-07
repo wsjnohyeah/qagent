@@ -37,7 +37,8 @@ from agentic_quant.risk import RestrictionRegistry
 
 
 MARKET_SCAN_EVENT = "market.universe.scanned.v1"
-MARKET_SCAN_PROMPT_VERSION = "market_scanner_rerank@0.1.0"
+MARKET_SCAN_PROMPT_VERSION = "market_scanner_rerank@0.2.0"
+AUTO_TRADING_POOL_SLUG = "scanner-trading-pool"
 
 
 class MarketScannerPolicy(BaseModel):
@@ -248,7 +249,7 @@ class MarketScanStore:
 
 
 class MarketUniverseScanner:
-    """Discover attention candidates without granting execution authority."""
+    """Discover candidates and optionally govern a bounded pre-execution pool."""
 
     def __init__(
         self,
@@ -279,6 +280,9 @@ class MarketUniverseScanner:
         return {
             "enabled": self.settings.market_scanner_enabled,
             "llm_enabled": self.settings.market_scanner_llm_enabled,
+            "auto_trading_pool_enabled": (
+                self.settings.market_scanner_auto_trading_pool_enabled
+            ),
             "policy_version": self.policy.version,
             "limits": dict(self.policy.limits),
             "theme_count": len(self.policy.themes),
@@ -361,6 +365,12 @@ class MarketUniverseScanner:
             reason=f"Automated {self.policy.version} scan {scan_id}",
             created_by="market-universe-scanner",
         )
+        trading_pool_admission = self._update_trading_pool(
+            scan_id=scan_id,
+            selected_symbols=selected_symbols,
+            llm_status=llm_status,
+            llm_invocation_id=llm_invocation_id,
+        )
         payload = {
             "scan_id": scan_id,
             "cycle_key": cycle_key,
@@ -377,10 +387,84 @@ class MarketUniverseScanner:
             "llm_invocation_id": llm_invocation_id,
             "llm_error_code": llm_error_code,
             "candidates": [item.model_dump(mode="json") for item in finalized],
+            "trading_pool_admission": trading_pool_admission,
+            "automatic_trading_pool": bool(
+                self.settings.market_scanner_auto_trading_pool_enabled
+            ),
             "automatic_execution": False,
         }
         self.store.record(scan_id=scan_id, as_of=cutoff, payload=payload)
         return payload
+
+    def _update_trading_pool(
+        self,
+        *,
+        scan_id: str,
+        selected_symbols: list[str],
+        llm_status: str,
+        llm_invocation_id: str | None,
+    ) -> dict[str, Any]:
+        current = self.objects.get_list(AUTO_TRADING_POOL_SLUG)
+        if current is None:
+            raise ValueError("Scanner Trading Pool is not initialized")
+        previous_members = [str(value) for value in current["members"]]
+        if not self.settings.market_scanner_auto_trading_pool_enabled:
+            return {
+                "enabled": False,
+                "status": "DISABLED",
+                "list_slug": AUTO_TRADING_POOL_SLUG,
+                "list_revision": int(current["current_revision"]),
+                "admitted_symbols": [],
+                "added_symbols": [],
+                "removed_symbols": [],
+                "basis_scan_id": None,
+                "basis_llm_invocation_id": None,
+            }
+        if llm_status != "COMPLETED" or llm_invocation_id is None:
+            previous = self.store.latest()
+            previous_admission = dict(
+                previous.get("trading_pool_admission") or {}
+            ) if previous else {}
+            return {
+                "enabled": True,
+                "status": (
+                    "HELD_PREVIOUS_LLM_REVIEW"
+                    if previous_members
+                    else "WAITING_LLM_REVIEW"
+                ),
+                "list_slug": AUTO_TRADING_POOL_SLUG,
+                "list_revision": int(current["current_revision"]),
+                "admitted_symbols": previous_members,
+                "added_symbols": [],
+                "removed_symbols": [],
+                "basis_scan_id": previous_admission.get("basis_scan_id"),
+                "basis_llm_invocation_id": previous_admission.get(
+                    "basis_llm_invocation_id"
+                ),
+            }
+        updated = self.objects.replace_list_members(
+            slug_or_id=AUTO_TRADING_POOL_SLUG,
+            members=selected_symbols,
+            reason=(
+                f"Autonomous LLM-reviewed admission from {self.policy.version} "
+                f"scan {scan_id}; invocation {llm_invocation_id}"
+            ),
+            created_by="market-universe-scanner",
+        )
+        admitted = [str(value) for value in updated["members"]]
+        before = set(previous_members)
+        after = set(admitted)
+        return {
+            "enabled": True,
+            "status": "UPDATED" if before != after else "UNCHANGED",
+            "list_slug": AUTO_TRADING_POOL_SLUG,
+            "list_revision": int(updated["current_revision"]),
+            "admitted_symbols": admitted,
+            "added_symbols": sorted(after - before),
+            "removed_symbols": sorted(before - after),
+            "basis_scan_id": scan_id,
+            "basis_llm_invocation_id": llm_invocation_id,
+        }
 
     async def _fetch_sources(
         self,
@@ -669,6 +753,10 @@ class MarketUniverseScanner:
         ]
 
     def _llm_interval_elapsed(self, now: datetime) -> bool:
+        if self.settings.market_scanner_auto_trading_pool_enabled:
+            trading_pool = self.objects.get_list(AUTO_TRADING_POOL_SLUG)
+            if trading_pool is None or not trading_pool["members"]:
+                return True
         completed = next(
             (
                 item
@@ -801,6 +889,12 @@ class MarketUniverseScanner:
         if not fallback:
             universe = self.objects.get_list("trading-universe")
             fallback = list(universe["members"]) if universe else []
+        trading_pool_admission = self._update_trading_pool(
+            scan_id=scan_id,
+            selected_symbols=[],
+            llm_status="NOT_RUN",
+            llm_invocation_id=None,
+        )
         payload = {
             "scan_id": scan_id,
             "cycle_key": as_of.strftime("%Y-%m-%dT%H"),
@@ -817,6 +911,10 @@ class MarketUniverseScanner:
             "llm_invocation_id": None,
             "llm_error_code": None,
             "candidates": [],
+            "trading_pool_admission": trading_pool_admission,
+            "automatic_trading_pool": bool(
+                self.settings.market_scanner_auto_trading_pool_enabled
+            ),
             "automatic_execution": False,
         }
         self.store.record(scan_id=scan_id, as_of=as_of, payload=payload)

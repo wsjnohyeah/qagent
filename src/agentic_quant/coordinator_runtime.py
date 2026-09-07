@@ -30,6 +30,7 @@ from agentic_quant.ledger import EventLedger
 from agentic_quant.llm import LLMConfigurationError
 from agentic_quant.llm_budget import LLMBudgetExceededError
 from agentic_quant.market_ingestion import MarketDataIngestionService
+from agentic_quant.market_scanner import AUTO_TRADING_POOL_SLUG, MARKET_SCAN_EVENT
 from agentic_quant.market_store import MarketDataStore
 from agentic_quant.ml import (
     MLDatasetBuilder,
@@ -836,7 +837,16 @@ class ResearchCoordinatorHandler:
             str(symbol).upper()
             for symbol in (universe["members"] if universe else [])
         }
-        if str(context["symbol"]).upper() not in governed:
+        symbol = str(context["symbol"]).upper()
+        scanner_admission = self._scanner_pool_admission(
+            symbol=symbol,
+            scan_id=(
+                str(context["universe_scan_id"])
+                if context.get("universe_scan_id")
+                else None
+            ),
+        )
+        if symbol not in governed and scanner_admission is None:
             return {
                 "outcome": "WAITING_TRADING_UNIVERSE_APPROVAL",
                 "required_actions": ["list.replace_members"],
@@ -845,5 +855,60 @@ class ResearchCoordinatorHandler:
         return {
             "outcome": "WAITING_HUMAN_CONFIRMATION",
             "required_actions": ["strategy.adopt", "shadow.start"],
+            "trading_pool_authority": (
+                "MANUAL_TRADING_UNIVERSE"
+                if symbol in governed
+                else "SCANNER_LLM_TRADING_POOL"
+            ),
+            "scanner_admission": scanner_admission,
             "automatic_broker_orders": False,
+        }
+
+    def _scanner_pool_admission(
+        self,
+        *,
+        symbol: str,
+        scan_id: str | None,
+    ) -> dict[str, Any] | None:
+        if (
+            not self.settings.market_scanner_auto_trading_pool_enabled
+            or scan_id is None
+        ):
+            return None
+        with self.ledger.engine.connect() as connection:
+            row = connection.execute(
+                select(ledger_events.c.payload)
+                .where(
+                    ledger_events.c.event_type == MARKET_SCAN_EVENT,
+                    ledger_events.c.correlation_id == scan_id,
+                )
+                .order_by(ledger_events.c.sequence.desc())
+                .limit(1)
+            ).one_or_none()
+        if row is None:
+            return None
+        admission = dict(dict(row.payload).get("trading_pool_admission") or {})
+        if admission.get("status") not in {
+            "UPDATED",
+            "UNCHANGED",
+            "HELD_PREVIOUS_LLM_REVIEW",
+        }:
+            return None
+        pool = self.objects.get_list(AUTO_TRADING_POOL_SLUG)
+        if pool is None or int(pool["current_revision"]) != int(
+            admission.get("list_revision", -1)
+        ):
+            return None
+        admitted = {str(value).upper() for value in admission.get("admitted_symbols", [])}
+        current = {str(value).upper() for value in pool["members"]}
+        if symbol not in admitted or symbol not in current:
+            return None
+        return {
+            "scan_id": scan_id,
+            "list_slug": AUTO_TRADING_POOL_SLUG,
+            "list_revision": int(pool["current_revision"]),
+            "basis_scan_id": admission.get("basis_scan_id"),
+            "basis_llm_invocation_id": admission.get(
+                "basis_llm_invocation_id"
+            ),
         }

@@ -135,10 +135,12 @@
   stage honors its persisted subsystem pause control.
 - When enabled, the dynamic scanner runs before that DAG and binds each coordinator job to
   its immutable scan ID. Deterministic price, dollar-volume, restriction, and benchmark
-  gates precede an optional four-hour, USD-budgeted LLM re-rank of at most 40 supplied names.
-  Invalid/failed LLM output falls back deterministically. The scanner can revise only the
-  Candidate List; Trading Universe admission, validation, adoption, risk, and execution
-  authority remain separate.
+  gates precede a four-hour, USD-budgeted LLM re-rank of at most 40 supplied names. When the
+  separate autonomous-pool flag is enabled, only a completed LLM review may refresh the
+  bounded Scanner Trading Pool; skipped/failed review holds the previous revision. Each scan
+  records admitted, added, and removed symbols plus exact list, scan, and invocation lineage.
+  Pool membership permits progression toward Shadow adoption but cannot validate or adopt a
+  strategy, start Shadow, enable Paper, or submit an order.
 - Newly listed scanner candidates use immutable provider-observed history boundaries after a
   complete leading-window probe and strict validation from the first observed bar forward.
   Lookback expansion forces a new probe; internal/trailing gaps and insufficient ML/validation
@@ -161,7 +163,7 @@
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases. A verified `main` push publishes an immutable GHCR
   commit-SHA image with matching embedded/OCI source provenance; deployment rejects mismatches.
-- The current end-to-end audit passes 163 tests, strict typing across 59 source files,
+- The current end-to-end audit passes 164 tests, strict typing across 59 source files,
   authenticated local and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, fresh schema
   upgrade/downgrade/re-upgrade checks, zero PostgreSQL schema drift, and the repository secret
   scan.

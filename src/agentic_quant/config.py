@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     coordinator_document_max_pages: int = Field(default=10, ge=1, le=100)
     market_scanner_enabled: bool = False
     market_scanner_llm_enabled: bool = False
+    market_scanner_auto_trading_pool_enabled: bool = False
     market_scanner_policy_path: Path = Path("./configs/market_scanner.yaml")
     auto_migrate: bool = True
     deployment_environment_id: str = "local-development"
@@ -98,6 +99,13 @@ class Settings(BaseSettings):
         if self.market_scanner_llm_enabled and not self.market_scanner_enabled:
             raise ValueError(
                 "MARKET_SCANNER_LLM_ENABLED=true requires MARKET_SCANNER_ENABLED=true"
+            )
+        if self.market_scanner_auto_trading_pool_enabled and not (
+            self.market_scanner_enabled and self.market_scanner_llm_enabled
+        ):
+            raise ValueError(
+                "MARKET_SCANNER_AUTO_TRADING_POOL_ENABLED=true requires both "
+                "MARKET_SCANNER_ENABLED=true and MARKET_SCANNER_LLM_ENABLED=true"
             )
         if self.paper_trading_enabled or self.market_scanner_enabled:
             if self.alpaca_paper_base_url.rstrip("/") != (

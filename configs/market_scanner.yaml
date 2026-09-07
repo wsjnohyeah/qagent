@@ -1,7 +1,8 @@
-version: market_scanner@0.1.0
+version: market_scanner@0.2.0
 
-# The scanner is a discovery funnel, not an execution allowlist. A symbol must still be
-# explicitly added to the governed trading-universe before Shadow adoption can be proposed.
+# The scanner is a discovery funnel, not an order authority. When the separately configured
+# auto-trading-pool mode is enabled, a successful LLM-reviewed scan may refresh the bounded
+# scanner-owned pool. Exact strategy validation and human Shadow adoption remain mandatory.
 limits:
   most_active_count: 100
   mover_count: 50

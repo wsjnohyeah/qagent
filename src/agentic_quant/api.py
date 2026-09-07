@@ -481,6 +481,9 @@ def create_app(
         market_scanner_status=lambda: {
             "enabled": app_settings.market_scanner_enabled,
             "llm_enabled": app_settings.market_scanner_llm_enabled,
+            "auto_trading_pool_enabled": (
+                app_settings.market_scanner_auto_trading_pool_enabled
+            ),
             "latest_run": market_scan_store.latest(),
         },
     )
@@ -993,6 +996,9 @@ def create_app(
             ),
             "market_scanner_enabled": app_settings.market_scanner_enabled,
             "market_scanner_llm_enabled": app_settings.market_scanner_llm_enabled,
+            "market_scanner_auto_trading_pool_enabled": (
+                app_settings.market_scanner_auto_trading_pool_enabled
+            ),
             "llm_routing_version": llm_status["routing_version"],
             "llm_route_source": llm_status["route_source"],
             "llm_budget_policy": llm_budget_manager.effective_policy_version(),

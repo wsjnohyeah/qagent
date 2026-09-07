@@ -64,6 +64,8 @@ COORDINATOR_PAID_RESEARCH_ENABLED=false
 MARKET_SCANNER_ENABLED=false
 # This spends against the routine_pipeline daily USD budget and fails back to deterministic.
 MARKET_SCANNER_LLM_ENABLED=false
+# Requires both scanner flags. It refreshes only the scanner-owned pool, never an order.
+MARKET_SCANNER_AUTO_TRADING_POOL_ENABLED=false
 MARKET_SCANNER_POLICY_PATH=./configs/market_scanner.yaml
 AUTO_MIGRATE=false
 POSTGRES_DB=quant
@@ -185,7 +187,9 @@ Verify and record:
   enabled. `WAITING_PAID_RESEARCH_ENABLEMENT` is expected until paid automation is approved.
 - When dynamic discovery is enabled, `GET /v1/market-scanner/status` has a recent completed
   or explicit fallback run, its raw object IDs resolve, and every coordinator job carries the
-  same `universe_scan_id`. Confirm that Candidate List membership alone cannot start Shadow.
+  same `universe_scan_id`. If autonomous pool admission is enabled, verify the recorded list
+  revision, additions/removals, basis scan, and LLM invocation. Candidate or pool membership
+  alone must not adopt a strategy, start Shadow, or submit an order.
 - Inspect newly listed candidates for a completed first market-data stage with an immutable
   `history_boundary_event_id`. Pre-listing sessions may be outside that verified window, but
   any missing session at or after `verified_window_start` must still fail data quality.

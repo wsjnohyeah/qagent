@@ -49,6 +49,9 @@ def test_production_worker_healthchecks_allow_cold_import_latency() -> None:
     assert coordinator_environment["MARKET_SCANNER_LLM_ENABLED"].endswith(
         ":-false}"
     )
+    assert coordinator_environment[
+        "MARKET_SCANNER_AUTO_TRADING_POOL_ENABLED"
+    ].endswith(":-false}")
 
 
 def test_baseline_bracket_executes_stop_first_when_intrabar_order_is_unknown() -> None:
@@ -141,6 +144,12 @@ def test_market_scanner_asset_metadata_is_pinned_to_paper_host() -> None:
             _env_file=None,
             market_scanner_enabled=True,
             alpaca_paper_base_url="https://api.alpaca.markets",
+        )
+    with pytest.raises(ValidationError, match="requires both"):
+        Settings(
+            _env_file=None,
+            market_scanner_enabled=True,
+            market_scanner_auto_trading_pool_enabled=True,
         )
 
 

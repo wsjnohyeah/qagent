@@ -79,6 +79,17 @@ DEFAULT_LISTS: tuple[dict[str, Any], ...] = (
         "members": (),
     },
     {
+        "slug": "scanner-trading-pool",
+        "list_type": "DYNAMIC_TRADING_POOL",
+        "name": "Scanner Trading Pool",
+        "description": (
+            "LLM-reviewed scanner selections allowed to progress toward Shadow adoption; "
+            "membership does not authorize a strategy or broker order."
+        ),
+        "mode": "DYNAMIC",
+        "members": (),
+    },
+    {
         "slug": "shadow-active",
         "list_type": "SHADOW_ACTIVE",
         "name": "Shadow Active",

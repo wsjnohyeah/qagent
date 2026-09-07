@@ -122,6 +122,7 @@ def test_lists_are_versioned_and_admin_actions_require_exact_confirmation(
             "candidate-list",
             "focus-watchlist",
             "restricted",
+            "scanner-trading-pool",
             "shadow-active",
             "trading-universe",
         }
