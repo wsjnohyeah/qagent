@@ -65,6 +65,28 @@ class EntitlementCheck(FrozenModel):
     detail: str
 
 
+class MarketScreenerPage(FrozenModel):
+    provider: str
+    data_type: str
+    provider_received_at: datetime
+    request_metadata: dict[str, Any]
+    raw_payload: dict[str, Any]
+
+
+class StockSnapshotsPage(FrozenModel):
+    provider: str
+    provider_received_at: datetime
+    request_metadata: dict[str, Any]
+    raw_payload: dict[str, Any]
+
+
+class AssetCatalogPage(FrozenModel):
+    provider: str
+    provider_received_at: datetime
+    request_metadata: dict[str, Any]
+    raw_payload: dict[str, Any]
+
+
 class DocumentFetchRequest(FrozenModel):
     symbols: tuple[str, ...] = Field(min_length=1)
     start: datetime | None = None

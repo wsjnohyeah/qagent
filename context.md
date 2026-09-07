@@ -10,7 +10,7 @@ present, but order authorization remains code-blocked until a separately validat
 execution lifecycle exists; paid research, off-site backup/alerting, and statistical/elapsed
 production evidence remain open
 
-Current documented baseline: C037 — `Harden and launch the production stack`
+Current documented baseline: C038 — `Add bounded dynamic market discovery`
 
 ## Purpose and authority
 
@@ -45,7 +45,9 @@ A Git commit cannot contain its own content-derived hash without changing that h
 - Supported conceptual modes are `research`, `backtest`, `shadow`, and `paper`.
 - The executable settings intentionally omit `live`; `LIVE_TRADING_ENABLED=true` fails validation.
 - The original synthetic shadow path remains operational and makes no broker call.
-- A read-only Alpaca adapter now retrieves SIP historical stock bars, OPRA option-chain snapshots, and authenticates to the SIP stock WebSocket.
+- A read-only Alpaca adapter now retrieves SIP historical stock bars, OPRA option-chain
+  snapshots, most-active/mover screens, batched stock snapshots, and authenticates to the SIP
+  stock WebSocket.
 - Real provider responses flow through content-addressed MinIO raw storage, normalized PostgreSQL tables, the append-only event ledger, and Redis Streams.
 - Alpaca News, SEC EDGAR, and an approved-host IR feed have passed live read-only ingestion.
   The social aggregate adapter is implemented but disabled by default. The LLM transport and
@@ -96,8 +98,8 @@ A Git commit cannot contain its own content-derived hash without changing that h
   System Steward with persistent conversation history and safely rendered Markdown; overview,
   governed lists, paginated dataset/date drill-downs, normalized evidence, strategies with
   experiment/trade/validation provenance, complete shadow decision lineage, worker/job/
-  quality details, activity, Steward code work, and per-object discussion timelines remain
-  available through the left navigation.
+  quality details, a dedicated Market Scanner, activity, Steward code work, and per-object
+  discussion timelines remain available through the left navigation.
 - Strategy pages are narrative-first. Every version is labeled deterministic baseline or
   hybrid ML + LLM. Hybrid pages expose the exact point-in-time snapshot, ML forecast/model,
   cited Research LLM thesis/claims/risks, generator proposal, independent critic verdict,
@@ -185,6 +187,15 @@ A Git commit cannot contain its own content-derived hash without changing that h
   are consumed before current work. Validation reuse requires the full execution contract,
   exact market-data/window fingerprint, semantic current promotion-policy hash, and current
   research-search count. Non-daily coordinator requests now fail closed.
+- A bounded discovery stage can now precede that DAG. It merges Alpaca's top 100 active names,
+  top 50 gainers and losers, 83 reviewed AI-infrastructure/high-beta/cross-sector theme seeds,
+  and the administrator Focus Watchlist. Deterministic price, dollar-volume, restricted-
+  security, and benchmark gates retain at most 40 review names and 20 deep-research names.
+  An optional `routine_pipeline` LLM re-rank is USD-budgeted and limited to once per four
+  hours; it cannot introduce symbols, and all failure modes preserve deterministic output.
+  Each coordinator job retains the immutable scan ID. The dynamic Candidate List has no
+  execution authority; a name must still enter the governed Trading Universe before Shadow
+  adoption can be offered.
 - Research retrieval adds `research_outcome_feedback@0.1.0` when prior results exist. It is a
   bounded, content-hashed summary of backtests, validations, Shadow events, and Paper records
   whose durable timestamps are no later than the new analysis cutoff. The resulting evidence
@@ -539,6 +550,7 @@ flowchart LR
     SHADOW --> LEDGER
     LEDGER --> DB["SQLite local-lite / PostgreSQL Compose"]
     ALPACA["Alpaca SIP / OPRA read-only"] --> INGEST["Historical + snapshot + stream adapters"]
+    ALPACA --> SCAN["Bounded activity + theme scanner"]
     SOURCES["SEC / approved IR / Alpaca News"] --> DOCINGEST["Document + facts adapters"]
     COORD --> DOCINGEST
     DOCINGEST --> CATALYST["Entity resolution + catalyst dedup"]
@@ -582,6 +594,7 @@ flowchart LR
     OPENAI["OpenAI Responses API"] --> LLMGW
     METAMODEL["Meta Model Responses API"] --> LLMGW
     LLMGW --> LLMAUDIT["Immutable invocation audit"]
+    LLMGW --> SCAN
     LLMAUDIT --> DB
     LLMAUDIT --> LEDGER
     DB --> RETRIEVE["Point-in-time evidence retrieval"]
@@ -598,7 +611,9 @@ flowchart LR
     GENERATE --> PITSPEC
     MLTRAIN --> DB
     FORECAST --> DB
-    COORD["Persistent research coordinator DAG"] --> INGEST
+    SCAN --> COORD["Persistent research coordinator DAG"]
+    SCAN --> DB
+    COORD --> INGEST
     COORD --> PITFEATURES
     COORD --> MLTRAIN
     COORD --> ANALYST
@@ -730,6 +745,7 @@ flowchart TB
       RAW["Object storage / Parquet"]
     end
     subgraph Research["Research plane"]
+      DISCOVERY["Bounded market discovery"]
       EVIDENCE["Point-in-time EvidencePacket + features"]
       ML["Calibrated statistical / ML forecasts"]
       LLM["LLM research orchestrator"]
@@ -752,7 +768,7 @@ flowchart TB
       LEDGER2["Append-only decision ledger"]
       GIT["Git code/config/ADRs"]
     end
-    MARKET --> COLLECT
+    MARKET --> DISCOVERY --> COLLECT
     DOCS --> COLLECT
     SOCIAL --> COLLECT
     COLLECT --> BUS
@@ -761,6 +777,7 @@ flowchart TB
     EVIDENCE --> ML
     EVIDENCE --> LLM
     ML --> LLM
+    LLM --> DISCOVERY
     LLM --> AGENTS --> SPEC
     SPEC --> BACKTEST --> VALIDATE --> REGISTRY
     VALIDATE --> LLM
@@ -786,6 +803,9 @@ The application provides one authenticated interface with:
 
 - a data explorer for normalized market data, filings, news, catalysts, feature snapshots,
   freshness, gaps, source provenance, and raw-object lineage;
+- a market-scanner page showing the bounded activity/theme funnel, deterministic scores,
+  optional LLM comments, Candidate List revision, and immutable source objects without
+  implying execution permission;
 - an LLM analysis workspace showing citation-bound interpretations, evidence used, model and
   prompt versions, uncertainty, disagreements, and prior-analysis outcomes;
 - a strategy lab showing `StrategySpec` contents, ML forecasts, backtest/validation results,
@@ -814,6 +834,7 @@ year or more of data.
 | Risk engine | `src/agentic_quant/risk.py` | deterministic gates and equity position sizing |
 | Shared account | `src/agentic_quant/virtual_account.py` | atomic cash/risk reservations, sleeve attribution, and immutable risk revisions |
 | Research coordinator | `src/agentic_quant/coordinator.py`, `coordinator_runtime.py` | resumable nine-stage daily DAG with full-window gap repair and bounded news refresh |
+| Market scanner | `src/agentic_quant/market_scanner.py`, `configs/market_scanner.yaml` | bounded activity/theme discovery, deterministic eligibility/ranking, optional constrained LLM re-rank, immutable scan lineage |
 | Production bootstrap | `src/agentic_quant/production_bootstrap.py`, `infra/deploy/` | immutable image provenance, environment identity, defaults, forced pause, migration/startup health, and backup verification |
 | Event ledger | `src/agentic_quant/ledger.py` | append-only SQL event storage and lineage queries |
 | Vertical slice | `src/agentic_quant/pipeline.py` | synthetic catalyst through shadow-order record |
@@ -2531,10 +2552,11 @@ Ordered near-term work:
 2. Run a read-only Alpaca Paper probe in the intended environment. Build and validate the
    separate Paper execution profile, nested-child lifecycle, and deterministic session-close
    exit before any enrollment or external order.
-3. Approve licensed corporate-action/historical-universe and primary evidence refresh inputs,
-   run production long-horizon backfill, enable paid coordinator stages only after route/USD-
-   budget review, and collect Phase 5 statistical plus continuous-Shadow evidence and
-   controlled ML-only versus ML+LLM ablations.
+3. Review the production scanner's precision and theme catalog, approve licensed corporate-
+   action/historical-universe and primary evidence refresh inputs, run production long-horizon
+   backfill, enable paid coordinator stages only after route/USD-budget review, and collect
+   Phase 5 statistical plus continuous-Shadow evidence and controlled ML-only versus ML+LLM
+   ablations.
 4. Continue interactive UI review and add account/coordinator affordances where operator use
    shows they are needed.
 5. Add a governed point-in-time macro-event calendar and remaining licensed data sources.
@@ -2960,6 +2982,70 @@ lifecycle. No Paper order was used as a build or deployment test.
     The exact corrected image is advanced only after this commit's GitHub CI/GHCR publication
     succeeds. A permanent domain, automated off-site backup, and external alert destination
     remain operator inputs; Paper remains code-blocked by its distinct validated lifecycle.
+
+### D042 — Dynamic discovery is broad, bounded, and never execution authority
+
+- Date: 2026-09-07 PDT.
+- The fixed four-name bootstrap list was too narrow to surface changing speculative attention,
+  while running full multi-year research over every listed security would make data, compute,
+  and LLM cost unbounded.
+- Decision: merge Alpaca most-active/mover screens, an explicit reviewed theme catalog, and
+  the administrator Focus Watchlist; require current active/tradable asset metadata; exclude
+  restricted names, benchmarks, funds/ETFs/ETNs/warrants/rights, sub-$3 prices, and less than
+  $20 million in current or prior-session dollar volume before ranking.
+- Decision: retain at most 40 deterministic review candidates and 20 deep-research symbols.
+  The optional `routine_pipeline` LLM may re-rank only that supplied set once per four hours.
+  Its output is strict and bounded; provider, budget, schema, truncation, or invented-symbol
+  failure preserves deterministic ranking.
+- Decision: persist raw responses, scan event, policy identity, scores/reasons, optional LLM
+  comments, and scan-to-coordinator lineage. The scanner may revise only `candidate-list`.
+  `trading-universe` admission and all existing validation, adoption, risk, Shadow, and Paper
+  boundaries remain independent and human-controlled.
+- Formal record: ADR 0028.
+
+### C038 — `Add bounded dynamic market discovery`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-07 PDT.
+- User intent: replace the very small fixed research pool with a scalable selection mechanism
+  that captures current hot stocks and plausible next-hot AI-infrastructure/speculative names,
+  permits bounded LLM input, updates relevant Phase 6 UI, and is developed locally before an
+  immutable production deployment.
+- Scope:
+  - Added read-only Alpaca most-active, mover, active-asset, and batched snapshot adapters with
+    immutable raw-object archival and a hard-pinned asset-metadata host.
+  - Added `market_scanner@0.1.0`: 83 reviewed theme seeds including SNDK, manual focus inputs,
+    deterministic activity/liquidity/product/restriction filters, a top-40 review set, and a
+    top-20 deep-research shortlist.
+  - Added four-hour, estimated-USD-budgeted `routine_pipeline` LLM re-ranking, prior-scan
+    context, strict structured validation, invented-symbol rejection, recoverable final-JSON
+    extraction for Responses-compatible providers, and deterministic fallback.
+  - Persisted `market.universe.scanned.v1`, candidate-list revisions, raw lineage, and the
+    scan ID on every coordinator job. Added an explicit Trading Universe gate before Shadow
+    adoption readiness.
+  - Added scanner status to the authenticated API, System Steward snapshot/citations, a
+    dedicated Control Center page, production flags, operator docs, and ADR 0028.
+- Architecture/decision impact:
+  - Broad discovery is now a bounded front end to the existing expensive research DAG. LLM
+    judgment can change research priority but never security eligibility or execution rights.
+  - No schema migration was needed; scans use the append-only event ledger and existing
+    versioned system lists.
+- Validation:
+  - `make release-check` passed: Flake8, strict mypy across 59 source files, all 161 tests,
+    local authenticated doctor, repository secret scan, Docker rebuild/doctor, and PostgreSQL
+    Alembic zero-drift at `20260907_0031`.
+  - Browser JavaScript parsed under Node 24. A live read-only Alpaca scan merged 258 symbols,
+    retained 40 review candidates and 20 deep-research names, included SNDK, and leaked none
+    of the sampled leveraged/single-stock ETFs after asset filtering.
+  - A real Meta `muse-spark-1.3` scanner call completed through the existing budget gateway,
+    consumed an estimated `$0.008322`, and re-ranked SNDK from deterministic rank 8 to final
+    rank 4. A prior provider draft-plus-final response reproduced and verified strict final-
+    JSON recovery. No Paper order or live-money operation was executed.
+- Expected global state after commit:
+  - The exact source is ready for GitHub CI/GHCR publication and a guarded production rollout.
+    Production remains on C037 until that immutable image passes CI and is explicitly deployed.
+    Scanner activation will not resume new exposure, enable Paper, or enable the paid strategy-
+    research stages.
 
 ## Template for future commit entries
 

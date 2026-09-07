@@ -3,8 +3,24 @@
 ## Purpose
 
 The coordinator turns the existing research tools into one restart-safe workflow without
-giving an LLM execution authority. One hourly cycle is identified by UTC hour and one DAG is
-created for each symbol in the governed `trading-universe` list.
+giving an LLM execution authority. With the market scanner disabled, one hourly cycle is
+created for each symbol in the governed `trading-universe` list. With it enabled, the cycle is
+bound to an immutable scan ID and runs the deep-research DAG over the scanner's bounded
+Candidate List.
+
+## Market-discovery funnel
+
+`configs/market_scanner.yaml` defines a reviewed, versioned policy. The scanner merges Alpaca
+most-active/mover responses, theme seeds, and Focus Watchlist members; archives every raw
+response; fetches snapshots in batches; and applies deterministic price, dollar-volume,
+restriction, and benchmark filters. It retains 40 review candidates and selects at most 20.
+
+When `MARKET_SCANNER_LLM_ENABLED=true`, the `routine_pipeline` model may re-rank only those 40
+symbols, at most once every four hours. It cannot add symbols. Budget exhaustion, incomplete
+provider output, invalid JSON, or an invented symbol yields `FAILED_FALLBACK` and preserves
+the deterministic result. The scan updates only the dynamic `candidate-list`. A candidate
+must separately enter `trading-universe` before the last coordinator stage can offer Shadow
+adoption, and adoption/start still require explicit confirmations.
 
 ## Stages
 
@@ -34,6 +50,9 @@ AUTONOMOUS_COORDINATOR_ENABLED=true
 COORDINATOR_POLL_SECONDS=3600
 COORDINATOR_INITIAL_LOOKBACK_DAYS=1826
 COORDINATOR_PAID_RESEARCH_ENABLED=false
+MARKET_SCANNER_ENABLED=false
+MARKET_SCANNER_LLM_ENABLED=false
+MARKET_SCANNER_POLICY_PATH=./configs/market_scanner.yaml
 ```
 
 Leave paid research false during initial bootstrap. After data coverage, model readiness,
@@ -42,7 +61,8 @@ worker permits the two LLM stages. The LLM still cannot adopt or execute a strat
 
 ## Inspection and recovery
 
-Use `GET /v1/coordinator/status`, `GET /v1/workflow-jobs`, and the Pipelines page. Each job
+Use `GET /v1/market-scanner/status`, the Market Scanner page,
+`GET /v1/coordinator/status`, `GET /v1/workflow-jobs`, and the Pipelines page. Each job
 has dependency IDs, attempt count, owner/token lease, result, and error code. A process crash
 leaves a lease that is reclaimed after ten minutes. A provider exception marks only that
 stage failed and is retried on the next poll; completed parents are never repeated. A final

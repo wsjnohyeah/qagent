@@ -1,0 +1,119 @@
+version: market_scanner@0.1.0
+
+# The scanner is a discovery funnel, not an execution allowlist. A symbol must still be
+# explicitly added to the governed trading-universe before Shadow adoption can be proposed.
+limits:
+  most_active_count: 100
+  mover_count: 50
+  snapshot_batch_size: 100
+  deterministic_review_count: 40
+  selected_count: 20
+  minimum_price_usd: "3.00"
+  minimum_dollar_volume_usd: "20000000"
+  llm_max_output_tokens: 1600
+  llm_min_interval_minutes: 240
+
+# Alpaca's stock screener includes exchange-traded products. Asset-name metadata removes
+# funds, ETFs/ETNs, warrants, and rights before ranking.
+excluded_asset_name_terms:
+  - ETF
+  - ETN
+  - FUND
+  - WARRANT
+  - WARRANTS
+  - RIGHT
+  - RIGHTS
+
+# Curated anchors ensure emerging AI-infrastructure names are observed before they appear in
+# the market-wide mover lists. META is intentionally absent because it is restricted policy.
+themes:
+  ai_compute_semiconductors:
+    - NVDA
+    - AMD
+    - AVGO
+    - MRVL
+    - ARM
+    - MU
+    - SNDK
+    - TSM
+    - ASML
+    - AMAT
+    - LRCX
+    - KLAC
+    - QCOM
+    - INTC
+    - MCHP
+    - "ON"
+  ai_networking_optics:
+    - ANET
+    - CIEN
+    - COHR
+    - LITE
+    - CRDO
+    - ALAB
+    - CLS
+    - FN
+  servers_storage:
+    - DELL
+    - HPE
+    - SMCI
+    - PSTG
+    - NTAP
+    - WDC
+  data_center_power:
+    - VRT
+    - ETN
+    - PWR
+    - GEV
+    - CEG
+    - VST
+    - NRG
+    - OKLO
+    - SMR
+  cloud_ai_software:
+    - AAPL
+    - MSFT
+    - AMZN
+    - GOOGL
+    - ORCL
+    - CRWV
+    - NBIS
+    - PLTR
+    - SNOW
+    - DDOG
+    - MDB
+    - NET
+    - APP
+  high_beta_innovation:
+    - TSLA
+    - COIN
+    - MSTR
+    - HOOD
+    - RDDT
+    - RKLB
+    - ASTS
+    - IONQ
+    - RGTI
+    - QBTS
+    - SOUN
+    - TEM
+    - IREN
+    - APLD
+  liquid_cross_sector:
+    - JPM
+    - BAC
+    - GS
+    - V
+    - MA
+    - XOM
+    - CVX
+    - LLY
+    - UNH
+    - JNJ
+    - WMT
+    - COST
+    - HD
+    - MCD
+    - CAT
+    - GE
+    - UNP

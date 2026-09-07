@@ -11,11 +11,14 @@ from agentic_quant.domain import OptionSnapshot, StockBar
 from agentic_quant.ids import stable_uuid
 from agentic_quant.market_calendar import MarketSessionClock
 from agentic_quant.providers.base import (
+    AssetCatalogPage,
     EntitlementCheck,
+    MarketScreenerPage,
     OptionChainRequest,
     OptionSnapshotsPage,
     StockBarsPage,
     StockBarsRequest,
+    StockSnapshotsPage,
 )
 
 
@@ -49,12 +52,17 @@ class AlpacaMarketDataProvider:
         api_secret: str,
         base_url: str = "https://data.alpaca.markets",
         client: httpx.AsyncClient | None = None,
+        assets_base_url: str = "https://paper-api.alpaca.markets",
         calendar_name: str = "XNYS",
         max_retries: int = 3,
         retry_base_seconds: float = 0.5,
     ) -> None:
         if not api_key or not api_secret:
             raise AlpacaConfigurationError("Alpaca API key and secret are required")
+        if assets_base_url.rstrip("/") != "https://paper-api.alpaca.markets":
+            raise AlpacaConfigurationError(
+                "Alpaca asset metadata is hard-pinned to the Paper API host"
+            )
         self._headers = {
             "APCA-API-KEY-ID": api_key,
             "APCA-API-SECRET-KEY": api_secret,
@@ -62,6 +70,7 @@ class AlpacaMarketDataProvider:
         self._owns_client = client is None
         self._max_retries = max_retries
         self._retry_base_seconds = retry_base_seconds
+        self._assets_base_url = assets_base_url.rstrip("/")
         self._client = client or httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             timeout=httpx.Timeout(60.0, connect=15.0),
@@ -157,6 +166,75 @@ class AlpacaMarketDataProvider:
             raw_payload=payload,
             bars=bars,
             next_page_token=payload.get("next_page_token"),
+        )
+
+    async def fetch_most_actives(self, *, top: int = 100) -> MarketScreenerPage:
+        if not 1 <= top <= 100:
+            raise ValueError("Most-active count must be between 1 and 100")
+        endpoint = "/v1beta1/screener/stocks/most-actives"
+        params = {"top": top, "by": "volume"}
+        response = await self._get(endpoint, params)
+        return MarketScreenerPage(
+            provider=self.name,
+            data_type="stock_screener_most_actives",
+            provider_received_at=datetime.now(UTC),
+            request_metadata={"endpoint": endpoint, "params": params},
+            raw_payload=response.json(),
+        )
+
+    async def fetch_active_assets(self) -> AssetCatalogPage:
+        endpoint = "/v2/assets"
+        params = {"status": "active", "asset_class": "us_equity"}
+        response = await self._get(f"{self._assets_base_url}{endpoint}", params)
+        payload = response.json()
+        if not isinstance(payload, list):
+            raise AlpacaResponseError(
+                status_code=502,
+                endpoint=endpoint,
+                detail="asset catalog response was not a list",
+            )
+        return AssetCatalogPage(
+            provider=self.name,
+            provider_received_at=datetime.now(UTC),
+            request_metadata={"endpoint": endpoint, "params": params},
+            raw_payload={"assets": payload},
+        )
+
+    async def fetch_market_movers(self, *, top: int = 50) -> MarketScreenerPage:
+        if not 1 <= top <= 50:
+            raise ValueError("Mover count must be between 1 and 50")
+        endpoint = "/v1beta1/screener/stocks/movers"
+        params = {"top": top}
+        response = await self._get(endpoint, params)
+        return MarketScreenerPage(
+            provider=self.name,
+            data_type="stock_screener_movers",
+            provider_received_at=datetime.now(UTC),
+            request_metadata={"endpoint": endpoint, "params": params},
+            raw_payload=response.json(),
+        )
+
+    async def fetch_stock_snapshots(
+        self,
+        *,
+        symbols: tuple[str, ...],
+        feed: str = "sip",
+    ) -> StockSnapshotsPage:
+        normalized = tuple(
+            sorted({symbol.strip().upper() for symbol in symbols if symbol.strip()})
+        )
+        if not normalized:
+            raise ValueError("Stock snapshot request requires at least one symbol")
+        if len(normalized) > 200:
+            raise ValueError("Stock snapshot request is limited to 200 symbols")
+        endpoint = "/v2/stocks/snapshots"
+        params = {"symbols": ",".join(normalized), "feed": feed}
+        response = await self._get(endpoint, params)
+        return StockSnapshotsPage(
+            provider=self.name,
+            provider_received_at=datetime.now(UTC),
+            request_metadata={"endpoint": endpoint, "params": params},
+            raw_payload=response.json(),
         )
 
     def _normalize_bar(

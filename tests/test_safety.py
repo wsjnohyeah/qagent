@@ -44,6 +44,11 @@ def test_production_worker_healthchecks_allow_cold_import_latency() -> None:
         assert healthcheck["interval"] == "60s"
         assert healthcheck["timeout"] == "20s"
         assert healthcheck["retries"] == 3
+    coordinator_environment = compose["services"]["coordinator"]["environment"]
+    assert coordinator_environment["MARKET_SCANNER_ENABLED"].endswith(":-false}")
+    assert coordinator_environment["MARKET_SCANNER_LLM_ENABLED"].endswith(
+        ":-false}"
+    )
 
 
 def test_baseline_bracket_executes_stop_first_when_intrabar_order_is_unknown() -> None:
@@ -123,6 +128,20 @@ def test_live_mode_is_not_representable() -> None:
         Settings(_env_file=None, trading_mode="live")
     with pytest.raises(ValidationError):
         Settings(_env_file=None, live_trading_enabled=True)
+
+
+def test_market_scanner_asset_metadata_is_pinned_to_paper_host() -> None:
+    with pytest.raises(ValidationError, match="requires MARKET_SCANNER_ENABLED"):
+        Settings(
+            _env_file=None,
+            market_scanner_llm_enabled=True,
+        )
+    with pytest.raises(ValidationError, match="asset metadata is hard-pinned"):
+        Settings(
+            _env_file=None,
+            market_scanner_enabled=True,
+            alpaca_paper_base_url="https://api.alpaca.markets",
+        )
 
 
 def test_risk_inputs_require_aware_ordered_timestamps() -> None:

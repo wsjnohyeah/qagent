@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     coordinator_initial_lookback_days: int = Field(default=1_826, ge=30, le=3_650)
     coordinator_document_lookback_days: int = Field(default=90, ge=1, le=365)
     coordinator_document_max_pages: int = Field(default=10, ge=1, le=100)
+    market_scanner_enabled: bool = False
+    market_scanner_llm_enabled: bool = False
+    market_scanner_policy_path: Path = Path("./configs/market_scanner.yaml")
     auto_migrate: bool = True
     deployment_environment_id: str = "local-development"
     database_url: str = "sqlite+pysqlite:///./work/agentic_quant.db"
@@ -92,17 +95,22 @@ class Settings(BaseSettings):
     def live_execution_is_impossible(self) -> Settings:
         if self.live_trading_enabled:
             raise ValueError("Live trading is prohibited; LIVE_TRADING_ENABLED must remain false")
-        if self.paper_trading_enabled:
-            if self.trading_mode != TradingMode.PAPER:
-                raise ValueError(
-                    "PAPER_TRADING_ENABLED=true requires TRADING_MODE=paper"
-                )
+        if self.market_scanner_llm_enabled and not self.market_scanner_enabled:
+            raise ValueError(
+                "MARKET_SCANNER_LLM_ENABLED=true requires MARKET_SCANNER_ENABLED=true"
+            )
+        if self.paper_trading_enabled or self.market_scanner_enabled:
             if self.alpaca_paper_base_url.rstrip("/") != (
                 "https://paper-api.alpaca.markets"
             ):
                 raise ValueError(
-                    "Paper trading is hard-pinned to "
+                    "Alpaca Paper asset metadata is hard-pinned to "
                     "https://paper-api.alpaca.markets"
+                )
+        if self.paper_trading_enabled:
+            if self.trading_mode != TradingMode.PAPER:
+                raise ValueError(
+                    "PAPER_TRADING_ENABLED=true requires TRADING_MODE=paper"
                 )
             if not self.alpaca_api_key or not self.alpaca_api_secret:
                 raise ValueError(

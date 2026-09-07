@@ -67,6 +67,12 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert system_status["ml_policy"] == "ml_policy@0.1.0"
         assert system_status["openai_configured"] is False
         assert system_status["meta_model_configured"] is False
+        assert system_status["market_scanner_enabled"] is False
+        assert system_status["market_scanner_llm_enabled"] is False
+        scanner = client.get("/v1/market-scanner/status").json()
+        assert scanner["policy_version"] == "market_scanner@0.1.0"
+        assert scanner["latest_run"] is None
+        assert scanner["execution_authority"] is False
         paper = client.get("/v1/paper/status").json()
         assert paper["provider"] == "alpaca_paper"
         assert paper["submission_ready"] is False
@@ -196,6 +202,8 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert "Model routing" in page.text
         assert "System Steward" in page.text
         assert 'data-page="steward"' in page.text
+        assert 'data-page="scanner"' in page.text
+        assert "Broad scan → deterministic filter" in page.text
         assert 'class="steward-page"' in page.text
         assert "function renderMarkdown" in page.text
         assert "LLM spending budget" in page.text

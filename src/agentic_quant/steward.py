@@ -41,6 +41,7 @@ class SystemSteward:
         paper: PaperTradingRuntime,
         actions: AdminActionService,
         system_status: Callable[[], dict[str, Any]],
+        market_scanner_status: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self.engine = engine
         self.llm_gateway = llm_gateway
@@ -49,6 +50,7 @@ class SystemSteward:
         self.paper = paper
         self.actions = actions
         self.system_status = system_status
+        self.market_scanner_status = market_scanner_status or (lambda: {})
 
     async def ask(
         self,
@@ -554,6 +556,33 @@ class SystemSteward:
             )
             citations.add(dataset["citation_id"])
         system_status = self.system_status()
+        market_scanner = dict(self.market_scanner_status())
+        latest_scan = market_scanner.get("latest_run")
+        if isinstance(latest_scan, dict):
+            latest_scan = dict(latest_scan)
+            latest_scan["candidates"] = [
+                {
+                    key: candidate.get(key)
+                    for key in (
+                        "symbol",
+                        "final_rank",
+                        "attention_class",
+                        "final_score",
+                        "theme",
+                        "metrics",
+                        "source_tags",
+                        "llm_thesis",
+                        "llm_risks",
+                    )
+                }
+                for candidate in latest_scan.get("candidates", [])[:10]
+                if isinstance(candidate, dict)
+            ]
+            scan_id = latest_scan.get("scan_id")
+            if scan_id:
+                latest_scan["citation_id"] = f"SCAN:{scan_id}"
+                citations.add(str(latest_scan["citation_id"]))
+            market_scanner["latest_run"] = latest_scan
         budget = dict(system_status.get("llm_budget") or {})
         if budget:
             current_windows = [
@@ -586,6 +615,7 @@ class SystemSteward:
                 "counts": self.objects.object_summary(),
                 "lists": lists,
                 "data_catalog": catalog,
+                "market_scanner": market_scanner,
                 "strategies": strategies,
                 "shadow_deployments": deployments,
                 "paper": {
@@ -638,6 +668,15 @@ class SystemSteward:
         }
         section_terms = {
             "lists": ("list", "watchlist", "universe", "名单", "股票池"),
+            "market_scanner": (
+                "scan",
+                "scanner",
+                "hot stock",
+                "candidate",
+                "选股",
+                "热点",
+                "候选",
+            ),
             "data_catalog": ("data", "news", "filing", "raw", "数据", "新闻"),
             "recent_ingestions": ("pipeline", "ingest", "data", "采集", "管线"),
             "recent_data_quality": ("quality", "data", "质量", "数据"),
@@ -653,6 +692,7 @@ class SystemSteward:
         }
         context_sections = {
             "list": {"lists"},
+            "market_scanner": {"market_scanner", "lists"},
             "raw_object": {"data_catalog", "recent_ingestions", "recent_data_quality"},
             "dataset": {"data_catalog", "recent_ingestions", "recent_data_quality"},
             "strategy": {"strategies", "recent_validations"},
@@ -677,6 +717,7 @@ class SystemSteward:
         if not matched:
             for section in (
                 "lists",
+                "market_scanner",
                 "data_catalog",
                 "strategies",
                 "shadow_deployments",

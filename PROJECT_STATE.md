@@ -26,6 +26,10 @@
 - `context.md` is the required master record for architecture, discussions, iterations, commit contents, and post-commit global state.
 - Alembic migrations now own the ledger and normalized market-data schema.
 - The read-only Alpaca adapter supports SIP historical one-minute bars, OPRA option-chain snapshots, and SIP WebSocket authentication/stream parsing.
+- The read-only Alpaca adapter also supports bounded most-active, stock-mover, and batched
+  snapshot discovery. A versioned scanner merges those feeds with 83 reviewed theme seeds
+  (including SNDK) and the Focus Watchlist, then filters and ranks a maximum 20-symbol deep-
+  research shortlist.
 - The Alpaca Paper account endpoint passed a real read-only probe: account active, USD,
   trading/account blocks false, and zero positions. No order endpoint was called.
 - A real AAPL backfill stored 391 unique minute bars; replay inserted zero duplicates. A bounded OPRA request stored 10 unique option snapshots; replay inserted zero duplicates.
@@ -75,7 +79,8 @@
 - The local web Control Center is locked behind one persistent administrator session and
   CSRF protection. Its default view is a dedicated full-page System Steward workspace with
   persistent conversations and safely rendered Markdown; the remaining navigation exposes
-  overview, lists, data, strategy, shadow, pipeline, model, activity, and code-change objects.
+  overview, lists, market-scanner evidence, data, strategy, shadow, pipeline, model, activity,
+  and code-change objects.
 - Overview reads the persistent LLM budget ledger and shows current daily/monthly estimated-
   USD consumption, reservations, limits, and provider/workload utilization.
 - Each workload's daily estimated-USD limit is editable through an immutable, explicit-
@@ -124,6 +129,12 @@
   and current research-search count. ML reuse is bound to dataset plus full training contract.
   Exhausted jobs do not starve later groups and require one confirmation-gated retry. Every
   stage honors its persisted subsystem pause control.
+- When enabled, the dynamic scanner runs before that DAG and binds each coordinator job to
+  its immutable scan ID. Deterministic price, dollar-volume, restriction, and benchmark
+  gates precede an optional four-hour, USD-budgeted LLM re-rank of at most 40 supplied names.
+  Invalid/failed LLM output falls back deterministically. The scanner can revise only the
+  Candidate List; Trading Universe admission, validation, adoption, risk, and execution
+  authority remain separate.
 - Later Research LLM calls receive a bounded, content-hashed, point-in-time outcome summary
   derived from backtests, validation reports, Shadow events, and Paper state already known at
   the cutoff. Forecast evidence also carries label semantics, untouched-holdout metrics,
@@ -142,10 +153,14 @@
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases. A verified `main` push publishes an immutable GHCR
   commit-SHA image with matching embedded/OCI source provenance; deployment rejects mismatches.
-- The current end-to-end audit passes 152 tests, strict typing across 58 source files,
+- The current end-to-end audit passes 161 tests, strict typing across 59 source files,
   authenticated local and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, fresh schema
   upgrade/downgrade/re-upgrade checks, zero PostgreSQL schema drift, and the repository secret
   scan.
+- A real read-only dynamic scan merged 258 source names, retained 40 review candidates and 20
+  deep-research stocks, included SNDK, and excluded sampled leveraged/single-stock ETFs. A
+  real budgeted Meta scanner re-rank completed for an estimated `$0.008322`, moving SNDK from
+  deterministic rank 8 to final rank 4 without introducing a symbol or execution authority.
 - A real bounded AAPL coordinator run trained 734 point-in-time examples, persisted two ML
   candidates and a one-bar forecast, supplied 14 time-safe feature/forecast/document items to
   `gpt-5.6-sol`, and received a citation-valid `ABSTAIN` at 0.90 confidence. The selected ML
@@ -217,10 +232,10 @@
 2. Run the read-only Alpaca Paper account probe in the intended environment. Before any
    enrollment or external order, build the matching Paper execution validator, nested-order
    lifecycle, and deterministic session-close position exit required by ADR 0025.
-3. Approve licensed corporate-action/historical-universe and primary evidence refresh inputs,
-   run production-scale backfill, enable paid coordinator stages only after budget review, and
-   collect Phase 5 statistical plus continuous-shadow evidence and ML-only versus ML+LLM
-   ablations.
+3. Review production scanner results and theme coverage, approve licensed corporate-action/
+   historical-universe and primary evidence refresh inputs, run production-scale backfill,
+   enable paid coordinator stages only after budget review, and collect Phase 5 statistical
+   plus continuous-shadow evidence and ML-only versus ML+LLM ablations.
 4. Continue interactive Phase 6.1 UI review with real operator navigation and refine labels;
    the Strategy lineage redesign is implemented locally and awaits operator feedback.
 5. Extend fill realism with multi-bar partial fills, order cancellation, quote-derived
@@ -287,3 +302,6 @@
 - ADR 0027: bind validation and ML reuse to current behavior contracts, classify failed LLM
   calls as infrastructure recovery, make workflow exhaustion explicit/fair/retryable, and use
   coherent order-then-position Paper reconciliation.
+- ADR 0028: discover a bounded dynamic research universe from market activity, theme seeds,
+  and operator focus; permit only budgeted constrained LLM re-ranking; keep all execution
+  authority behind the governed Trading Universe and existing deterministic/human gates.

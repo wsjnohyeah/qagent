@@ -55,7 +55,10 @@ DEFAULT_LISTS: tuple[dict[str, Any], ...] = (
         "slug": "trading-universe",
         "list_type": "TRADING_UNIVERSE",
         "name": "Trading Universe",
-        "description": "Symbols eligible for bounded scanning and research.",
+        "description": (
+            "Administrator-governed symbols allowed to progress from research "
+            "toward Shadow adoption."
+        ),
         "mode": "GOVERNED",
         "members": ("AAPL", "SPY", "QQQ", "IWM"),
     },

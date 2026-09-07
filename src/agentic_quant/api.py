@@ -58,6 +58,7 @@ from agentic_quant.llm_budget import (
 )
 from agentic_quant.llm_store import LLMStore
 from agentic_quant.market_ingestion import MarketDataIngestionService
+from agentic_quant.market_scanner import MarketScanStore, MarketUniverseScanner
 from agentic_quant.market_store import MarketDataStore
 from agentic_quant.migrations import require_current_database, upgrade_database
 from agentic_quant.ml import (
@@ -315,6 +316,7 @@ def create_app(
         ledger=ledger,
         budget_manager=llm_budget_manager,
     )
+    market_scan_store = MarketScanStore(ledger)
     evidence_retriever = ResearchEvidenceRetriever(document_store)
     research_analyst = EvidenceBoundResearchAnalyst(
         llm_gateway,
@@ -476,6 +478,11 @@ def create_app(
         paper,
         actions,
         steward_system_status,
+        market_scanner_status=lambda: {
+            "enabled": app_settings.market_scanner_enabled,
+            "llm_enabled": app_settings.market_scanner_llm_enabled,
+            "latest_run": market_scan_store.latest(),
+        },
     )
 
     @asynccontextmanager
@@ -526,6 +533,16 @@ def create_app(
         application.state.actions = actions
         application.state.steward = steward
         application.state.code_changes = code_changes
+        market_scanner = MarketUniverseScanner(
+            settings=app_settings,
+            ledger=ledger,
+            objects=objects,
+            market=application.state.market_store,
+            archive=archive,
+            llm_gateway=llm_gateway,
+            restrictions=restrictions,
+        )
+        application.state.market_scanner = market_scanner
         coordinator = AutonomousCoordinator(
             workflow_job_store,
             handler=ResearchCoordinatorHandler(
@@ -702,31 +719,46 @@ def create_app(
                             detail="Autonomous coordinator is disabled by control plane",
                         )
                     else:
-                        universe = objects.get_list("trading-universe")
-                        symbols = tuple(universe["members"]) if universe else ()
+                        universe_scan_id = None
+                        if app_settings.market_scanner_enabled:
+                            scan = await market_scanner.run_once(
+                                as_of=datetime.now(UTC),
+                            )
+                            symbols = tuple(scan["selected_symbols"])
+                            universe_scan_id = str(scan["scan_id"])
+                        else:
+                            universe = objects.get_list("trading-universe")
+                            symbols = tuple(universe["members"]) if universe else ()
                         if not symbols:
                             actions.record_pipeline_heartbeat(
                                 pipeline="coordinator",
                                 status="WAITING",
-                                detail="Trading universe is empty",
+                                detail=(
+                                    "Market scan returned no candidates"
+                                    if app_settings.market_scanner_enabled
+                                    else "Trading universe is empty"
+                                ),
                             )
                         else:
                             actions.record_pipeline_heartbeat(
                                 pipeline="coordinator",
                                 status="RUNNING",
                                 detail=(
-                                    f"Starting governed cycle for {len(symbols)} symbols"
+                                    f"Starting research cycle for {len(symbols)} symbols; "
+                                    f"scan={universe_scan_id or 'disabled'}"
                                 ),
                             )
                             result = await coordinator.run_once(
                                 symbols=symbols,
                                 as_of=datetime.now(UTC),
+                                universe_scan_id=universe_scan_id,
                             )
                             actions.record_pipeline_heartbeat(
                                 pipeline="coordinator",
                                 status="IDLE",
                                 detail=(
                                     f"cycle={result['job_group_id']} "
+                                    f"scan={universe_scan_id or 'disabled'} "
                                     f"processed={result['processed_this_run']} "
                                     f"waiting={result['business_waiting_count']}"
                                 ),
@@ -959,6 +991,8 @@ def create_app(
             "coordinator_paid_research_enabled": (
                 app_settings.coordinator_paid_research_enabled
             ),
+            "market_scanner_enabled": app_settings.market_scanner_enabled,
+            "market_scanner_llm_enabled": app_settings.market_scanner_llm_enabled,
             "llm_routing_version": llm_status["routing_version"],
             "llm_route_source": llm_status["route_source"],
             "llm_budget_policy": llm_budget_manager.effective_policy_version(),
@@ -1015,6 +1049,7 @@ def create_app(
             "paper": paper.status(),
             "virtual_account": account,
             "coordinator": application.state.coordinator.status(limit=80),
+            "market_scanner": application.state.market_scanner.status(limit=3),
             "recent_activity": objects.activity(limit=25),
             "pending_actions": [
                 item
@@ -1415,6 +1450,11 @@ def create_app(
     @application.get("/v1/coordinator/status")
     def coordinator_status() -> dict[str, Any]:
         value: dict[str, Any] = application.state.coordinator.status()
+        return value
+
+    @application.get("/v1/market-scanner/status")
+    def market_scanner_status() -> dict[str, Any]:
+        value: dict[str, Any] = application.state.market_scanner.status()
         return value
 
     @application.get("/v1/catalysts")

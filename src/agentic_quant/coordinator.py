@@ -61,6 +61,7 @@ class AutonomousCoordinator:
         as_of: datetime,
         timeframe: str = "1Day",
         max_attempts: int = 5,
+        universe_scan_id: str | None = None,
     ) -> tuple[str, tuple[WorkflowJob, ...]]:
         if as_of.tzinfo is None:
             raise ValueError("Coordinator cutoff must be timezone-aware")
@@ -70,7 +71,16 @@ class AutonomousCoordinator:
         if not normalized:
             raise ValueError("Coordinator requires at least one governed symbol")
         cycle_key = as_of.astimezone(UTC).strftime("%Y-%m-%dT%H")
-        group_id = stable_uuid("autonomous-research", timeframe, cycle_key)
+        group_id = (
+            stable_uuid(
+                "autonomous-research",
+                timeframe,
+                cycle_key,
+                universe_scan_id,
+            )
+            if universe_scan_id is not None
+            else stable_uuid("autonomous-research", timeframe, cycle_key)
+        )
         now = datetime.now(UTC)
         planned: list[WorkflowJob] = []
         for symbol in normalized:
@@ -85,6 +95,8 @@ class AutonomousCoordinator:
                     "stage": stage,
                     "cycle_key": cycle_key,
                 }
+                if universe_scan_id is not None:
+                    payload["universe_scan_id"] = universe_scan_id
                 planned.append(
                     WorkflowJob(
                         workflow_job_id=job_id,
@@ -116,11 +128,13 @@ class AutonomousCoordinator:
         as_of: datetime,
         timeframe: str = "1Day",
         max_jobs: int | None = None,
+        universe_scan_id: str | None = None,
     ) -> dict[str, Any]:
         group_id, _ = self.plan(
             symbols=symbols,
             as_of=as_of,
             timeframe=timeframe,
+            universe_scan_id=universe_scan_id,
         )
         backlog_group_ids = self.jobs.incomplete_group_ids(
             job_type_prefix="coordinator.",

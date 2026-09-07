@@ -158,6 +158,8 @@ class ResearchCoordinatorHandler:
                 "as_of": str(job.payload["as_of"]),
             }
         )
+        if job.payload.get("universe_scan_id") is not None:
+            context["universe_scan_id"] = job.payload["universe_scan_id"]
         required_pipelines = {
             "collect_market_data": ("market-data",),
             "collect_research_evidence": ("documents",),
@@ -691,6 +693,17 @@ class ResearchCoordinatorHandler:
             return {"outcome": "WAITING_EXACT_VALIDATION"}
         if not context.get("eligible_for_human_review"):
             return {"outcome": "WAITING_FUTURE_RESEARCH_EVIDENCE"}
+        universe = self.objects.get_list("trading-universe")
+        governed = {
+            str(symbol).upper()
+            for symbol in (universe["members"] if universe else [])
+        }
+        if str(context["symbol"]).upper() not in governed:
+            return {
+                "outcome": "WAITING_TRADING_UNIVERSE_APPROVAL",
+                "required_actions": ["list.replace_members"],
+                "automatic_execution": False,
+            }
         return {
             "outcome": "WAITING_HUMAN_CONFIRMATION",
             "required_actions": ["strategy.adopt", "shadow.start"],

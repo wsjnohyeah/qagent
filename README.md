@@ -138,6 +138,15 @@ validation, Shadow, and Paper outcomes plus the forecast model's label, untouche
 metrics, calibration, drift, and gate status. Paid LLM stages default off, and the coordinator
 cannot promote, adopt, or submit orders.
 
+An optional bounded market scanner now supplies that per-symbol DAG. Each hour it merges
+Alpaca most-active and mover feeds with a reviewed 83-symbol theme catalog and the Focus
+Watchlist, applies deterministic price/liquidity/restriction/benchmark filters, and keeps at
+most 20 deep-research candidates. A budgeted LLM may re-rank only the deterministic top 40 at
+most once every four hours; invalid output, provider failure, or exhausted budget falls back
+to deterministic ranking. Scan evidence, scores, reasons, LLM comments, and coordinator
+lineage are persisted. The resulting Candidate List has no execution authority: explicit
+Trading Universe admission and the existing validation/adoption/Shadow gates still apply.
+
 ## Commands
 
 | Command | Purpose |
@@ -184,6 +193,9 @@ PAPER_POLL_SECONDS=30
 ALPACA_PAPER_BASE_URL=https://paper-api.alpaca.markets
 COORDINATOR_DOCUMENT_LOOKBACK_DAYS=90
 COORDINATOR_DOCUMENT_MAX_PAGES=10
+MARKET_SCANNER_ENABLED=false
+MARKET_SCANNER_LLM_ENABLED=false
+MARKET_SCANNER_POLICY_PATH=./configs/market_scanner.yaml
 LLM_OPENAI_API_KEY=
 LLM_META_API_KEY=
 LLM_ROUTING_PATH=./configs/model_routing.yaml
@@ -423,6 +435,9 @@ The web application is organized around system objects rather than a fixed dashb
   LLM estimated-USD spend against daily and monthly budget limits.
 - **Lists** manages the governed trading universe, focus watchlist, candidate list,
   shadow-active symbols, benchmarks, and read-only restriction list with immutable revisions.
+- **Market scanner** explains the discovery funnel and shows the latest ranked candidates,
+  activity/liquidity metrics, deterministic reasons, optional LLM thesis/risks, and immutable
+  source payloads. Candidate selection is visibly separate from Trading Universe permission.
 - **Data explorer** exposes clickable dataset types, date groups, pagination, normalized rows,
   documents/facts, and collapsed bounded raw payloads with provenance.
 - **Strategies** identifies deterministic baselines versus ML + LLM candidates and presents
@@ -444,7 +459,8 @@ produce a diff and passing test record before a separate commit approval can be 
 
 See `runbooks/control_center.md`, `runbooks/shadow_runtime.md`, ADR 0017, and ADR 0018.
 Coordinator operation is documented in `runbooks/autonomous_coordinator.md`; shared-account
-and environment-isolation decisions are recorded in ADR 0022. Subject-aware validation and
+and environment-isolation decisions are recorded in ADR 0022; dynamic discovery is recorded
+in ADR 0028. Subject-aware validation and
 open-price execution review are recorded in ADR 0023. The independent review of
 `3b3926e` and its current disposition are recorded in
 `docs/REVIEW_REMEDIATION_3B3926E_2026-09-06.md`.
@@ -518,6 +534,7 @@ AGENTS.md                mandatory operating rules for coding/deployment agents
 - `GET /v1/workflow-jobs`
 - `GET /v1/workflow-jobs/{job_id}`
 - `GET /v1/coordinator/status`
+- `GET /v1/market-scanner/status`
 - `GET /v1/documents/search`
 - `GET /v1/catalysts`
 - `GET /v1/research/experiments`

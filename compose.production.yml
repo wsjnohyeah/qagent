@@ -70,6 +70,8 @@ services:
       SHADOW_RUNTIME_ENABLED: "false"
       AUTONOMOUS_COORDINATOR_ENABLED: "${AUTONOMOUS_COORDINATOR_ENABLED:-true}"
       COORDINATOR_PAID_RESEARCH_ENABLED: "${COORDINATOR_PAID_RESEARCH_ENABLED:-false}"
+      MARKET_SCANNER_ENABLED: "${MARKET_SCANNER_ENABLED:-false}"
+      MARKET_SCANNER_LLM_ENABLED: "${MARKET_SCANNER_LLM_ENABLED:-false}"
     volumes:
       - object-store-data:/app/work/object-store
     depends_on:

@@ -19,7 +19,10 @@ from agentic_quant.market_calendar import MarketSessionClock
 from agentic_quant.market_ingestion import MarketDataIngestionService
 from agentic_quant.market_store import MarketDataStore
 from agentic_quant.migrations import upgrade_database
-from agentic_quant.providers.alpaca import AlpacaMarketDataProvider
+from agentic_quant.providers.alpaca import (
+    AlpacaConfigurationError,
+    AlpacaMarketDataProvider,
+)
 from agentic_quant.providers.base import OptionChainRequest, StockBarsPage, StockBarsRequest
 
 
@@ -100,12 +103,96 @@ def test_stock_bar_request_requires_a_valid_timezone_aware_window() -> None:
             start=datetime(2026, 9, 3, 14, 30),
             end=datetime(2026, 9, 3, 14, 31),
         )
+
+    with pytest.raises(AlpacaConfigurationError, match="asset metadata"):
+        AlpacaMarketDataProvider(
+            api_key="test-key",
+            api_secret="test-secret",
+            assets_base_url="https://api.alpaca.markets",
+        )
     with pytest.raises(ValueError, match="start must be before end"):
         StockBarsRequest(
             symbol="AAPL",
             start=datetime(2026, 9, 3, 14, 31, tzinfo=UTC),
             end=datetime(2026, 9, 3, 14, 31, tzinfo=UTC),
         )
+
+
+def test_alpaca_adapter_fetches_market_screeners_and_stock_snapshots() -> None:
+    seen: list[tuple[str, dict[str, str]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.path, dict(request.url.params)))
+        if request.url.path.endswith("most-actives"):
+            return httpx.Response(
+                200,
+                json={"most_actives": [{"symbol": "SNDK", "volume": 1000}]},
+            )
+        if request.url.path.endswith("movers"):
+            return httpx.Response(
+                200,
+                json={
+                    "gainers": [
+                        {"symbol": "SNDK", "price": 100, "percent_change": 8}
+                    ],
+                    "losers": [],
+                },
+            )
+        if request.url.path.endswith("assets"):
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "class": "us_equity",
+                        "symbol": "SNDK",
+                        "name": "Sandisk Corporation Common Stock",
+                        "status": "active",
+                        "tradable": True,
+                    }
+                ],
+            )
+        return httpx.Response(
+            200,
+            json={"SNDK": {"latestTrade": {"p": 100}}},
+        )
+
+    async def scenario():  # type: ignore[no-untyped-def]
+        client = httpx.AsyncClient(
+            base_url="https://data.alpaca.markets",
+            transport=httpx.MockTransport(handler),
+        )
+        provider = AlpacaMarketDataProvider(
+            api_key="test-key",
+            api_secret="test-secret",
+            client=client,
+        )
+        active = await provider.fetch_most_actives(top=100)
+        movers = await provider.fetch_market_movers(top=50)
+        assets = await provider.fetch_active_assets()
+        snapshots = await provider.fetch_stock_snapshots(
+            symbols=("sndk", "SNDK"),
+            feed="sip",
+        )
+        await client.aclose()
+        return active, movers, assets, snapshots
+
+    active, movers, assets, snapshots = asyncio.run(scenario())
+    assert active.raw_payload["most_actives"][0]["symbol"] == "SNDK"
+    assert movers.raw_payload["gainers"][0]["percent_change"] == 8
+    assert assets.raw_payload["assets"][0]["symbol"] == "SNDK"
+    assert snapshots.raw_payload["SNDK"]["latestTrade"]["p"] == 100
+    assert seen == [
+        (
+            "/v1beta1/screener/stocks/most-actives",
+            {"top": "100", "by": "volume"},
+        ),
+        ("/v1beta1/screener/stocks/movers", {"top": "50"}),
+        (
+            "/v2/assets",
+            {"status": "active", "asset_class": "us_equity"},
+        ),
+        ("/v2/stocks/snapshots", {"symbols": "SNDK", "feed": "sip"}),
+    ]
 
 
 def test_alpaca_adapter_supports_point_in_time_safe_daily_bars() -> None:

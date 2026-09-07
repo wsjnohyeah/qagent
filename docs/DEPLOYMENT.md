@@ -60,6 +60,11 @@ COORDINATOR_DOCUMENT_LOOKBACK_DAYS=90
 COORDINATOR_DOCUMENT_MAX_PAGES=10
 # Leave false until routes and USD budgets are reviewed after bootstrap.
 COORDINATOR_PAID_RESEARCH_ENABLED=false
+# Enable only after the Alpaca screener/snapshot probe and policy review pass.
+MARKET_SCANNER_ENABLED=false
+# This spends against the routine_pipeline daily USD budget and fails back to deterministic.
+MARKET_SCANNER_LLM_ENABLED=false
+MARKET_SCANNER_POLICY_PATH=./configs/market_scanner.yaml
 AUTO_MIGRATE=false
 POSTGRES_DB=quant
 POSTGRES_USER=quant
@@ -178,6 +183,9 @@ Verify and record:
 - The bootstrap output says `ready_paused` and the stored environment ID matches this stack.
 - `GET /v1/coordinator/status` is readable and the coordinator heartbeat is present when
   enabled. `WAITING_PAID_RESEARCH_ENABLEMENT` is expected until paid automation is approved.
+- When dynamic discovery is enabled, `GET /v1/market-scanner/status` has a recent completed
+  or explicit fallback run, its raw object IDs resolve, and every coordinator job carries the
+  same `universe_scan_id`. Confirm that Candidate List membership alone cannot start Shadow.
 - Before enabling Paper, `POST /v1/paper/probe` succeeds read-only and the returned account
   identity, cash/equity, and positions match the dedicated Alpaca Paper account. No order is
   submitted as a deployment health check.
