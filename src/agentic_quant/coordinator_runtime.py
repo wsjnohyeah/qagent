@@ -30,6 +30,7 @@ from agentic_quant.ml import (
     MLStore,
     WalkForwardMLTrainer,
     ml_dataset_sha256,
+    ml_training_contract_sha256,
 )
 from agentic_quant.providers.alpaca import AlpacaMarketDataProvider
 from agentic_quant.providers.base import (
@@ -46,6 +47,7 @@ from agentic_quant.strategy_generation import HybridStrategyGenerator
 from agentic_quant.validation import (
     WalkForwardValidator,
     load_promotion_gate_policy,
+    promotion_policy_sha256,
     validation_execution_contract,
     validation_input_fingerprint,
 )
@@ -400,6 +402,11 @@ class ResearchCoordinatorHandler:
                 "required_samples": self.ml_policy.validation.minimum_samples,
             }
         dataset_sha256 = ml_dataset_sha256(examples)
+        training_contract_sha256 = ml_training_contract_sha256(
+            policy=self.ml_policy,
+            horizon_bars=1,
+            feature_set_version=FEATURE_SET_VERSION,
+        )
         existing = next(
             (
                 item
@@ -409,6 +416,8 @@ class ResearchCoordinatorHandler:
                 and int(item["horizon_bars"]) == 1
                 and item["feature_set_version"] == FEATURE_SET_VERSION
                 and item["dataset_sha256"] == dataset_sha256
+                and item.get("training_contract_sha256")
+                == training_contract_sha256
             ),
             None,
         )
@@ -473,6 +482,7 @@ class ResearchCoordinatorHandler:
                 and item["prompt_version"] == ANALYSIS_PROMPT_VERSION
                 and item["evidence_bundle"]["evidence_bundle_hash"]
                 == bundle.evidence_bundle_hash
+                and item.get("llm_invocation_status") != "FAILED"
             ),
             None,
         )
@@ -596,6 +606,17 @@ class ResearchCoordinatorHandler:
             step_bars=10,
             embargo_bars=1,
         )
+        promotion_policy = load_promotion_gate_policy(
+            self.settings.research_promotion_policy_path
+        )
+        expected_policy_sha256 = promotion_policy_sha256(promotion_policy)
+        expected_trial_count = max(
+            1,
+            self.research.strategy_trial_count(
+                symbol=str(context["symbol"]),
+                timeframe=str(context["timeframe"]),
+            ),
+        )
         prior = next(
             (
                 item
@@ -610,6 +631,15 @@ class ResearchCoordinatorHandler:
                     "validation_input"
                 )
                 == expected_input
+                and dict(item.get("gate_assessment") or {}).get("policy_sha256")
+                == expected_policy_sha256
+                and int(
+                    dict(item.get("robustness_metrics") or {}).get(
+                        "selection_search_trial_count",
+                        0,
+                    )
+                )
+                == expected_trial_count
             ),
             None,
         )
@@ -626,9 +656,7 @@ class ResearchCoordinatorHandler:
                 self.research,
                 self.ledger,
                 calendar_name=self.settings.market_calendar,
-                promotion_policy=load_promotion_gate_policy(
-                    self.settings.research_promotion_policy_path
-                ),
+                promotion_policy=promotion_policy,
                 risk_policy=self.shadow.effective_risk_policy(),
                 restrictions=self.restrictions,
             ).run(

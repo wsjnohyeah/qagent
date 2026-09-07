@@ -664,6 +664,47 @@ def test_partial_fill_expiry_cancels_remainder_but_keeps_lifecycle_open(
     assert broker.submissions == 1
 
 
+def test_reconciliation_refreshes_position_after_order_state_changes(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    class FillAfterInitialPositionRead(_FakeBroker):
+        race = False
+
+        async def fetch_order_by_client_id(
+            self,
+            client_order_id: str,
+        ) -> dict[str, Any] | None:
+            if self.race:
+                self.race = False
+                self.orders[client_order_id].update(
+                    status="canceled",
+                    filled_qty="1",
+                    filled_avg_price="100",
+                    legs=[],
+                )
+                self.positions = ({"symbol": "AAPL", "qty": "1"},)
+            return await super().fetch_order_by_client_id(client_order_id)
+
+    now = datetime(2026, 9, 8, 20, tzinfo=UTC)
+    broker = FillAfterInitialPositionRead()
+    _, runtime, shadow, clock = _paper_fixture(
+        settings,
+        broker=broker,
+        now=now,
+    )
+    asyncio.run(runtime.tick(trigger="initial", new_exposure_paused=False))
+    shadow.execution_profile = BASELINE_EXECUTION_PROFILE_VERSION
+    broker.race = True
+    clock[0] += timedelta(seconds=1)
+
+    result = asyncio.run(runtime.tick(trigger="race", new_exposure_paused=True))
+    stored = runtime.orders()[0]
+
+    assert result["orders_submitted"] == 0
+    assert stored["filled_quantity"] == Decimal("1")
+    assert stored["lifecycle_complete"] is False
+
+
 def test_paper_enrollment_rejects_shadow_only_execution_certificate(
     settings,  # type: ignore[no-untyped-def]
 ) -> None:

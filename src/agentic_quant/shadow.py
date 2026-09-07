@@ -4,6 +4,7 @@ import asyncio
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, Callable
 
 from sqlalchemy import Engine, delete, func, insert, select, update
@@ -60,6 +61,12 @@ from agentic_quant.virtual_account import (
     MAIN_VIRTUAL_ACCOUNT_ID,
     VirtualAccountStore,
 )
+from agentic_quant.validation import (
+    DEFAULT_PROMOTION_GATE_POLICY,
+    PromotionGatePolicy,
+    load_promotion_gate_policy,
+    promotion_policy_sha256,
+)
 
 
 _ZERO = Decimal("0")
@@ -85,6 +92,8 @@ class ShadowRuntime:
         restrictions: RestrictionRegistry,
         calendar_name: str = "XNYS",
         now_provider: Callable[[], datetime] | None = None,
+        promotion_policy: PromotionGatePolicy | None = None,
+        promotion_policy_path: Path | None = None,
     ) -> None:
         self.engine = engine
         self.research_store = research_store
@@ -100,6 +109,8 @@ class ShadowRuntime:
         self.costs = BacktestCostModel()
         self.accounts = VirtualAccountStore(engine)
         self._now_provider = now_provider or (lambda: datetime.now(UTC))
+        self._promotion_policy = promotion_policy or DEFAULT_PROMOTION_GATE_POLICY
+        self._promotion_policy_path = promotion_policy_path
         self._tick_lock = asyncio.Lock()
 
     def _now(self) -> datetime:
@@ -209,6 +220,31 @@ class ShadowRuntime:
             )
         if str(report.execution_contract_sha256) != _canonical_hash(expected_contract):
             raise ValueError("Validation execution contract hash is invalid")
+        current_policy = (
+            load_promotion_gate_policy(self._promotion_policy_path)
+            if self._promotion_policy_path is not None
+            else self._promotion_policy
+        )
+        if gate.get("policy_sha256") != promotion_policy_sha256(current_policy):
+            raise ValueError(
+                "Validation admission assessment is stale under the current "
+                "promotion policy"
+            )
+        current_trial_count = self.research_store.strategy_trial_count(
+            symbol=str(report.symbol),
+            timeframe=str(report.timeframe),
+        )
+        assessed_trial_count = int(
+            dict(report.robustness_metrics or {}).get(
+                "selection_search_trial_count",
+                0,
+            )
+        )
+        if assessed_trial_count != current_trial_count:
+            raise ValueError(
+                "Validation admission assessment is stale under the current "
+                "research search count"
+            )
         return {
             "summary": f"Adopt {spec.name}@{spec.version} for shadow use",
             "strategy_spec_id": strategy_spec_id,

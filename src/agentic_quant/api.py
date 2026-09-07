@@ -343,6 +343,7 @@ def create_app(
         restrictions=restrictions,
         calendar_name=app_settings.market_calendar,
         now_provider=shadow_now_provider,
+        promotion_policy_path=app_settings.research_promotion_policy_path,
     )
     resolved_paper_factory = paper_broker_factory
     if (
@@ -449,6 +450,7 @@ def create_app(
         budget_preview_callback=preview_budget,
         budget_update_callback=activate_budget,
         model_promote_callback=promote_model,
+        workflow_jobs=workflow_job_store,
         ledger=ledger,
     )
 

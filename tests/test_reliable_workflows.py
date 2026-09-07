@@ -3,10 +3,17 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+import json
+from pathlib import Path
+from unittest.mock import patch
 
 import pytest
+from fastapi.testclient import TestClient
+from pydantic import SecretStr
 from sqlalchemy import update
 
+from agentic_quant.archive import FileRawArchive
+from agentic_quant.api import create_app
 from agentic_quant.backtest_engine import EventDrivenPortfolio
 from agentic_quant.data_quality import (
     DataQualityError,
@@ -14,7 +21,10 @@ from agentic_quant.data_quality import (
     inspect_market_bars,
 )
 from agentic_quant.coordinator import AutonomousCoordinator, COORDINATOR_STAGES
-from agentic_quant.coordinator_runtime import daily_bar_gap_windows
+from agentic_quant.coordinator_runtime import (
+    ResearchCoordinatorHandler,
+    daily_bar_gap_windows,
+)
 from agentic_quant.database import event_outbox, workflow_jobs
 from agentic_quant.domain import (
     BacktestCostModel,
@@ -26,8 +36,10 @@ from agentic_quant.domain import (
 )
 from agentic_quant.ledger import EventLedger
 from agentic_quant.market_ingestion import IngestionSummary
+from agentic_quant.market_calendar import MarketSessionClock
+from agentic_quant.market_store import MarketDataStore
 from agentic_quant.migrations import upgrade_database
-from agentic_quant.providers.base import StockBarsRequest
+from agentic_quant.providers.base import StockBarsPage, StockBarsRequest
 from agentic_quant.reference_data import (
     GovernedReferenceImporter,
     ReferenceDataStore,
@@ -55,6 +67,44 @@ def _minute_bar(minute: int, *, high: str = "101", low: str = "99") -> StockBar:
         feed="sip",
         raw_object_id="TEST_RAW",
         ingested_at=datetime(2026, 9, 4, tzinfo=UTC),
+    )
+
+
+def _daily_bars_for_gap_test(count: int) -> tuple[StockBar, ...]:
+    clock = MarketSessionClock("XNYS")
+    sessions = clock.calendar.sessions_in_range("2025-01-02", "2025-06-30")[
+        :count
+    ]
+    return tuple(
+        StockBar(
+            bar_id=f"daily-gap-{index}",
+            symbol="AAPL",
+            timeframe="1Day",
+            event_time=datetime.combine(
+                session.date(),
+                datetime.min.time(),
+                tzinfo=UTC,
+            ),
+            available_from=clock.daily_bar_available_from(
+                datetime.combine(
+                    session.date(),
+                    datetime.min.time(),
+                    tzinfo=UTC,
+                )
+            ),
+            open=Decimal("100"),
+            high=Decimal("101"),
+            low=Decimal("99"),
+            close=Decimal("100.5"),
+            volume=1_000_000,
+            trade_count=10_000,
+            vwap=Decimal("100.2"),
+            source="fixture",
+            feed="sip",
+            raw_object_id="TEST_RAW",
+            ingested_at=datetime(2026, 9, 4, tzinfo=UTC),
+        )
+        for index, session in enumerate(sessions)
     )
 
 
@@ -226,6 +276,7 @@ def test_partitioned_backfill_resumes_without_repeating_completed_work(
     assert jobs.health_summary() == {
         "workflow_jobs": 3,
         "failed_workflow_jobs": 0,
+        "exhausted_workflow_jobs": 0,
     }
 
 
@@ -261,6 +312,7 @@ def test_autonomous_coordinator_resumes_failed_stage_without_repeating_parents(
         "RUNNING": 0,
         "COMPLETED": 3,
         "FAILED": 1,
+        "EXHAUSTED": 0,
     }
     second = asyncio.run(
         coordinator.run_once(symbols=("AAPL",), as_of=cutoff)
@@ -293,6 +345,113 @@ def test_daily_gap_planner_repairs_internal_and_trailing_sessions() -> None:
             datetime(2026, 9, 5, tzinfo=UTC),
         ),
     )
+
+
+def test_coordinator_retry_repairs_the_original_historical_gap(
+    settings,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    runtime_settings = settings.model_copy(
+        update={
+            "alpaca_api_key": SecretStr("mock-key"),
+            "alpaca_api_secret": SecretStr("mock-secret"),
+            "coordinator_initial_lookback_days": 30,
+        }
+    )
+    upgrade_database(runtime_settings.database_url)
+    ledger = EventLedger(runtime_settings.database_url)
+    market = MarketDataStore(ledger.engine)
+    source = tuple(
+        item.model_copy(
+            update={
+                "source": "alpaca",
+                "feed": runtime_settings.alpaca_stock_feed,
+            }
+        )
+        for item in _daily_bars_for_gap_test(35)
+    )
+    as_of = source[30].available_from + timedelta(seconds=1)
+    desired_start = datetime.combine(
+        (as_of - timedelta(days=30)).date(),
+        datetime.min.time(),
+        tzinfo=UTC,
+    )
+    expected = tuple(
+        item for item in source if desired_start <= item.event_time < as_of
+    )
+    missing = expected[1]
+    requests: list[StockBarsRequest] = []
+
+    class Publisher:
+        def publish(self, **payload):  # type: ignore[no-untyped-def]
+            return str(len(json.loads(payload["envelope_json"])))
+
+        def health(self) -> bool:
+            return True
+
+    class HoleOnceProvider:
+        name = "alpaca"
+
+        async def __aenter__(self):  # type: ignore[no-untyped-def]
+            return self
+
+        async def __aexit__(self, *_args):  # type: ignore[no-untyped-def]
+            return None
+
+        async def fetch_stock_bars_page(
+            self,
+            request: StockBarsRequest,
+            *,
+            page_token: str | None = None,
+        ) -> StockBarsPage:
+            del page_token
+            requests.append(request)
+            bars = tuple(
+                item
+                for item in expected
+                if request.start <= item.event_time < request.end
+                and (len(requests) > 1 or item.bar_id != missing.bar_id)
+            )
+            return StockBarsPage(
+                provider="alpaca",
+                provider_received_at=as_of,
+                request_metadata=request.model_dump(mode="json"),
+                raw_payload={"fixture": True, "rows": len(bars)},
+                bars=bars,
+            )
+
+    handler = ResearchCoordinatorHandler.__new__(ResearchCoordinatorHandler)
+    handler.settings = runtime_settings
+    handler.ledger = ledger
+    handler.market = market
+    handler.archive = FileRawArchive(tmp_path / "raw")
+    handler.publisher = Publisher()
+    provider = HoleOnceProvider()
+    context = {
+        "symbol": "AAPL",
+        "timeframe": "1Day",
+        "as_of": as_of.isoformat(),
+    }
+    with patch(
+        "agentic_quant.coordinator_runtime.AlpacaMarketDataProvider",
+        return_value=provider,
+    ):
+        with pytest.raises(DataQualityError, match="missing_intervals"):
+            asyncio.run(handler._collect_market_data(context))
+        second = asyncio.run(handler._collect_market_data(context))
+
+    stored = market.bars_between(
+        symbol="AAPL",
+        timeframe="1Day",
+        start=desired_start,
+        end=as_of,
+        source="alpaca",
+        feed=runtime_settings.alpaca_stock_feed,
+    )
+    assert second["outcome"] == "COMPLETED"
+    assert any(item.event_time == missing.event_time for item in stored)
+    assert len(stored) == len(expected)
+    assert requests[1].start <= missing.event_time < requests[1].end
 
 
 def test_autonomous_coordinator_rejects_unsupported_timeframe(
@@ -360,6 +519,140 @@ def test_autonomous_coordinator_recovers_failed_group_after_hour_rollover(
     assert calls.count((old_group_id, "collect_market_data")) == 1
     assert second["completed"] is True
     assert second["backlog_groups"][0]["job_group_id"] == old_group_id
+
+
+def test_exhausted_groups_do_not_starve_later_retryable_work(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    jobs = WorkflowJobStore(ledger.engine)
+    calls: list[str] = []
+
+    async def handler(job, dependencies):  # type: ignore[no-untyped-def]
+        del dependencies
+        calls.append(str(job.workflow_job_id))
+        return {"outcome": "COMPLETED"}
+
+    coordinator = AutonomousCoordinator(jobs, handler=handler)
+    now = datetime(2026, 9, 8, 20, tzinfo=UTC)
+    target_id = ""
+    exhausted_id = ""
+    for index in range(101):
+        _, planned = coordinator.plan(
+            symbols=("AAPL",),
+            as_of=now - timedelta(hours=102 - index),
+        )
+        first = next(
+            item
+            for item in planned
+            if item.payload["stage"] == "collect_market_data"
+        )
+        with ledger.engine.begin() as connection:
+            connection.execute(
+                update(workflow_jobs)
+                .where(workflow_jobs.c.workflow_job_id == first.workflow_job_id)
+                .values(
+                    status="FAILED",
+                    attempt_count=5 if index < 100 else 1,
+                )
+            )
+        if index == 100:
+            target_id = first.workflow_job_id
+        elif index == 0:
+            exhausted_id = first.workflow_job_id
+
+    preview = jobs.retry_preview(exhausted_id)
+    assert preview["next_max_attempts"] == 6
+    retried = jobs.retry_exhausted(
+        exhausted_id,
+        requested_by="test-admin",
+        reason="Provider has recovered",
+    )
+    assert retried["status"] == "PENDING"
+    result = asyncio.run(coordinator.run_once(symbols=("AAPL",), as_of=now))
+
+    assert target_id in calls
+    assert jobs.jobs_by_ids((target_id,))[0].status.value == "COMPLETED"
+    assert all(
+        group["job_group_id"]
+        != jobs.jobs_by_ids((target_id,))[0].job_group_id
+        or group["processed_this_run"] > 0
+        for group in result["backlog_groups"]
+    )
+
+
+def test_workflow_marks_the_final_failed_attempt_exhausted(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    jobs = WorkflowJobStore(ledger.engine, ledger)
+
+    async def handler(job, dependencies):  # type: ignore[no-untyped-def]
+        del job, dependencies
+        raise RuntimeError("persistent provider failure")
+
+    coordinator = AutonomousCoordinator(jobs, handler=handler)
+    cutoff = datetime(2026, 9, 8, 20, tzinfo=UTC)
+    group_id, planned = coordinator.plan(
+        symbols=("AAPL",),
+        as_of=cutoff,
+        max_attempts=1,
+    )
+    asyncio.run(coordinator.run_once(symbols=("AAPL",), as_of=cutoff))
+
+    first = jobs.jobs_by_ids((planned[0].workflow_job_id,))[0]
+    assert first.status.value == "EXHAUSTED"
+    assert group_id not in jobs.incomplete_group_ids(
+        job_type_prefix="coordinator."
+    )
+    assert jobs.health_summary()["exhausted_workflow_jobs"] == 1
+
+
+def test_exhausted_workflow_retry_requires_admin_confirmation(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    with TestClient(create_app(settings)) as client:
+        jobs = client.app.state.actions.workflow_jobs
+
+        async def handler(job, dependencies):  # type: ignore[no-untyped-def]
+            del job, dependencies
+            return {"outcome": "COMPLETED"}
+
+        coordinator = AutonomousCoordinator(jobs, handler=handler)
+        _, planned = coordinator.plan(
+            symbols=("AAPL",),
+            as_of=datetime(2026, 9, 8, 20, tzinfo=UTC),
+            max_attempts=1,
+        )
+        job_id = planned[0].workflow_job_id
+        with jobs.engine.begin() as connection:
+            connection.execute(
+                update(workflow_jobs)
+                .where(workflow_jobs.c.workflow_job_id == job_id)
+                .values(status="EXHAUSTED", attempt_count=1)
+            )
+        proposed = client.post(
+            "/v1/actions",
+            json={
+                "action_type": "workflow.retry_exhausted",
+                "target_type": "workflow_job",
+                "target_id": job_id,
+                "parameters": {},
+                "reason": "Provider incident has been resolved",
+            },
+        ).json()
+        assert jobs.jobs_by_ids((job_id,))[0].status.value == "EXHAUSTED"
+        confirmed = client.post(
+            f"/v1/actions/{proposed['action_request_id']}/confirm",
+            json={"confirmation_phrase": proposed["confirmation_phrase"]},
+        )
+
+        assert confirmed.status_code == 200
+        retried = jobs.jobs_by_ids((job_id,))[0]
+        assert retried.status.value == "PENDING"
+        assert retried.max_attempts == 2
 
 
 def test_fresh_running_partition_is_not_stolen_by_another_invoker(

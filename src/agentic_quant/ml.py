@@ -110,6 +110,48 @@ def ml_dataset_sha256(examples: tuple[MLTrainingExample, ...]) -> str:
     return _canonical_hash([item.model_dump(mode="json") for item in examples])
 
 
+ML_TRAINING_CONTRACT_VERSION = "walk_forward_ml_trainer@0.2.0"
+
+
+def ml_training_contract(
+    *,
+    policy: MLPolicy,
+    horizon_bars: int,
+    feature_set_version: str,
+) -> dict[str, Any]:
+    """Identify every behavior-bearing input to training and model selection."""
+    if horizon_bars < 1:
+        raise ValueError("ML horizon_bars must be positive")
+    return {
+        "version": ML_TRAINING_CONTRACT_VERSION,
+        "policy": policy.model_dump(mode="json"),
+        "horizon_bars": horizon_bars,
+        "feature_set_version": feature_set_version,
+        "algorithms": tuple(item.value for item in MLModelKind),
+        "label_contract": "next_open_to_horizon_close@0.2.0",
+        "calibration_contract": "purged_oos_platt_three_way@0.2.0",
+        "selection_contract": (
+            "minimum_purged_selection_brier_then_maximum_roc_auc;"
+            "promotion_on_untouched_final_holdout"
+        ),
+    }
+
+
+def ml_training_contract_sha256(
+    *,
+    policy: MLPolicy,
+    horizon_bars: int,
+    feature_set_version: str,
+) -> str:
+    return _canonical_hash(
+        ml_training_contract(
+            policy=policy,
+            horizon_bars=horizon_bars,
+            feature_set_version=feature_set_version,
+        )
+    )
+
+
 def _utc(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
@@ -908,6 +950,12 @@ class WalkForwardMLTrainer:
             embargo_bars=effective_embargo,
         )
         dataset_sha256 = ml_dataset_sha256(examples)
+        training_contract = ml_training_contract(
+            policy=self.policy,
+            horizon_bars=horizon_bars,
+            feature_set_version=feature_set_version,
+        )
+        training_contract_sha256 = _canonical_hash(training_contract)
         drift = _population_stability(examples, self.policy.features)
         drafts: list[dict[str, Any]] = []
         for kind in (MLModelKind.LOGISTIC_REGRESSION, MLModelKind.BOOSTED_STUMPS):
@@ -970,6 +1018,7 @@ class WalkForwardMLTrainer:
             }
             final_artifact = self._fit(kind, examples)
             final_artifact["calibrator"] = calibrator
+            final_artifact["training_contract"] = training_contract
             final_artifact["positive_mean_return"] = _mean(
                 [item.forward_return for item in examples if item.label == 1]
             )
@@ -1090,6 +1139,7 @@ class WalkForwardMLTrainer:
             horizon_bars=horizon_bars,
             feature_set_version=feature_set_version,
             dataset_sha256=dataset_sha256,
+            training_contract_sha256=training_contract_sha256,
             sample_count=len(examples),
             fold_count=len(folds),
             embargo_bars=effective_embargo,
@@ -1286,4 +1336,6 @@ __all__ = [
     "WalkForwardMLTrainer",
     "load_ml_policy",
     "ml_dataset_sha256",
+    "ml_training_contract",
+    "ml_training_contract_sha256",
 ]

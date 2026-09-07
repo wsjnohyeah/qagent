@@ -10,6 +10,7 @@ from sqlalchemy import Engine, func, insert, select
 
 from agentic_quant.database import (
     experiment_runs,
+    llm_invocations,
     ml_forecasts,
     ml_models,
     ml_training_runs,
@@ -24,6 +25,7 @@ from agentic_quant.domain import (
     AnalystClaim,
     EventEnvelope,
     Forecast,
+    LLMInvocationStatus,
     PointInTimeFeatureSnapshot,
     ResearchAnalysisRecord,
     ResearchAnalysisStatus,
@@ -131,6 +133,76 @@ class ResearchEvidenceRetriever:
                 raise ValueError("Forecast must match feature symbol and as_of")
             if forecast.training_data_cutoff > as_of:
                 raise ValueError("Forecast training cutoff exceeds research as_of")
+            forecast_payload = forecast.model_dump(
+                mode="json",
+                exclude={"created_at"},
+            )
+            with self.document_store.engine.connect() as connection:
+                lineage = connection.execute(
+                    select(
+                        ml_forecasts.c.model_id,
+                        ml_models.c.training_run_id,
+                        ml_models.c.kind,
+                        ml_models.c.status,
+                        ml_models.c.artifact_json,
+                        ml_models.c.metrics_json,
+                        ml_models.c.calibration_json,
+                        ml_models.c.drift_json,
+                        ml_models.c.promotion_assessment_json,
+                        ml_models.c.training_start,
+                        ml_models.c.training_end,
+                        ml_training_runs.c.dataset_sha256,
+                        ml_training_runs.c.training_contract_sha256,
+                        ml_training_runs.c.sample_count,
+                        ml_training_runs.c.fold_count,
+                        ml_training_runs.c.embargo_bars,
+                    )
+                    .join(
+                        ml_models,
+                        ml_models.c.model_id == ml_forecasts.c.model_id,
+                    )
+                    .join(
+                        ml_training_runs,
+                        ml_training_runs.c.training_run_id
+                        == ml_models.c.training_run_id,
+                    )
+                    .where(ml_forecasts.c.forecast_id == forecast.forecast_id)
+                ).one_or_none()
+            if lineage is not None:
+                artifact = dict(lineage.artifact_json or {})
+                contract = dict(artifact.get("training_contract") or {})
+                policy = dict(contract.get("policy") or {})
+                forecast_payload["model_evidence"] = {
+                    "model_id": str(lineage.model_id),
+                    "training_run_id": str(lineage.training_run_id),
+                    "kind": str(lineage.kind),
+                    "registry_status": str(lineage.status),
+                    "label": policy.get("label"),
+                    "training_window": {
+                        "start": _utc(lineage.training_start).isoformat(),
+                        "end": _utc(lineage.training_end).isoformat(),
+                        "sample_count": int(lineage.sample_count),
+                        "fold_count": int(lineage.fold_count),
+                        "embargo_bars": int(lineage.embargo_bars),
+                    },
+                    "final_holdout_metrics": dict(
+                        lineage.metrics_json or {}
+                    ).get("calibrated_final_holdout"),
+                    "calibration": dict(lineage.calibration_json or {}),
+                    "drift": dict(lineage.drift_json or {}),
+                    "promotion_assessment": dict(
+                        lineage.promotion_assessment_json or {}
+                    ),
+                    "dataset_sha256": str(lineage.dataset_sha256),
+                    "training_contract_version": contract.get("version"),
+                    "training_contract_sha256": str(
+                        lineage.training_contract_sha256
+                    ),
+                    "uncertainty_definition": (
+                        "distance-derived classification ambiguity; not a drift "
+                        "or out-of-distribution confidence interval"
+                    ),
+                }
             items.append(
                 self._item(
                     citation_id=f"FORECAST:{forecast.forecast_id}",
@@ -142,10 +214,7 @@ class ResearchEvidenceRetriever:
                     # cutoff. Its wall-clock creation timestamp is lineage metadata,
                     # not evidence from the future and must not be interpreted as
                     # such by the analyst.
-                    text=json.dumps(
-                        forecast.model_dump(mode="json", exclude={"created_at"}),
-                        sort_keys=True,
-                    ),
+                    text=json.dumps(forecast_payload, sort_keys=True),
                 )
             )
         outcome_feedback = self._outcome_feedback_item(
@@ -392,15 +461,30 @@ class IntelligenceStore:
 
     def recent(self, *, limit: int = 50) -> list[dict[str, Any]]:
         statement = (
-            select(research_analyses)
+            select(
+                research_analyses,
+                llm_invocations.c.status.label("llm_invocation_status"),
+                llm_invocations.c.error_code.label("llm_invocation_error_code"),
+            )
+            .outerjoin(
+                llm_invocations,
+                llm_invocations.c.invocation_id
+                == research_analyses.c.llm_invocation_id,
+            )
             .order_by(research_analyses.c.created_at.desc())
             .limit(limit)
         )
         with self.engine.connect() as connection:
             results = []
             for row in connection.execute(statement):
-                record = self._from_row(dict(row._mapping))
-                results.append(record.model_dump(mode="json"))
+                item = dict(row._mapping)
+                invocation_status = item.pop("llm_invocation_status")
+                invocation_error = item.pop("llm_invocation_error_code")
+                record = self._from_row(item)
+                result = record.model_dump(mode="json")
+                result["llm_invocation_status"] = invocation_status
+                result["llm_invocation_error_code"] = invocation_error
+                results.append(result)
             return results
 
     def decision_graph(self, analysis_id: str) -> dict[str, Any] | None:
@@ -448,6 +532,7 @@ class IntelligenceStore:
                         ml_models.c.model_version,
                         ml_models.c.training_run_id,
                         ml_training_runs.c.dataset_sha256,
+                        ml_training_runs.c.training_contract_sha256,
                     )
                     .join(ml_models, ml_models.c.model_id == ml_forecasts.c.model_id)
                     .join(
@@ -466,7 +551,10 @@ class IntelligenceStore:
                             "type": "ml_training_run",
                             "label": "point-in-time walk-forward training",
                             "metadata": {
-                                "dataset_sha256": str(lineage.dataset_sha256)
+                                "dataset_sha256": str(lineage.dataset_sha256),
+                                "training_contract_sha256": str(
+                                    lineage.training_contract_sha256
+                                ),
                             },
                         },
                         {
@@ -601,6 +689,11 @@ class EvidenceBoundResearchAnalyst:
                 timeout_seconds=180,
             )
         )
+        if invocation.status != LLMInvocationStatus.COMPLETED:
+            raise RuntimeError(
+                "LLM infrastructure invocation failed: "
+                f"{invocation.error_code or 'unknown_error'}"
+            )
         try:
             analysis = self._parse(invocation.output_text or "")
             validation = self._validate_analysis(bundle, analysis)

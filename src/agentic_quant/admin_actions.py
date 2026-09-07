@@ -16,6 +16,7 @@ from agentic_quant.ids import uuid7
 from agentic_quant.ledger import EventLedger
 from agentic_quant.paper import PaperTradingRuntime
 from agentic_quant.shadow import ShadowRuntime
+from agentic_quant.workflow import WorkflowJobStore
 
 
 ALLOWED_ACTIONS = {
@@ -45,6 +46,7 @@ ALLOWED_ACTIONS = {
     "paper.cancel_order",
     "account.risk.update",
     "outbox.requeue_dead",
+    "workflow.retry_exhausted",
     "code_change.open",
     "code_change.approve_commit",
 }
@@ -69,6 +71,7 @@ class AdminActionService:
             [dict[str, Any], str, str], dict[str, Any]
         ],
         model_promote_callback: Callable[[str, str, str], dict[str, Any]],
+        workflow_jobs: WorkflowJobStore,
         ledger: EventLedger | None = None,
     ) -> None:
         self.engine = engine
@@ -82,6 +85,7 @@ class AdminActionService:
         self.budget_preview_callback = budget_preview_callback
         self.budget_update_callback = budget_update_callback
         self.model_promote_callback = model_promote_callback
+        self.workflow_jobs = workflow_jobs
         self.ledger = ledger
 
     def propose(
@@ -407,6 +411,8 @@ class AdminActionService:
                 "last_error": event["last_error"],
                 "automatic_execution": False,
             }
+        if action_type == "workflow.retry_exhausted":
+            return self.workflow_jobs.retry_preview(target_id)
         summaries = {
             "runtime.pause": "Pause all new shadow exposure",
             "runtime.resume": "Resume eligible shadow exposure",
@@ -428,6 +434,9 @@ class AdminActionService:
                 "Activate a new shared virtual-account risk revision"
             ),
             "outbox.requeue_dead": "Requeue one dead event for bounded delivery retry",
+            "workflow.retry_exhausted": (
+                "Authorize one additional attempt for an exhausted workflow stage"
+            ),
             "code_change.open": "Queue an isolated, scoped code-change session",
             "code_change.approve_commit": "Approve a tested diff for local commit",
         }
@@ -579,6 +588,12 @@ class AdminActionService:
             if self.ledger is None:
                 raise ValueError("Event ledger is unavailable")
             return self.ledger.requeue_dead(target_id)
+        if action_type == "workflow.retry_exhausted":
+            return self.workflow_jobs.retry_exhausted(
+                target_id,
+                requested_by=confirmed_by,
+                reason=reason,
+            )
         if action_type == "code_change.open":
             return self.code_changes.open(
                 request=str(parameters["request"]),

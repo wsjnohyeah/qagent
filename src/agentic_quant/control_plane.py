@@ -875,7 +875,14 @@ class SystemObjectStore:
                 ("as_of", "training_data_cutoff", "created_at"),
             )
             model_row = connection.execute(
-                select(ml_models, ml_training_runs.c.sample_count)
+                select(
+                    ml_models,
+                    ml_training_runs.c.sample_count,
+                    ml_training_runs.c.fold_count,
+                    ml_training_runs.c.embargo_bars,
+                    ml_training_runs.c.dataset_sha256,
+                    ml_training_runs.c.training_contract_sha256,
+                )
                 .join(
                     ml_training_runs,
                     ml_training_runs.c.training_run_id
@@ -900,7 +907,18 @@ class SystemObjectStore:
                     "model_version": raw_model["model_version"],
                     "kind": raw_model["kind"],
                     "sample_count": raw_model["sample_count"],
+                    "fold_count": raw_model["fold_count"],
+                    "embargo_bars": raw_model["embargo_bars"],
                     "metrics": raw_model["metrics_json"],
+                    "calibration": raw_model["calibration_json"],
+                    "drift": raw_model["drift_json"],
+                    "promotion_assessment": raw_model[
+                        "promotion_assessment_json"
+                    ],
+                    "dataset_sha256": raw_model["dataset_sha256"],
+                    "training_contract_sha256": raw_model[
+                        "training_contract_sha256"
+                    ],
                     "training_data_cutoff": raw_model["training_data_cutoff"],
                 }
             forecast = {

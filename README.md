@@ -129,11 +129,14 @@ risk revision invalidates prior execution certificates until exact validation is
 The autonomous coordinator persists an hourly, per-symbol nine-stage DAG from full-window,
 gap-repaired market data and refreshed Alpaca News through feature/ML/LLM research,
 constrained generation, exact validation, and human-gated shadow readiness. It resumes
-incomplete groups across hour boundaries without repeating completed parents. Validation
-reuse requires both the exact execution contract and the actual market-data/window fingerprint.
+retryable groups across hour boundaries without repeating completed parents; exhausted stages
+are explicit and require a confirmed one-attempt retry. Validation reuse requires the exact
+execution contract, market-data/window fingerprint, current promotion policy, and current
+research-search count. ML reuse separately requires the exact versioned training contract.
 Later Research LLM calls receive bounded, point-in-time summaries of already-known backtest,
-validation, Shadow, and Paper outcomes. Paid LLM stages default off, and the coordinator cannot
-promote, adopt, or submit orders.
+validation, Shadow, and Paper outcomes plus the forecast model's label, untouched-holdout
+metrics, calibration, drift, and gate status. Paid LLM stages default off, and the coordinator
+cannot promote, adopt, or submit orders.
 
 ## Commands
 
@@ -564,6 +567,7 @@ AGENTS.md                mandatory operating rules for coding/deployment agents
 - `POST /v1/paper/probe` — authenticated, read-only Alpaca Paper connectivity check
 - `GET /v1/runtime/controls` and confirmation-gated pipeline controls
 - `GET /v1/outbox/dead` and confirmation-gated single-event dead-letter requeue
+- confirmation-gated `workflow.retry_exhausted` for one additional durable-stage attempt
 - `GET /v1/code-changes` and tested-candidate intake
 
 All non-health interaction is locked behind the single administrator session when
@@ -597,7 +601,9 @@ non-destructive archive verification are provided by `infra/deploy/backup_vps.sh
 `infra/deploy/verify_backup.sh`; `infra/deploy/restore_drill_vps.sh` exercises an isolated
 disposable restore without touching production. Off-site retention and an executed restore
 drill remain operator gates. The detailed North Star comparison is in
-`docs/PRE_DEPLOY_NORTH_STAR_REVIEW_2026-09-06.md`.
+`docs/PRE_DEPLOY_NORTH_STAR_REVIEW_2026-09-06.md`; the later cache, recovery, and coherent
+Paper reconciliation audit is dispositioned in
+`docs/REVIEW_REMEDIATION_DE4C3D0_2026-09-07.md`.
 
 The source repository is [wsjnohyeah/qagent](https://github.com/wsjnohyeah/qagent), with
 local `main` tracking `origin/main`.

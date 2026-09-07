@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import insert, select
 
 from agentic_quant.api import create_app
+from agentic_quant.coordinator_runtime import ResearchCoordinatorHandler
 from agentic_quant.control_plane import SystemObjectStore
 from agentic_quant.database import shadow_trade_plans, validation_reports
 from agentic_quant.domain import BacktestCostModel, StockBar
@@ -19,14 +20,20 @@ from agentic_quant.market_calendar import MarketSessionClock
 from agentic_quant.market_store import MarketDataStore
 from agentic_quant.migrations import upgrade_database
 from agentic_quant.research_store import ResearchStore, _canonical_hash
-from agentic_quant.research import default_strategy_spec, research_code_sha256
+from agentic_quant.research import (
+    PointInTimeFeatureBuilder,
+    default_strategy_spec,
+    research_code_sha256,
+)
 from agentic_quant.validation import (
+    DEFAULT_PROMOTION_GATE_POLICY,
     PromotionGatePolicy,
     WalkForwardValidator,
     assess_research_gate,
     continuous_oos_equity_and_drawdown,
     combinatorial_purged_diagnostics,
     deflated_sharpe_diagnostics,
+    promotion_policy_sha256,
     validation_execution_contract,
     validation_input_fingerprint,
 )
@@ -136,8 +143,13 @@ def _seed_eligible_report(
                 embargo_bars=1,
                 aggregate_metrics={},
                 regime_metrics={},
-                robustness_metrics={},
-                gate_assessment={"eligible_for_human_review": True},
+                robustness_metrics={"selection_search_trial_count": 1},
+                gate_assessment={
+                    "eligible_for_human_review": True,
+                    "policy_sha256": promotion_policy_sha256(
+                        DEFAULT_PROMOTION_GATE_POLICY
+                    ),
+                },
                 report_hash="a" * 64,
                 code_git_sha="test-fixture-only",
                 created_at=datetime.now(UTC),
@@ -336,6 +348,7 @@ def test_real_static_validation_can_reach_adoption_and_shadow_start(
         restrictions=RestrictionRegistry.from_yaml(
             settings.restricted_securities_path
         ),
+        promotion_policy=permissive_test_policy,
     )
     shadow.initialize_virtual_account()
     adoption = shadow.adopt_strategy(
@@ -352,6 +365,110 @@ def test_real_static_validation_can_reach_adoption_and_shadow_start(
     )
     assert adoption["status"] == "ADOPTED_FOR_SHADOW"
     assert deployment["status"] == "ACTIVE"
+
+
+def test_validation_cache_and_adoption_require_current_gate_assessment(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    market = MarketDataStore(ledger.engine)
+    store = ResearchStore(ledger.engine)
+    bars = _regime_bars(count=120)
+    market.insert_bars(bars, raw_object_id="TEST_RAW")
+    spec = store.record_strategy_spec(
+        default_strategy_spec(
+            "momentum",
+            timeframe="1Day",
+            code_sha256=research_code_sha256(),
+        )
+    )
+    permissive = PromotionGatePolicy(
+        version="research_gate@0.2.1",
+        minimum_oos_folds=4,
+        minimum_candidate_count=3,
+        minimum_regime_count=1,
+        maximum_probability_of_backtest_overfitting=Decimal("1"),
+        minimum_deflated_sharpe_probability=Decimal("0"),
+        minimum_positive_oos_fold_rate=Decimal("0"),
+        maximum_allowed_drawdown=Decimal("-1"),
+    )
+    restrictions = RestrictionRegistry.from_yaml(
+        settings.restricted_securities_path
+    )
+    objects = SystemObjectStore(ledger.engine, ledger)
+    objects.ensure_defaults()
+    shadow = ShadowRuntime(
+        ledger.engine,
+        store,
+        objects,
+        risk_policy=RiskPolicy.from_yaml(settings.risk_policy_path),
+        restrictions=restrictions,
+        promotion_policy=permissive,
+    )
+    shadow.initialize_virtual_account()
+    handler = ResearchCoordinatorHandler.__new__(ResearchCoordinatorHandler)
+    handler.settings = settings
+    handler.ledger = ledger
+    handler.research = store
+    handler.shadow = shadow
+    handler.restrictions = restrictions
+    context = {
+        "symbol": "AAPL",
+        "timeframe": "1Day",
+        "as_of": bars[-1].available_from.isoformat(),
+        "strategy_spec_id": spec.strategy_spec_id,
+    }
+    with patch(
+        "agentic_quant.coordinator_runtime.load_promotion_gate_policy",
+        return_value=permissive,
+    ):
+        first = asyncio.run(handler._validate_strategy(context))
+    assert first["eligible_for_human_review"] is True
+
+    snapshot = PointInTimeFeatureBuilder(store).build(
+        symbol="AAPL",
+        timeframe="1Day",
+        as_of=bars[-1].available_from,
+        bars=bars,
+    )
+    for index in range(5):
+        store.create_generation_attempt(
+            generation_attempt_id=uuid7(),
+            feature_snapshot_id=snapshot.feature_snapshot_id,
+            analysis_id=f"trial-analysis-{index}",
+            forecast_id=f"trial-forecast-{index}",
+            provider=None,
+        )
+    with pytest.raises(ValueError, match="research search count"):
+        shadow.adoption_preview(
+            strategy_spec_id=spec.strategy_spec_id,
+            validation_report_id=str(first["validation_report_id"]),
+        )
+    with patch(
+        "agentic_quant.coordinator_runtime.load_promotion_gate_policy",
+        return_value=permissive,
+    ):
+        after_trials = asyncio.run(handler._validate_strategy(context))
+    assert after_trials["outcome"] == "COMPLETED"
+    assert after_trials["validation_report_id"] != first["validation_report_id"]
+
+    stricter = permissive.model_copy(
+        update={"version": "research_gate@0.2.2", "minimum_oos_folds": 12}
+    )
+    shadow._promotion_policy = stricter
+    with pytest.raises(ValueError, match="promotion policy"):
+        shadow.adoption_preview(
+            strategy_spec_id=spec.strategy_spec_id,
+            validation_report_id=str(after_trials["validation_report_id"]),
+        )
+    with patch(
+        "agentic_quant.coordinator_runtime.load_promotion_gate_policy",
+        return_value=stricter,
+    ):
+        after_policy = asyncio.run(handler._validate_strategy(context))
+    assert after_policy["outcome"] == "COMPLETED"
+    assert after_policy["eligible_for_human_review"] is False
 
 
 def test_shadow_adoption_rejects_unsupported_minute_execution(

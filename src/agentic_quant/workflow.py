@@ -8,7 +8,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Engine, func, or_, select, update
+from sqlalchemy import Engine, case, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -74,8 +74,13 @@ class WorkflowJobStore:
         job_type_prefix: str,
         exclude_group_id: str | None = None,
         limit: int = 100,
+        stale_after: timedelta = timedelta(minutes=10),
     ) -> tuple[str, ...]:
-        statement = (
+        if limit < 1:
+            return ()
+        if stale_after <= timedelta(0):
+            raise ValueError("stale_after must be positive")
+        groups = (
             select(
                 workflow_jobs.c.job_group_id,
                 func.min(workflow_jobs.c.created_at).label("first_created_at"),
@@ -86,14 +91,86 @@ class WorkflowJobStore:
             )
             .group_by(workflow_jobs.c.job_group_id)
             .order_by(func.min(workflow_jobs.c.created_at).asc())
-            .limit(limit)
         )
         if exclude_group_id is not None:
-            statement = statement.where(
+            groups = groups.where(
                 workflow_jobs.c.job_group_id != exclude_group_id
             )
+        selected: list[str] = []
+        offset = 0
+        batch_size = max(100, limit * 2)
+        stale_before = datetime.now(UTC) - stale_after
         with self.engine.connect() as connection:
-            return tuple(str(row.job_group_id) for row in connection.execute(statement))
+            while len(selected) < limit:
+                batch = tuple(
+                    str(row.job_group_id)
+                    for row in connection.execute(
+                        groups.offset(offset).limit(batch_size)
+                    )
+                )
+                if not batch:
+                    break
+                rows = connection.execute(
+                    select(workflow_jobs)
+                    .where(workflow_jobs.c.job_group_id.in_(batch))
+                    .order_by(
+                        workflow_jobs.c.job_group_id.asc(),
+                        workflow_jobs.c.partition_key.asc(),
+                    )
+                ).all()
+                jobs_by_group: dict[str, list[WorkflowJob]] = {
+                    group_id: [] for group_id in batch
+                }
+                for row in rows:
+                    job = self._from_row(dict(row._mapping))
+                    jobs_by_group[job.job_group_id].append(job)
+                for group_id in batch:
+                    jobs = jobs_by_group[group_id]
+                    by_id = {job.workflow_job_id: job for job in jobs}
+                    recoverable = False
+                    for job in jobs:
+                        dependencies_complete = all(
+                            by_id[dependency_id].status
+                            == WorkflowJobStatus.COMPLETED
+                            for dependency_id in job.dependency_job_ids
+                            if dependency_id in by_id
+                        ) and all(
+                            dependency_id in by_id
+                            for dependency_id in job.dependency_job_ids
+                        )
+                        retryable = (
+                            job.status
+                            in {
+                                WorkflowJobStatus.PENDING,
+                                WorkflowJobStatus.FAILED,
+                            }
+                            and job.attempt_count < job.max_attempts
+                            and dependencies_complete
+                        )
+                        stale_running = (
+                            job.status == WorkflowJobStatus.RUNNING
+                            and (
+                                (
+                                    job.lease_expires_at is not None
+                                    and job.lease_expires_at <= datetime.now(UTC)
+                                )
+                                or (
+                                    job.lease_expires_at is None
+                                    and job.updated_at < stale_before
+                                )
+                            )
+                        )
+                        if retryable or stale_running:
+                            recoverable = True
+                            break
+                    if recoverable:
+                        selected.append(group_id)
+                        if len(selected) >= limit:
+                            break
+                offset += len(batch)
+                if len(batch) < batch_size:
+                    break
+        return tuple(selected)
 
     def requeue_stale(
         self,
@@ -119,7 +196,14 @@ class WorkflowJobStore:
                     )
                 )
                 .values(
-                    status=WorkflowJobStatus.PENDING.value,
+                    status=case(
+                        (
+                            workflow_jobs.c.attempt_count
+                            >= workflow_jobs.c.max_attempts,
+                            WorkflowJobStatus.EXHAUSTED.value,
+                        ),
+                        else_=WorkflowJobStatus.PENDING.value,
+                    ),
                     error_code="worker_restarted",
                     lease_owner=None,
                     lease_token=None,
@@ -275,6 +359,21 @@ class WorkflowJobStore:
     ) -> None:
         now = datetime.now(UTC)
         with self.engine.begin() as connection:
+            active = connection.execute(
+                select(
+                    workflow_jobs.c.attempt_count,
+                    workflow_jobs.c.max_attempts,
+                ).where(
+                    (workflow_jobs.c.workflow_job_id == workflow_job_id)
+                    & (workflow_jobs.c.status == WorkflowJobStatus.RUNNING.value)
+                    & (workflow_jobs.c.lease_owner == worker_id)
+                    & (workflow_jobs.c.lease_token == lease_token)
+                    & (workflow_jobs.c.lease_expires_at > now)
+                )
+            ).one_or_none()
+            if active is None:
+                raise ValueError("Workflow failure requires the active lease owner")
+            exhausted = int(active.attempt_count) >= int(active.max_attempts)
             updated = connection.execute(
                 update(workflow_jobs)
                 .where(
@@ -285,7 +384,11 @@ class WorkflowJobStore:
                     & (workflow_jobs.c.lease_expires_at > now)
                 )
                 .values(
-                    status=WorkflowJobStatus.FAILED.value,
+                    status=(
+                        WorkflowJobStatus.EXHAUSTED.value
+                        if exhausted
+                        else WorkflowJobStatus.FAILED.value
+                    ),
                     error_code=error_code[:120],
                     lease_owner=None,
                     lease_token=None,
@@ -297,7 +400,11 @@ class WorkflowJobStore:
             raise ValueError("Workflow failure requires the active lease owner")
         self._emit(
             workflow_job_id,
-            "workflow.job.failed.v1",
+            (
+                "workflow.job.exhausted.v1"
+                if exhausted
+                else "workflow.job.failed.v1"
+            ),
             payload={"error_code": error_code[:120]},
         )
 
@@ -335,6 +442,79 @@ class WorkflowJobStore:
                 for row in connection.execute(statement)
             ]
 
+    def retry_preview(self, workflow_job_id: str) -> dict[str, Any]:
+        jobs = self.jobs_by_ids((workflow_job_id,))
+        if not jobs:
+            raise ValueError("Workflow job not found")
+        job = jobs[0]
+        exhausted = job.status == WorkflowJobStatus.EXHAUSTED or (
+            job.status == WorkflowJobStatus.FAILED
+            and job.attempt_count >= job.max_attempts
+        )
+        if not exhausted:
+            raise ValueError("Workflow job is not exhausted")
+        return {
+            "summary": f"Authorize one retry for {job.job_type}",
+            "workflow_job_id": workflow_job_id,
+            "job_group_id": job.job_group_id,
+            "partition_key": job.partition_key,
+            "attempt_count": job.attempt_count,
+            "next_max_attempts": job.attempt_count + 1,
+            "automatic_execution": False,
+        }
+
+    def retry_exhausted(
+        self,
+        workflow_job_id: str,
+        *,
+        requested_by: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        preview = self.retry_preview(workflow_job_id)
+        now = datetime.now(UTC)
+        with self.engine.begin() as connection:
+            result = connection.execute(
+                update(workflow_jobs)
+                .where(
+                    (workflow_jobs.c.workflow_job_id == workflow_job_id)
+                    & (
+                        (
+                            workflow_jobs.c.status
+                            == WorkflowJobStatus.EXHAUSTED.value
+                        )
+                        | (
+                            (
+                                workflow_jobs.c.status
+                                == WorkflowJobStatus.FAILED.value
+                            )
+                            & (
+                                workflow_jobs.c.attempt_count
+                                >= workflow_jobs.c.max_attempts
+                            )
+                        )
+                    )
+                )
+                .values(
+                    status=WorkflowJobStatus.PENDING.value,
+                    max_attempts=workflow_jobs.c.attempt_count + 1,
+                    error_code=None,
+                    updated_at=now,
+                )
+            )
+        if int(result.rowcount or 0) != 1:
+            raise ValueError("Workflow job changed before retry authorization")
+        self._emit(
+            workflow_job_id,
+            "workflow.job.retry_authorized.v1",
+            payload={
+                "requested_by": requested_by[:80],
+                "reason": reason[:500],
+                "previous_attempt_count": preview["attempt_count"],
+                "new_max_attempts": preview["next_max_attempts"],
+            },
+        )
+        return self.jobs_by_ids((workflow_job_id,))[0].model_dump(mode="json")
+
     def health_summary(self) -> dict[str, int]:
         with self.engine.connect() as connection:
             return {
@@ -348,6 +528,28 @@ class WorkflowJobStore:
                         select(func.count())
                         .select_from(workflow_jobs)
                         .where(workflow_jobs.c.status == WorkflowJobStatus.FAILED.value)
+                    ).scalar_one()
+                ),
+                "exhausted_workflow_jobs": int(
+                    connection.execute(
+                        select(func.count())
+                        .select_from(workflow_jobs)
+                        .where(
+                            (
+                                workflow_jobs.c.status
+                                == WorkflowJobStatus.EXHAUSTED.value
+                            )
+                            | (
+                                (
+                                    workflow_jobs.c.status
+                                    == WorkflowJobStatus.FAILED.value
+                                )
+                                & (
+                                    workflow_jobs.c.attempt_count
+                                    >= workflow_jobs.c.max_attempts
+                                )
+                            )
+                        )
                     ).scalar_one()
                 ),
             }

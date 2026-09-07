@@ -49,6 +49,9 @@ fails for existing Shadow certificates because no current validator emits the re
 - The worker cancels an unfilled or partially filled entry remainder after plan expiry. A
   nonzero broker position keeps the lifecycle open as `POSITION_OPEN_REQUIRES_EXIT`, blocks
   expansion, and requires operator resolution. Automatic close is not yet implemented.
+- Reconciliation reads the broker order first and then refreshes positions before deciding
+  lifecycle completion. A fill arriving after the tick's initial account snapshot therefore
+  cannot be misclassified as flat or become an unmanaged position on the next tick.
 - New exposure requires an active exact contract, unblocked broker account, adequate buying
   power, account floor and daily-loss headroom, per-trade and portfolio-risk headroom, no
   unmanaged positions, enabled pipeline, and resumed global switch.

@@ -11,16 +11,20 @@ created for each symbol in the governed `trading-universe` list.
 1. `collect_market_data`: incrementally ingest Alpaca `1Day` bars. A fresh production store
    starts with `COORDINATOR_INITIAL_LOOKBACK_DAYS` (default 1,826); development is still
    capped by its bounded-data setting.
-2. `materialize_features`: create idempotent point-in-time snapshots for completed bars.
-3. `train_ml`: train chronological candidates after the configured minimum sample count.
-4. `forecast_ml`: persist a forecast bound to the selected model and latest snapshot.
-5. `research_llm`: retrieve dated evidence and run the budgeted analyst only when
+2. `collect_research_evidence`: refresh bounded Alpaca News with a one-day overlap so
+   provider corrections are captured idempotently.
+3. `materialize_features`: create idempotent point-in-time snapshots for completed bars.
+4. `train_ml`: train chronological candidates after the configured minimum sample count;
+   reuse requires the exact dataset and complete versioned training contract.
+5. `forecast_ml`: persist a forecast bound to the selected model and latest snapshot.
+6. `research_llm`: retrieve dated evidence and run the budgeted analyst only when
    `COORDINATOR_PAID_RESEARCH_ENABLED=true`.
-6. `generate_strategy`: run constrained proposal plus adversarial critique; no model code or
+7. `generate_strategy`: run constrained proposal plus adversarial critique; no model code or
    sizing is accepted.
-7. `validate_strategy`: run exact-spec walk-forward validation under the current shared
-   account risk contract.
-8. `await_shadow_adoption`: report the strategy/report IDs and wait for the administrator's
+8. `validate_strategy`: run exact-spec walk-forward validation under the current shared
+   account risk contract. Cached admission also requires the current promotion policy and
+   current search-trial count.
+9. `await_shadow_adoption`: report the strategy/report IDs and wait for the administrator's
    separate `strategy.adopt` and `shadow.start` confirmations.
 
 ## Configuration
@@ -41,7 +45,9 @@ worker permits the two LLM stages. The LLM still cannot adopt or execute a strat
 Use `GET /v1/coordinator/status`, `GET /v1/workflow-jobs`, and the Pipelines page. Each job
 has dependency IDs, attempt count, owner/token lease, result, and error code. A process crash
 leaves a lease that is reclaimed after ten minutes. A provider exception marks only that
-stage failed and is retried on the next poll; completed parents are never repeated.
+stage failed and is retried on the next poll; completed parents are never repeated. A final
+failed attempt becomes `EXHAUSTED`, is skipped fairly so later groups can recover, and is
+retried only after confirmation of `workflow.retry_exhausted` in the Pipelines page.
 
 `WAITING_*` is a healthy business state. Common examples are insufficient history, missing
 credentials, paid research disabled, no accepted strategy proposal, insufficient validation

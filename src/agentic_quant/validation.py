@@ -150,6 +150,20 @@ def load_promotion_gate_policy(path: Path) -> PromotionGatePolicy:
         return PromotionGatePolicy.model_validate(yaml.safe_load(handle))
 
 
+def promotion_policy_sha256(policy: PromotionGatePolicy) -> str:
+    """Return the stable identity of every current research-admission threshold."""
+    def normalize(value: Any) -> Any:
+        if isinstance(value, Decimal):
+            return format(value.normalize(), "f")
+        if isinstance(value, dict):
+            return {key: normalize(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [normalize(item) for item in value]
+        return value
+
+    return _canonical_hash(normalize(policy.model_dump()))
+
+
 def _decimal(value: float) -> Decimal:
     return Decimal(str(round(value, 12)))
 
@@ -385,7 +399,7 @@ def assess_research_gate(
         status = "ELIGIBLE_FOR_HUMAN_REVIEW"
     return {
         "policy_version": policy.version,
-        "policy_sha256": _canonical_hash(policy.model_dump(mode="json")),
+        "policy_sha256": promotion_policy_sha256(policy),
         "status": status,
         "eligible_for_human_review": status == "ELIGIBLE_FOR_HUMAN_REVIEW",
         "automatic_promotion": False,

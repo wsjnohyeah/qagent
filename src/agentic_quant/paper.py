@@ -768,22 +768,27 @@ class PaperTradingRuntime:
                         str(order["client_order_id"])
                     )
                     if payload is not None:
+                        # Order and position snapshots must describe the same side of
+                        # the observation boundary. A fill can arrive after the
+                        # account-wide snapshot at the start of this tick.
+                        positions = await broker.fetch_positions()
+                        symbol = str(order["symbol"]).upper()
+                        position_quantity = self._position_quantity(
+                            positions,
+                            symbol=symbol,
+                        )
+                        position_quantity_by_symbol[symbol] = position_quantity
                         self._assert_lease(lease_token)
                         self._apply_broker_order(
                             str(order["paper_order_id"]),
                             payload,
                             self._now(),
-                            position_quantity=position_quantity_by_symbol.get(
-                                str(order["symbol"]).upper(), _ZERO
-                            ),
+                            position_quantity=position_quantity,
                         )
                         reconciled += 1
                         current = self._order(str(order["paper_order_id"]))
                         expires_at = _utc(current["plan_expires_at"])
                         broker_status = str(payload.get("status") or "unknown").lower()
-                        position_quantity = position_quantity_by_symbol.get(
-                            str(order["symbol"]).upper(), _ZERO
-                        )
                         if (
                             expires_at is not None
                             and expires_at <= self._now()
@@ -883,9 +888,6 @@ class PaperTradingRuntime:
                         broker,
                         order,
                         lease_token,
-                        position_quantity=position_quantity_by_symbol.get(
-                            str(order["symbol"]).upper(), _ZERO
-                        ),
                     ):
                         submitted += 1
                         buying_power -= required
@@ -932,9 +934,6 @@ class PaperTradingRuntime:
                             broker,
                             current,
                             lease_token,
-                            position_quantity=position_quantity_by_symbol.get(
-                                str(current["symbol"]).upper(), _ZERO
-                            ),
                         ):
                             submitted += 1
                             buying_power -= required
@@ -980,8 +979,6 @@ class PaperTradingRuntime:
         broker: PaperBroker,
         order: dict[str, Any],
         lease_token: str,
-        *,
-        position_quantity: Decimal,
     ) -> bool:
         order_id = str(order["paper_order_id"])
         self._increment_submission_attempt(order_id)
@@ -1004,6 +1001,12 @@ class PaperTradingRuntime:
             if terminal:
                 return False
             raise
+        self._assert_lease(lease_token)
+        positions = await broker.fetch_positions()
+        position_quantity = self._position_quantity(
+            positions,
+            symbol=str(order["symbol"]),
+        )
         self._assert_lease(lease_token)
         self._apply_broker_order(
             order_id,

@@ -115,6 +115,7 @@ class WorkflowJobStatus(StrEnum):
     RUNNING = "RUNNING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+    EXHAUSTED = "EXHAUSTED"
 
 
 class LLMProviderName(StrEnum):
@@ -462,6 +463,7 @@ class MLTrainingRun(FrozenModel):
     horizon_bars: int = Field(ge=1)
     feature_set_version: str
     dataset_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    training_contract_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     sample_count: int = Field(ge=1)
     fold_count: int = Field(ge=1)
     embargo_bars: int = Field(ge=1)

@@ -39,7 +39,7 @@
 - Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
   experiment runs, backtest trades, corporate actions, historical universe membership,
   feature parity checks, and walk-forward reports are stored through Alembic revision
-  `20260906_0030`, including exact validation contracts, shadow risk lineage, fenced workflow
+  `20260907_0031`, including exact validation and ML-training contracts, shadow risk lineage, fenced workflow
   attempts, generation-attempt audit, runtime leases, and the event outbox.
 - The Phase 3 runner provides buy-and-hold, long/cash momentum, and long/cash
   mean-reversion baselines with next-bar execution, commission, slippage, metrics, hashes,
@@ -104,6 +104,8 @@
   enrollment, deployment, plan, contract, account, restriction, buying power, and final-price
   risk. Partial entry expiry cancels the remainder, but a nonzero position remains
   `POSITION_OPEN_REQUIRES_EXIT` and blocks expansion.
+- Paper order reconciliation refreshes positions after every observed order transition and
+  submission acknowledgement, so a late partial fill cannot be closed using a stale snapshot.
 - Existing Shadow one-bar validation cannot authorize the different Paper lifecycle. Paper
   requires `alpaca_day_limit_bracket_one_session@0.1.0`; no current validator issues it, so
   Paper enrollment/submission is intentionally fail-closed. Read-only account probing and
@@ -113,11 +115,15 @@
   shadow-readiness DAG. It checks the full configured XNYS window instead of trusting only the
   latest bar, recovers older incomplete hourly groups, records `WAITING_*` business gates,
   defaults paid research off, and cannot promote/adopt/execute without human confirmation.
-  Validation reuse is bound to the exact contract plus market-data and window fingerprints.
-  Every stage honors its persisted subsystem pause control.
+  Validation reuse is bound to the exact execution/data contracts, current promotion policy,
+  and current research-search count. ML reuse is bound to dataset plus full training contract.
+  Exhausted jobs do not starve later groups and require one confirmation-gated retry. Every
+  stage honors its persisted subsystem pause control.
 - Later Research LLM calls receive a bounded, content-hashed, point-in-time outcome summary
   derived from backtests, validation reports, Shadow events, and Paper state already known at
-  the cutoff. This closes the research-feedback wiring without granting the LLM runtime power.
+  the cutoff. Forecast evidence also carries label semantics, untouched-holdout metrics,
+  calibration, drift, model gate, dataset, and training-contract identity. This closes the
+  research-feedback wiring without granting the LLM runtime power.
 - The global new-exposure pause is enforced inside the shadow tick boundary, so a manually
   confirmed tick cannot bypass the scheduler's kill switch.
 - Tactical risk evaluation now requires explicit, auditable catalyst, restriction-status,
@@ -127,11 +133,11 @@
   stop/target geometry used identically by research and shadow. Candidate/snapshot mismatches
   and future signal/feature timestamps also reject.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; local and remote `main`
-  were synchronized at `de4c3d0` before this implementation iteration.
+  were synchronized at `c534654` before this implementation iteration.
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases. A verified `main` push publishes an immutable GHCR
   commit-SHA image with matching embedded/OCI source provenance; deployment rejects mismatches.
-- The current end-to-end audit passes 144 tests, strict typing across 58 source files,
+- The current end-to-end audit passes 152 tests, strict typing across 58 source files,
   authenticated local and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, fresh schema
   upgrade/downgrade/re-upgrade checks, zero PostgreSQL schema drift, and the repository secret
   scan.
@@ -151,6 +157,10 @@
   `docs/REVIEW_REMEDIATION_C6A8020_2026-09-06.md`. Its R01–R07 counterexamples now have
   direct fixes or explicit fail-closed scope gates; the report's G01/G02/G04/G05 product and
   production-evidence work remains visible rather than being claimed complete.
+- The independent review of `de4c3d0` is dispositioned in
+  `docs/REVIEW_REMEDIATION_DE4C3D0_2026-09-07.md`. F01–F06 are fixed or independently
+  confirmed as already fixed on the later baseline. The separate Paper execution-policy and
+  automatic-exit milestone remains fail-closed rather than being relabeled as complete.
 - Phase 4 adds point-in-time document retrieval, `research_analysis@0.2.0`, exact quotation
   validation, deterministic abstention, atomic estimated-USD reservations, and Decision
   Inspector graph `ai_infrastructure_graph@0.1.0`.
@@ -263,3 +273,6 @@
   Paper lifecycle, reauthorize every POST, and keep positions open until broker-flat evidence.
 - ADR 0026: continuously repair daily data and refresh news, feed point-in-time outcomes back
   into research, publish commit-addressed images, and distinguish backup integrity from restore.
+- ADR 0027: bind validation and ML reuse to current behavior contracts, classify failed LLM
+  calls as infrastructure recovery, make workflow exhaustion explicit/fair/retryable, and use
+  coherent order-then-position Paper reconciliation.

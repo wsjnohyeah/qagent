@@ -39,6 +39,10 @@ from agentic_quant.risk import (
     RestrictionRegistry,
     RiskPolicy,
 )
+from agentic_quant.validation import (
+    load_promotion_gate_policy,
+    promotion_policy_sha256,
+)
 
 
 def test_admin_session_is_required_and_csrf_protects_writes(
@@ -522,8 +526,15 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
                 embargo_bars=1,
                 aggregate_metrics={},
                 regime_metrics={},
-                robustness_metrics={},
-                gate_assessment={"eligible_for_human_review": True},
+                robustness_metrics={"selection_search_trial_count": 1},
+                gate_assessment={
+                    "eligible_for_human_review": True,
+                    "policy_sha256": promotion_policy_sha256(
+                        load_promotion_gate_policy(
+                            settings.research_promotion_policy_path
+                        )
+                    ),
+                },
                 report_hash="a" * 64,
                 code_git_sha="test-git-sha",
                 created_at=datetime.now(UTC),
@@ -566,7 +577,7 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
                 validation_report_id=report_id,
             )
         client.app.state.shadow.risk_policy = current_policy
-        adoption = client.post(
+        adoption_response = client.post(
             "/v1/actions",
             json={
                 "action_type": "strategy.adopt",
@@ -575,7 +586,9 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
                 "parameters": {"validation_report_id": report_id},
                 "reason": "Eligible validation report reviewed by administrator",
             },
-        ).json()
+        )
+        assert adoption_response.status_code == 200, adoption_response.text
+        adoption = adoption_response.json()
         assert client.post(
             f"/v1/actions/{adoption['action_request_id']}/confirm",
             json={"confirmation_phrase": adoption["confirmation_phrase"]},

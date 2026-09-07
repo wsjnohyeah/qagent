@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
 import math
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -11,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agentic_quant.api import create_app
+from agentic_quant.coordinator_runtime import ResearchCoordinatorHandler
 from agentic_quant.document_store import DocumentStore
 from agentic_quant.domain import (
     EvidencePacket,
@@ -37,6 +40,7 @@ from agentic_quant.ml import (
     WalkForwardMLTrainer,
     load_ml_policy,
 )
+from agentic_quant.research import FEATURE_SET_VERSION
 from agentic_quant.research_store import ResearchStore
 
 
@@ -198,6 +202,14 @@ def test_walk_forward_training_calibration_drift_and_forecast(
     assert f"FORECAST:{forecast.forecast_id}" in {
         item.citation_id for item in evidence.items
     }
+    forecast_evidence = next(
+        item for item in evidence.items if item.evidence_type == "ml_forecast"
+    )
+    model_evidence = json.loads(forecast_evidence.text)["model_evidence"]
+    assert model_evidence["label"] == policy.label.model_dump(mode="json")
+    assert model_evidence["final_holdout_metrics"]["sample_count"] > 0
+    assert model_evidence["promotion_assessment"]["eligible_for_review"] is False
+    assert len(model_evidence["training_contract_sha256"]) == 64
     intelligence = IntelligenceStore(ledger.engine, ledger)
     analysis = ResearchAnalysisRecord(
         analysis_id=uuid7(),
@@ -280,6 +292,59 @@ def test_training_can_pin_one_feature_version_when_legacy_rows_remain(
     assert legacy.feature_snapshot_id not in {
         item.feature_snapshot_id for item in examples
     }
+
+
+def test_coordinator_retrains_when_ml_policy_contract_changes(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    research = ResearchStore(ledger.engine)
+    legacy = _seed_snapshots(research, count=128)
+    snapshots = tuple(
+        research.record_feature_snapshot(
+            item.model_copy(
+                update={
+                    "feature_snapshot_id": uuid7(),
+                    "feature_set_version": FEATURE_SET_VERSION,
+                }
+            )
+        )
+        for item in legacy
+    )
+    configured_policy = load_ml_policy(ROOT / "configs/ml_policy.yaml")
+    base_policy = configured_policy.model_copy(
+        update={
+            "validation": configured_policy.validation.model_copy(
+                update={"minimum_samples": 30}
+            )
+        }
+    )
+    handler = ResearchCoordinatorHandler.__new__(ResearchCoordinatorHandler)
+    handler.settings = settings
+    handler.research = research
+    handler.ml = MLStore(ledger.engine, ledger)
+    handler.ml_policy = base_policy
+    context = {"feature_snapshot_id": snapshots[-1].feature_snapshot_id}
+
+    first = asyncio.run(handler._train_ml(context))
+    handler.ml_policy = base_policy.model_copy(
+        update={
+            "version": "ml_policy@0.2.0",
+            "validation": base_policy.validation.model_copy(
+                update={"embargo_bars": base_policy.validation.embargo_bars + 1}
+            ),
+        }
+    )
+    second = asyncio.run(handler._train_ml(context))
+
+    assert first["outcome"] == "COMPLETED"
+    assert second["outcome"] == "COMPLETED"
+    assert second["training_run_id"] != first["training_run_id"]
+    runs = handler.ml.recent_training_runs(limit=2)
+    assert runs[0]["training_contract_sha256"] != runs[1][
+        "training_contract_sha256"
+    ]
 
 
 def test_ml_labels_follow_executable_bars_and_ignore_sparse_snapshot_spacing(

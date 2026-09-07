@@ -10,7 +10,7 @@ remediation passes. Alpaca Paper probing/reconciliation is present, but order au
 code-blocked until a separately validated Paper execution lifecycle exists; cloud deployment
 and statistical/elapsed production evidence remain open
 
-Current documented baseline: C035 — `Close pre-deploy North Star gaps`
+Current documented baseline: C036 — `Bind current research and recovery contracts`
 
 ## Purpose and authority
 
@@ -134,20 +134,21 @@ A Git commit cannot contain its own content-derived hash without changing that h
   and-hold benchmark is research-only. Shadow itself makes no broker call.
 - Phase 7 persists Paper enrollments, deterministic client-order intents, broker lifecycle
   events, account/position snapshots, and runtime runs through Alembic revision
-  `20260906_0030`. The only broker host is exactly `paper-api.alpaca.markets`.
+  `20260907_0031`. The only broker host is exactly `paper-api.alpaca.markets`.
 - Existing one-bar Shadow certificates cannot authorize a different Paper broker lifecycle.
   Paper requires `alpaca_day_limit_bracket_one_session@0.1.0`, which no current validator
   issues, so enrollment/submission is intentionally blocked. The adapter uses account-bound
   intents, stable client IDs, Alpaca price increments, DAY brackets, and current authorization
   before every POST. Partial-fill expiry cancels the remaining entry, but any nonzero broker
   position remains `POSITION_OPEN_REQUIRES_EXIT` and blocks new exposure. Read-only probing
-  and reconciliation remain available; automatic position exit and complete child-order
-  persistence remain open.
+  and reconciliation remain available. Reconciliation now observes an order transition before
+  refreshing the associated position, so a late partial fill cannot be closed against a stale
+  account snapshot. Automatic position exit and complete child-order persistence remain open.
 - Code modification is represented by scoped change sessions. The web process exposes no
   shell; a trusted external coding worker must produce a diff and passing test record before
   a separate local-commit approval. Push and deployment remain external actions.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; this iteration starts from
-  synchronized commit `de4c3d0`. No cloud host is configured yet.
+  synchronized commit `c534654`. No cloud host is configured yet.
 - The independent `06b6853` fix verification is mapped item-by-item in
   `docs/REVIEW_REMEDIATION_2026-09-05.md`. The deterministic F01–F11 counterexamples are
   followed by the corrections from the `56bb979` review in
@@ -157,6 +158,10 @@ A Git commit cannot contain its own content-derived hash without changing that h
   `docs/REVIEW_REMEDIATION_C6A8020_2026-09-06.md`. Its Paper authorization, price, lifecycle,
   coordinator rollover, Shadow cutoff, minute-scope, and validation-cache counterexamples now
   have explicit fixes or fail-closed gates.
+- The independent `de4c3d0` review is dispositioned in
+  `docs/REVIEW_REMEDIATION_DE4C3D0_2026-09-07.md`. Its six reproduced cache, recovery,
+  data-window, and Paper reconciliation findings are fixed or verified fixed on the later
+  baseline without weakening the separate Paper execution-profile gate.
 - Tactical risk calls now require a typed external context covering catalyst applicability,
   known restriction status, liquidity, market-data health, macro-calendar knowledge, nearest
   major macro event, event-strategy approval, and duplicate intent. Unknown or unsafe facts
@@ -173,13 +178,20 @@ A Git commit cannot contain its own content-derived hash without changing that h
   features, ML training, forecast, Research LLM, constrained strategy generation, exact
   validation, and human-gated Shadow readiness. Completed stages are not repeated after
   restart. Data/budget/human prerequisites are explicit `WAITING_*` outcomes; infrastructure
-  failures use fenced bounded retries. Older incomplete hourly groups are consumed before
-  current work. Validation reuse requires the full execution contract plus the exact market-
-  data/window fingerprint. Non-daily coordinator requests now fail closed.
+  failures use fenced bounded retries. `EXHAUSTED` stages no longer occupy the recovery window;
+  an administrator can confirm exactly one additional attempt. Older retryable hourly groups
+  are consumed before current work. Validation reuse requires the full execution contract,
+  exact market-data/window fingerprint, semantic current promotion-policy hash, and current
+  research-search count. Non-daily coordinator requests now fail closed.
 - Research retrieval adds `research_outcome_feedback@0.1.0` when prior results exist. It is a
   bounded, content-hashed summary of backtests, validations, Shadow events, and Paper records
   whose durable timestamps are no later than the new analysis cutoff. The resulting evidence
   is stored in the analysis bundle and can be cited; it grants no execution authority.
+- ML training reuse requires both the point-in-time dataset hash and a versioned full training
+  contract covering policy, features, labels, horizon, algorithms, calibration/purging, and
+  selection behavior. Forecast evidence supplied to Research LLM also includes final-holdout
+  metrics, calibration, drift, model gate, and both data/contract identities. A failed provider
+  invocation remains infrastructure failure and cannot become a cached research rejection.
 - Static exact-spec validation now has a subject-specific gate: multi-candidate breadth and
   PBO are N/A rather than impossible requirements, while folds, regimes, drawdown, positive
   OOS rate and Deflated Sharpe remain enforced. Deflated Sharpe uses the recorded market-
@@ -281,6 +293,10 @@ Development service ports bind only to loopback. The local Compose credentials a
   authenticated local and Docker doctors, repository secret scan, image rebuild with an
   explicit dirty-development revision marker, and PostgreSQL Alembic zero-drift. The clean
   pushed image receives the exact commit SHA in CI. No Paper order was sent.
+- C036 local release gate passes 152 tests, Flake8, strict mypy across 58 source files,
+  authenticated local and Docker doctors, repository secret scan, browser JavaScript parsing,
+  PostgreSQL Alembic zero-drift at `20260907_0031`, and a fresh SQLite
+  upgrade/downgrade/re-upgrade cycle. PostgreSQL still contains zero Paper orders.
 - The current local PostgreSQL Strategy registry contains nine historical deterministic
   baseline versions and no hybrid ML + LLM strategy yet. The revised UI now states this
   explicitly instead of implying missing lineage; a hybrid lineage will appear only after a
@@ -305,9 +321,9 @@ Development service ports bind only to loopback. The local Compose credentials a
 - Phase 2 fixtures verify primary/secondary source distinction, correction-version retention, SEC filing and XBRL normalization, IR feed parsing, and cross-document catalyst deduplication.
 - Alpaca REST results are now normalized to the internal half-open `[start, end)` contract;
   `market_data_quality@0.2.0` rejects out-of-window rows and live gap seeds use only 1Min bars.
-- Alembic migrations through `20260906_0030` own the Phase 3D/4/5/6/7 schema, including exact
-  validation contracts, shadow decision lineage, fenced workflow/runtime leases, the event
-  outbox, and strategy-generation attempt audit.
+- Alembic migrations through `20260907_0031` own the Phase 3D/4/5/6/7 schema, including exact
+  validation and ML-training contracts, shadow decision lineage, fenced workflow/runtime
+  leases, the event outbox, and strategy-generation attempt audit.
 - `make research-smoke`: passed with 100 deterministic daily bars, three immutable baseline
   experiments, nonzero cost modeling, matching offline/online feature hashes, and ordered
   event-driven portfolio ledgers. Stored counts accumulate safely in the persistent ignored
@@ -837,7 +853,7 @@ year or more of data.
 | ML training/registry | `src/agentic_quant/ml.py`, `configs/ml_policy.yaml` | PIT labels, logistic/stump walk-forward, calibration, drift, JSON registry, forecasts |
 | Strategy generator | `src/agentic_quant/strategy_generation.py` | evidence/forecast-bound LLM generation, adversarial critique, constrained research DSL |
 | Runtime worker | `src/agentic_quant/worker.py` | supervised shadow and autonomous research schedulers with persistent heartbeats |
-| Schema migrations | `migrations/` | Alembic schema history through Paper account-binding revision `20260906_0030` |
+| Schema migrations | `migrations/` | Alembic schema history through ML training-contract revision `20260907_0031` |
 
 ## Current executable risk baseline
 
@@ -2826,6 +2842,67 @@ position-exit lifecycle. No Paper order was used as a build test.
     pushed commit's CI/GHCR job passes. Remaining pre-bootstrap items require operator-owned
     infrastructure inputs. Paper remains code-blocked until its matching validator and exit
     lifecycle exist.
+
+### D041 — Current admission, training, and recovery state are separate contracts
+
+- Date: 2026-09-07 PDT.
+- The `de4c3d0` review demonstrated that immutable historical results were being conflated
+  with current eligibility: validation reuse omitted the current promotion policy and search
+  breadth, while ML reuse omitted its behavior-bearing training policy.
+- Decision: retain historical reports unchanged, but require current semantic policy/search
+  identity for a new Shadow adoption. ML cache identity is dataset plus a separately versioned
+  training contract; changing embargo, labels, feature policy, algorithms, calibration, or
+  selection behavior cannot return the old run.
+- Decision: a failed LLM invocation is infrastructure failure and remains retryable; it is not
+  a Research LLM `REJECTED` judgment. Valid ABSTAIN and completed schema-invalid responses
+  remain distinguishable.
+- Decision: final workflow failure is explicit `EXHAUSTED`, excluded from the fair recovery
+  queue, and grants only one extra attempt through an audited administrator confirmation.
+- Decision: Paper lifecycle state is computed from an order observation followed by a fresh
+  position observation. This closes the confirmed snapshot race without changing the separate
+  Paper-compatible execution-policy gate.
+- Formal record: ADR 0027 and
+  `docs/REVIEW_REMEDIATION_DE4C3D0_2026-09-07.md`.
+
+### C036 — `Bind current research and recovery contracts`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-07 PDT.
+- User intent: assess the independent `de4c3d0` review against the latest main branch, repair
+  every still-reproducible correctness issue, and keep the system honest about deployment and
+  Paper readiness.
+- Scope:
+  - Bound validation cache reuse and new Shadow adoption to the current semantic promotion
+    policy and research-search count while preserving historical reports.
+  - Added Alembic `20260907_0031` and a complete ML training-contract hash; legacy runs cannot
+    satisfy a current cache lookup after policy or trainer behavior changes.
+  - Separated failed provider invocations from model research rejection and prevented legacy
+    failed-invocation analyses from being reused.
+  - Made recovery fair by selecting each group's first incomplete stage, introduced explicit
+    `EXHAUSTED` status, health visibility, and a confirmation-gated one-attempt retry.
+  - Re-read broker positions after order observations and submission acknowledgements before
+    deciding Paper lifecycle completion.
+  - Added model quality/gate/label/drift/training-contract evidence to Research LLM inputs and
+    the human-readable Strategy UI.
+  - Added the review disposition, ADR 0027, and updated operator documentation.
+- Architecture/decision impact:
+  - Historical evidence remains append-only, while eligibility is explicitly current-state.
+    Dataset identity and behavior-policy identity are no longer conflated.
+  - Workflow liveness now distinguishes a retryable failure from a terminal exhausted stage.
+  - The separately validated Paper profile and automatic exit lifecycle remain an explicit
+    later milestone; no certificate was renamed and no order path was enabled.
+- Validation:
+  - `make release-check` passed: 152 tests, Flake8, strict mypy across 58 source files,
+    authenticated local doctor, repository secret scan, Docker rebuild/doctor, and PostgreSQL
+    Alembic zero-drift at `20260907_0031`.
+  - A fresh SQLite database passed base-to-head upgrade, downgrade to `20260906_0030`,
+    re-upgrade, and schema-drift checks. The browser JavaScript parsed successfully; the
+    rebuilt local image is labeled `c534654...-dirty` pending the clean C036 commit.
+  - No paid LLM request, Alpaca Paper order, or live-money operation was executed.
+- Expected global state after commit:
+  - All F01–F06 findings in the `de4c3d0` review are fixed or confirmed fixed on current main.
+    The repository remains ready for guarded paused bootstrap; unattended Paper remains
+    fail-closed pending its distinct validated execution and exit lifecycle.
 
 ## Template for future commit entries
 

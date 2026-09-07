@@ -32,6 +32,14 @@ chronological folds and an embargo. It stores raw OOS metrics, calibrates on the
 OOS predictions, evaluates calibration on the later half, and measures PSI between older and
 newer feature distributions.
 
+Training reuse requires both the exact point-in-time dataset hash and
+`walk_forward_ml_trainer@0.2.0` contract hash. The latter covers the complete ML policy,
+feature set, label threshold/horizon, algorithms, purging/calibration method, and selection
+rule. A policy change therefore retrains instead of silently returning an older model. The
+Research LLM receives the selected model's label definition, final untouched-holdout metrics,
+calibration, drift, gate result, and both dataset/training-contract identities with each
+forecast.
+
 ## Promotion
 
 `configs/ml_policy.yaml` owns minimum sample/OOS/fold counts and ROC-AUC, Brier, ECE, and PSI

@@ -5,6 +5,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import insert
@@ -15,6 +16,7 @@ from agentic_quant.domain import (
     EvidencePacket,
     EvidenceReference,
     LLMProviderName,
+    LLMInvocationStatus,
     LLMUsage,
     LLMWorkload,
     PointInTimeFeatureSnapshot,
@@ -338,6 +340,52 @@ def test_unknown_citation_rejects_llm_output(
     assert record.status == ResearchAnalysisStatus.REJECTED
     assert record.analysis is None
     assert record.rejection_reason == "structured_output_validation_failed"
+
+
+def test_failed_llm_invocation_is_not_cached_as_research_rejection(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    research = ResearchStore(ledger.engine)
+    documents = DocumentStore(ledger.engine)
+    feature = _feature(research)
+    documents.upsert_document(
+        _document(
+            body="Known before cutoff",
+            ingested_at=AS_OF - timedelta(hours=1),
+        ),
+        "RAW_OLD",
+    )
+    bundle = ResearchEvidenceRetriever(documents).retrieve(
+        feature_snapshot=feature,
+        as_of=AS_OF,
+    )
+
+    class FailedGateway:
+        calls = 0
+
+        async def complete(self, request):  # type: ignore[no-untyped-def]
+            del request
+            self.calls += 1
+            return SimpleNamespace(
+                invocation_id=uuid7(),
+                status=LLMInvocationStatus.FAILED,
+                error_code="upstream_transport_error",
+                output_text=None,
+            )
+
+    gateway = FailedGateway()
+    analyst = EvidenceBoundResearchAnalyst(  # type: ignore[arg-type]
+        gateway,
+        IntelligenceStore(ledger.engine),
+    )
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="upstream_transport_error"):
+            asyncio.run(analyst.analyze(bundle))
+
+    assert gateway.calls == 2
+    assert analyst.store.health_summary()["research_analyses"] == 0
 
 
 def test_citation_id_does_not_authorize_a_contradictory_claim(

@@ -902,6 +902,7 @@ ml_training_runs = Table(
     Column("horizon_bars", Integer, nullable=False),
     Column("feature_set_version", String(80), nullable=False),
     Column("dataset_sha256", String(64), nullable=False, index=True),
+    Column("training_contract_sha256", String(64), nullable=False, index=True),
     Column("sample_count", Integer, nullable=False),
     Column("fold_count", Integer, nullable=False),
     Column("embargo_bars", Integer, nullable=False),
