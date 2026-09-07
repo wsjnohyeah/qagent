@@ -3405,6 +3405,30 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: correction to C046 production status reporting found during its
   post-deploy authenticated verification.
 
+### C048 — `Retry incomplete coordinator cycles promptly`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-07 PDT.
+- User intent: finish all safe production work, activate formal research, Shadow, and Alpaca
+  Paper, then repeatedly review and correct the deployed result.
+- Scope:
+  - Added an early one-minute scheduler retry whenever either the current coordinator cycle or
+    an older backlog cycle is incomplete; the normal completed-cycle scan cadence stays hourly.
+  - Added regressions for incomplete current cycles, incomplete backlog cycles, and the normal
+    all-complete hourly path.
+  - Documented the lease-recovery timing in the setup and production deployment guides.
+- Architecture/decision impact:
+  - Lease fencing and the existing 15-minute ownership period remain unchanged. After a process
+    replacement, the new coordinator now observes and reclaims an expired lease promptly rather
+    than waiting as long as an additional hour.
+- Validation: focused coordinator/Control Center tests, Flake8, and strict mypy pass. The full
+  release gate, GitHub Actions, immutable-image deploy, and production recovery evidence are
+  required before this correction is considered deployed.
+- Expected global state after commit: source contains the production-discovered recovery fix;
+  production remains on C047 until CI publishes this exact commit.
+- Corrections/follow-ups: record the final immutable rollout and production research outcome in
+  the next entry.
+
 ## Template for future commit entries
 
 Copy this section before making a commit:

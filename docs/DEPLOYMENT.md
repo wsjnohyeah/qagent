@@ -152,7 +152,9 @@ deploy script still performs its own immediate, blocking heartbeat gates during 
 
 The coordinator validates the complete configured daily window on each cycle and repairs
 internal as well as trailing XNYS-session gaps. It then refreshes bounded Alpaca News before
-feature/ML/LLM work. Paid LLM research remains a separate switch.
+feature/ML/LLM work. Its normal scan cadence remains hourly, but an incomplete current or
+backlog cycle is rechecked every minute so an expired worker lease is promptly reclaimed.
+Paid LLM research remains a separate switch.
 
 Never copy the development SQLite database or local object-store directory into production.
 The cloud coordinator backfills and derives its own data, feature, model, validation, and

@@ -101,6 +101,19 @@ from agentic_quant.validation import WalkForwardValidator, load_promotion_gate_p
 from agentic_quant.workflow import WorkflowJobStore
 
 
+COORDINATOR_INCOMPLETE_RETRY_SECONDS = 60
+
+
+def _coordinator_next_delay(
+    configured_delay: int,
+    result: dict[str, Any],
+) -> int:
+    summaries = (result, *tuple(result.get("backlog_groups", ())))
+    if any(not bool(summary.get("completed")) for summary in summaries):
+        return min(configured_delay, COORDINATOR_INCOMPLETE_RETRY_SECONDS)
+    return configured_delay
+
+
 class OperatorCommand(BaseModel):
     reason: str = Field(min_length=3, max_length=500)
 
@@ -763,6 +776,7 @@ def create_app(
                                 as_of=datetime.now(UTC),
                                 universe_scan_id=universe_scan_id,
                             )
+                            delay = _coordinator_next_delay(delay, result)
                             actions.record_pipeline_heartbeat(
                                 pipeline="coordinator",
                                 status="IDLE",

@@ -129,8 +129,9 @@ risk revision invalidates prior execution certificates until exact validation is
 The autonomous coordinator persists an hourly, per-symbol nine-stage DAG from full-window,
 gap-repaired market data and refreshed Alpaca News through feature/ML/LLM research,
 constrained generation, exact validation, and human-gated shadow readiness. It resumes
-retryable groups across hour boundaries without repeating completed parents; exhausted stages
-are explicit and require a confirmed one-attempt retry. Validation reuse requires the exact
+retryable groups without repeating completed parents, and rechecks incomplete cycles every
+minute rather than leaving an expired worker lease until the next hourly cycle. Exhausted
+stages are explicit and require a confirmed one-attempt retry. Validation reuse requires the exact
 execution contract, market-data/window fingerprint, current promotion policy, and current
 research-search count. ML reuse separately requires the exact versioned training contract.
 Later Research LLM calls receive bounded, point-in-time summaries of already-known backtest,

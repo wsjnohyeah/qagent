@@ -10,7 +10,7 @@ import pytest
 from pydantic import SecretStr
 from sqlalchemy import insert, select, update
 
-from agentic_quant.api import create_app
+from agentic_quant.api import _coordinator_next_delay, create_app
 from agentic_quant.config import Settings
 from agentic_quant.database import (
     admin_sessions,
@@ -389,6 +389,30 @@ def test_coordinator_honors_stage_specific_pipeline_pause(
         )
         assert evidence["result"]["outcome"] == "WAITING_PIPELINE_PAUSED"
         assert evidence["result"]["paused_pipelines"] == ["documents"]
+
+
+def test_coordinator_rechecks_incomplete_cycles_before_hourly_poll() -> None:
+    assert _coordinator_next_delay(3_600, {"completed": False}) == 60
+    assert (
+        _coordinator_next_delay(
+            3_600,
+            {
+                "completed": True,
+                "backlog_groups": [{"completed": False}],
+            },
+        )
+        == 60
+    )
+    assert (
+        _coordinator_next_delay(
+            3_600,
+            {
+                "completed": True,
+                "backlog_groups": [{"completed": True}],
+            },
+        )
+        == 3_600
+    )
 
 
 def test_production_rejects_plaintext_admin_password() -> None:

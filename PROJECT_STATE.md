@@ -136,6 +136,8 @@
   shadow-readiness DAG. It checks the full configured XNYS window instead of trusting only the
   latest bar, recovers older incomplete hourly groups, records `WAITING_*` business gates,
   defaults paid research off, and cannot promote/adopt/execute without human confirmation.
+  Incomplete current or backlog cycles are rechecked every minute, so an expired worker lease
+  is reclaimed promptly instead of waiting for the next hourly scan cadence.
   Validation reuse is bound to the exact execution/data contracts, current promotion policy,
   and current research-search count. ML reuse is bound to dataset plus full training contract.
   Exhausted jobs do not starve later groups and require one confirmation-gated retry. Every
