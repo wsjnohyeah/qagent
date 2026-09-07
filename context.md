@@ -10,7 +10,7 @@ present, but order authorization remains code-blocked until a separately validat
 execution lifecycle exists; paid research, off-site backup/alerting, and statistical/elapsed
 production evidence remain open
 
-Current documented baseline: C043 — `Invalidate stale scanner pool authority`
+Current documented baseline: C044 — `Use post-suspension research boundaries`
 
 ## Purpose and authority
 
@@ -3246,6 +3246,47 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Expected global state after commit:
   - Source closes the stale-revision edge case before the autonomous pool is activated in
     production; production remains unchanged on C039.
+- Corrections/follow-ups: none.
+
+### D046 — Extended suspensions define a new research segment only with strong evidence
+
+- Date: 2026-09-07 PDT.
+- The real NBIS retry passed provider normalization but correctly exposed 43 missing sessions
+  between 622 zero-volume placeholders and resumed positive-volume trading.
+- Decision: recognize a post-suspension research boundary only after a fully exhausted provider
+  probe, at least 20 missing exchange sessions, 20 immediately preceding zero-volume bars, a
+  positive-volume resumed bar, and strict completeness after resumption.
+- Feature materialization and exact validation must use only the verified current segment.
+  Raw/normalized older history remains preserved, while ordinary gaps continue to fail closed.
+- Formal record: ADR 0032.
+
+### C044 — `Use post-suspension research boundaries`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-07 PDT.
+- User intent: finish and production-verify the autonomous broad-market workflow rather than
+  accepting a superficially healthy deployment.
+- Scope:
+  - Added deterministic detection of a fully probed extended suspension and positive-volume
+    resumption, with immutable boundary interpretation and ingestion evidence.
+  - Restricted downstream feature materialization and exact validation to the verified current
+    history segment.
+  - Added an end-to-end coordinator regression covering initial repair, strict quality pass,
+    boundary reuse without a repeated provider request, and exclusion of pre-boundary bars.
+  - Added ADR 0032 and deployment/operator guidance.
+- Architecture/decision impact:
+  - A provider-observed current segment is not a corporate-identity claim. It is a conservative
+    operational scope that prevents old/halted observations from contaminating current research.
+- Validation:
+  - The focused reliable-workflow suite passes. A bounded real NBIS probe identifies
+    `2024-10-21` as the resumed boundary; all 470 later bars pass strict completeness with zero
+    missing intervals and zero zero-volume warnings.
+  - `make release-check` passed: Flake8, strict mypy across 59 source files, all 165 tests,
+    authenticated local doctor, secret scan, Docker rebuild/doctor, and PostgreSQL Alembic
+    zero-drift at `20260907_0031`.
+- Expected global state after commit:
+  - Source is ready for CI and a corrective immutable deployment. Production remains on C043;
+    NBIS jobs are safely retryable and cannot progress past failed data quality until correction.
 - Corrections/follow-ups: none.
 
 ## Template for future commit entries

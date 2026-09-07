@@ -193,6 +193,9 @@ Verify and record:
 - Inspect newly listed candidates for a completed first market-data stage with an immutable
   `history_boundary_event_id`. Pre-listing sessions may be outside that verified window, but
   any missing session at or after `verified_window_start` must still fail data quality.
+- For a renamed or resumed symbol, an accepted boundary must say
+  `PROVIDER_OBSERVED_POST_SUSPENSION_START`; verify the long zero-volume precursor, exhausted
+  missing interval, positive-volume resumed bar, and a clean post-boundary quality report.
 - Before enabling Paper, `POST /v1/paper/probe` succeeds read-only and the returned account
   identity, cash/equity, and positions match the dedicated Alpaca Paper account. No order is
   submitted as a deployment health check.

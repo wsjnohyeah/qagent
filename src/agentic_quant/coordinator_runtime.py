@@ -18,6 +18,7 @@ from agentic_quant.domain import (
     BacktestCostModel,
     EventEnvelope,
     ResearchAnalysisStatus,
+    StockBar,
     WorkflowJob,
 )
 from agentic_quant.ids import stable_uuid
@@ -63,6 +64,7 @@ from agentic_quant.validation import (
 
 
 MARKET_HISTORY_BOUNDARY_EVENT = "market.history.boundary.observed.v1"
+MINIMUM_SUSPENSION_SESSIONS = 20
 
 
 def daily_bar_gap_windows(
@@ -113,6 +115,69 @@ def daily_bar_gap_windows(
         )
         windows.append((window_start, window_end))
     return tuple(windows)
+
+
+def resumed_daily_history_start(
+    *,
+    bars: tuple[StockBar, ...],
+    start: datetime,
+    end: datetime,
+    calendar_name: str = "XNYS",
+    minimum_suspension_sessions: int = MINIMUM_SUSPENSION_SESSIONS,
+) -> datetime | None:
+    """Find a provider-evidenced current segment after an extended suspension.
+
+    A missing interval alone remains a data-quality failure. It is considered a security
+    inactivity boundary only when it spans the configured minimum, is immediately preceded
+    by the same number of explicit zero-volume provider bars, and is followed by a traded bar.
+    """
+    if minimum_suspension_sessions < 1:
+        raise ValueError("Suspension boundary requires at least one session")
+    if start.tzinfo is None or end.tzinfo is None:
+        raise ValueError("Suspension-boundary timestamps must be timezone-aware")
+    calendar = exchange_calendars.get_calendar(calendar_name)
+    sessions = tuple(
+        session.date()
+        for session in calendar.sessions_in_range(
+            start.astimezone(UTC).date().isoformat(),
+            end.astimezone(UTC).date().isoformat(),
+        )
+        if calendar.session_close(session).to_pydatetime() < end.astimezone(UTC)
+    )
+    bars_by_date = {item.event_time.astimezone(UTC).date(): item for item in bars}
+    missing_indexes = [
+        index for index, session_date in enumerate(sessions)
+        if session_date not in bars_by_date
+    ]
+    groups: list[list[int]] = []
+    for index in missing_indexes:
+        if not groups or index != groups[-1][-1] + 1:
+            groups.append([index])
+        else:
+            groups[-1].append(index)
+    candidate: datetime | None = None
+    for group in groups:
+        if (
+            len(group) < minimum_suspension_sessions
+            or group[0] < minimum_suspension_sessions
+            or group[-1] + 1 >= len(sessions)
+        ):
+            continue
+        prior_dates = sessions[
+            group[0] - minimum_suspension_sessions : group[0]
+        ]
+        if any(
+            bars_by_date.get(session_date) is None
+            or bars_by_date[session_date].volume != 0
+            for session_date in prior_dates
+        ):
+            continue
+        resumed_date = sessions[group[-1] + 1]
+        resumed_bar = bars_by_date.get(resumed_date)
+        if resumed_bar is None or resumed_bar.volume <= 0:
+            continue
+        candidate = datetime.combine(resumed_date, time.min, tzinfo=UTC)
+    return candidate
 
 
 class ResearchCoordinatorHandler:
@@ -198,6 +263,7 @@ class ResearchCoordinatorHandler:
         observed_start: datetime,
         observed_at: datetime,
         ingestion_run_ids: list[str],
+        interpretation: str = "PROVIDER_OBSERVED_HISTORY_START",
     ) -> str:
         event_id = stable_uuid(
             "market-history-boundary",
@@ -230,7 +296,7 @@ class ResearchCoordinatorHandler:
                     "observed_start": observed_start.isoformat(),
                     "observed_at": observed_at.isoformat(),
                     "evidence_ingestion_run_ids": ingestion_run_ids,
-                    "interpretation": "PROVIDER_OBSERVED_HISTORY_START",
+                    "interpretation": interpretation,
                 },
             )
         )
@@ -387,6 +453,7 @@ class ResearchCoordinatorHandler:
                 "ingestions": summaries,
             }
         boundary_event_id = known_boundary[0] if known_boundary else None
+        boundary_interpretation: str | None = None
         if known_boundary is None and windows:
             earliest = repaired[0].event_time
             if windows[0][0].date() < earliest.date():
@@ -398,6 +465,19 @@ class ResearchCoordinatorHandler:
                 repaired = tuple(
                     item for item in repaired if item.event_time >= coverage_start
                 )
+                boundary_interpretation = "PROVIDER_OBSERVED_HISTORY_START"
+        resumed_start = resumed_daily_history_start(
+            bars=repaired,
+            start=coverage_start,
+            end=as_of,
+            calendar_name=self.settings.market_calendar,
+        )
+        if resumed_start is not None and resumed_start > coverage_start:
+            coverage_start = resumed_start
+            repaired = tuple(
+                item for item in repaired if item.event_time >= coverage_start
+            )
+            boundary_interpretation = "PROVIDER_OBSERVED_POST_SUSPENSION_START"
         quality = MarketDataQualityService(
             self.market.engine,
             self.ledger,
@@ -410,7 +490,7 @@ class ResearchCoordinatorHandler:
             expected_start=coverage_start,
             expected_end=as_of,
         )
-        if known_boundary is None and coverage_start > desired_start:
+        if boundary_interpretation is not None:
             boundary_event_id = self._record_history_boundary(
                 symbol=symbol,
                 timeframe=timeframe,
@@ -420,6 +500,7 @@ class ResearchCoordinatorHandler:
                 ingestion_run_ids=[
                     str(item["ingestion_run_id"]) for item in summaries
                 ],
+                interpretation=boundary_interpretation,
             )
         return {
             "outcome": "COMPLETED",
@@ -483,11 +564,7 @@ class ResearchCoordinatorHandler:
 
     async def _materialize_features(self, context: dict[str, Any]) -> dict[str, Any]:
         as_of = datetime.fromisoformat(str(context["as_of"]))
-        bars = self.research.load_bars(
-            symbol=str(context["symbol"]),
-            timeframe=str(context["timeframe"]),
-            as_of_end=as_of,
-        )
+        bars = self._verified_research_bars(context=context, as_of=as_of)
         if len(bars) < 21:
             return {
                 "outcome": "WAITING_MORE_HISTORY",
@@ -712,11 +789,7 @@ class ResearchCoordinatorHandler:
         if spec is None:
             return {"outcome": "WAITING_STRATEGY_SPEC"}
         as_of = datetime.fromisoformat(str(context["as_of"]))
-        bars = self.research.load_bars(
-            symbol=str(context["symbol"]),
-            timeframe=str(context["timeframe"]),
-            as_of_end=as_of,
-        )
+        bars = self._verified_research_bars(context=context, as_of=as_of)
         if len(bars) < 72:
             return {
                 "outcome": "WAITING_VALIDATION_HISTORY",
@@ -826,6 +899,23 @@ class ResearchCoordinatorHandler:
                 report.gate_assessment.get("eligible_for_human_review")
             ),
         }
+
+    def _verified_research_bars(
+        self,
+        *,
+        context: dict[str, Any],
+        as_of: datetime,
+    ) -> tuple[StockBar, ...]:
+        bars = self.research.load_bars(
+            symbol=str(context["symbol"]),
+            timeframe=str(context["timeframe"]),
+            as_of_end=as_of,
+        )
+        raw_start = context.get("verified_window_start")
+        if raw_start is None:
+            return bars
+        verified_start = datetime.fromisoformat(str(raw_start)).astimezone(UTC)
+        return tuple(item for item in bars if item.event_time >= verified_start)
 
     async def _await_shadow_adoption(self, context: dict[str, Any]) -> dict[str, Any]:
         if not context.get("validation_report_id"):

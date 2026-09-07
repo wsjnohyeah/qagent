@@ -24,6 +24,7 @@ from agentic_quant.coordinator import AutonomousCoordinator, COORDINATOR_STAGES
 from agentic_quant.coordinator_runtime import (
     ResearchCoordinatorHandler,
     daily_bar_gap_windows,
+    resumed_daily_history_start,
 )
 from agentic_quant.database import event_outbox, workflow_jobs
 from agentic_quant.domain import (
@@ -44,6 +45,7 @@ from agentic_quant.reference_data import (
     GovernedReferenceImporter,
     ReferenceDataStore,
 )
+from agentic_quant.research_store import ResearchStore
 from agentic_quant.workflow import ResumableMarketBackfill, WorkflowJobStore
 from agentic_quant.ids import uuid7
 
@@ -556,6 +558,130 @@ def test_coordinator_records_and_reuses_new_listing_history_boundary(
     ]
     assert len(boundary_events) == 1
     assert boundary_events[0]["payload"]["symbol"] == "ALAB"
+
+
+def test_coordinator_uses_current_segment_after_extended_suspension(
+    settings,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    runtime_settings = settings.model_copy(
+        update={
+            "alpaca_api_key": SecretStr("mock-key"),
+            "alpaca_api_secret": SecretStr("mock-secret"),
+            "coordinator_initial_lookback_days": 365,
+            "development_max_backfill_days": 365,
+            "deployment_environment_id": "suspension-test",
+        }
+    )
+    upgrade_database(runtime_settings.database_url)
+    ledger = EventLedger(runtime_settings.database_url)
+    market = MarketDataStore(ledger.engine)
+    complete = _daily_bars_for_gap_test(100)
+    pre_suspension = complete[:10]
+    placeholders = tuple(
+        item.model_copy(
+            update={"volume": 0, "trade_count": 0, "vwap": None}
+        )
+        for item in complete[10:35]
+    )
+    resumed = complete[60:]
+    source = tuple(
+        item.model_copy(
+            update={
+                "symbol": "NBIS",
+                "source": "alpaca",
+                "feed": runtime_settings.alpaca_stock_feed,
+            }
+        )
+        for item in (*pre_suspension, *placeholders, *resumed)
+    )
+    as_of = complete[-1].available_from + timedelta(seconds=1)
+    expected_start = datetime.combine(
+        resumed[0].event_time.date(),
+        datetime.min.time(),
+        tzinfo=UTC,
+    )
+    assert resumed_daily_history_start(
+        bars=source,
+        start=complete[0].event_time,
+        end=as_of,
+    ) == expected_start
+    requests: list[StockBarsRequest] = []
+
+    class Publisher:
+        def publish(self, **_payload):  # type: ignore[no-untyped-def]
+            return "published"
+
+        def health(self) -> bool:
+            return True
+
+    class SuspendedProvider:
+        name = "alpaca"
+
+        async def __aenter__(self):  # type: ignore[no-untyped-def]
+            return self
+
+        async def __aexit__(self, *_args):  # type: ignore[no-untyped-def]
+            return None
+
+        async def fetch_stock_bars_page(
+            self,
+            request: StockBarsRequest,
+            *,
+            page_token: str | None = None,
+        ) -> StockBarsPage:
+            del page_token
+            requests.append(request)
+            bars = tuple(
+                item
+                for item in source
+                if request.start <= item.event_time < request.end
+            )
+            return StockBarsPage(
+                provider="alpaca",
+                provider_received_at=as_of,
+                request_metadata=request.model_dump(mode="json"),
+                raw_payload={"fixture": True, "rows": len(bars)},
+                bars=bars,
+            )
+
+    handler = ResearchCoordinatorHandler.__new__(ResearchCoordinatorHandler)
+    handler.settings = runtime_settings
+    handler.ledger = ledger
+    handler.market = market
+    handler.research = ResearchStore(ledger.engine)
+    handler.archive = FileRawArchive(tmp_path / "suspension-raw")
+    handler.publisher = Publisher()
+    context = {
+        "symbol": "NBIS",
+        "timeframe": "1Day",
+        "as_of": as_of.isoformat(),
+    }
+    with patch(
+        "agentic_quant.coordinator_runtime.AlpacaMarketDataProvider",
+        return_value=SuspendedProvider(),
+    ):
+        first = asyncio.run(handler._collect_market_data(context))
+        second = asyncio.run(handler._collect_market_data(context))
+
+    assert first["outcome"] == "COMPLETED"
+    assert first["verified_window_start"] == expected_start.isoformat()
+    assert second["outcome"] == "UP_TO_DATE"
+    assert len(requests) == 1
+    boundary = next(
+        event
+        for event in ledger.recent(limit=500)
+        if event["event_id"] == first["history_boundary_event_id"]
+    )
+    assert boundary["payload"]["interpretation"] == (
+        "PROVIDER_OBSERVED_POST_SUSPENSION_START"
+    )
+    verified = handler._verified_research_bars(
+        context={**context, "verified_window_start": first["verified_window_start"]},
+        as_of=as_of,
+    )
+    assert len(verified) == len(resumed)
+    assert all(item.event_time >= expected_start for item in verified)
 
 
 def test_autonomous_coordinator_rejects_unsupported_timeframe(

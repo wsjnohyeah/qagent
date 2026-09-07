@@ -144,6 +144,11 @@ strictly validates every session from that boundary forward. Expanding the reque
 beyond the recorded probe forces a new query; internal/trailing gaps still fail closed, and
 insufficient post-listing history still stops at the existing research gates.
 
+An extended suspension is handled separately and more strictly: only a 20-session-or-longer
+missing interval preceded by at least 20 explicit zero-volume provider bars and followed by a
+positive-volume bar may establish a post-resumption research boundary. The complete resumed
+segment must pass normal quality checks, and only that segment feeds features and validation.
+
 An optional bounded market scanner now supplies that per-symbol DAG. Each hour it merges
 Alpaca most-active and mover feeds with a reviewed 83-symbol theme catalog and the Focus
 Watchlist, applies deterministic price/liquidity/restriction/benchmark filters, and keeps at

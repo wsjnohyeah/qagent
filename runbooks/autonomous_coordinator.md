@@ -30,7 +30,9 @@ confirmations still apply, and neither candidate nor pool membership can submit 
    starts with `COORDINATOR_INITIAL_LOOKBACK_DAYS` (default 1,826); development is still
    capped by its bounded-data setting. For a newly listed symbol, a fully exhausted leading-
    window probe may persist `market.history.boundary.observed.v1` and validate from the first
-   observed bar forward. This does not relax any internal or trailing gap.
+   observed bar forward. A post-suspension boundary additionally requires at least 20 missing
+   sessions, 20 immediately preceding explicit zero-volume bars, a positive-volume resumption,
+   and a fully valid resumed segment. Other internal or trailing gaps still fail.
 2. `collect_research_evidence`: refresh bounded Alpaca News with a one-day overlap so
    provider corrections are captured idempotently.
 3. `materialize_features`: create idempotent point-in-time snapshots for completed bars.
