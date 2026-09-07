@@ -454,6 +454,110 @@ def test_coordinator_retry_repairs_the_original_historical_gap(
     assert requests[1].start <= missing.event_time < requests[1].end
 
 
+def test_coordinator_records_and_reuses_new_listing_history_boundary(
+    settings,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    runtime_settings = settings.model_copy(
+        update={
+            "alpaca_api_key": SecretStr("mock-key"),
+            "alpaca_api_secret": SecretStr("mock-secret"),
+            "coordinator_initial_lookback_days": 365,
+            "development_max_backfill_days": 365,
+            "deployment_environment_id": "new-listing-test",
+        }
+    )
+    upgrade_database(runtime_settings.database_url)
+    ledger = EventLedger(runtime_settings.database_url)
+    market = MarketDataStore(ledger.engine)
+    source = tuple(
+        item.model_copy(
+            update={
+                "symbol": "ALAB",
+                "source": "alpaca",
+                "feed": runtime_settings.alpaca_stock_feed,
+            }
+        )
+        for item in _daily_bars_for_gap_test(35)
+    )
+    as_of = source[-1].available_from + timedelta(seconds=1)
+    requests: list[StockBarsRequest] = []
+
+    class Publisher:
+        def publish(self, **_payload):  # type: ignore[no-untyped-def]
+            return "published"
+
+        def health(self) -> bool:
+            return True
+
+    class NewlyListedProvider:
+        name = "alpaca"
+
+        async def __aenter__(self):  # type: ignore[no-untyped-def]
+            return self
+
+        async def __aexit__(self, *_args):  # type: ignore[no-untyped-def]
+            return None
+
+        async def fetch_stock_bars_page(
+            self,
+            request: StockBarsRequest,
+            *,
+            page_token: str | None = None,
+        ) -> StockBarsPage:
+            del page_token
+            requests.append(request)
+            bars = tuple(
+                item
+                for item in source
+                if request.start <= item.event_time < request.end
+            )
+            return StockBarsPage(
+                provider="alpaca",
+                provider_received_at=as_of,
+                request_metadata=request.model_dump(mode="json"),
+                raw_payload={"fixture": True, "rows": len(bars)},
+                bars=bars,
+            )
+
+    handler = ResearchCoordinatorHandler.__new__(ResearchCoordinatorHandler)
+    handler.settings = runtime_settings
+    handler.ledger = ledger
+    handler.market = market
+    handler.archive = FileRawArchive(tmp_path / "new-listing-raw")
+    handler.publisher = Publisher()
+    provider = NewlyListedProvider()
+    context = {
+        "symbol": "ALAB",
+        "timeframe": "1Day",
+        "as_of": as_of.isoformat(),
+    }
+    with patch(
+        "agentic_quant.coordinator_runtime.AlpacaMarketDataProvider",
+        return_value=provider,
+    ):
+        first = asyncio.run(handler._collect_market_data(context))
+        second = asyncio.run(handler._collect_market_data(context))
+
+    assert first["outcome"] == "COMPLETED"
+    assert first["history_boundary_event_id"] is not None
+    assert first["verified_window_start"] == datetime.combine(
+        source[0].event_time.date(),
+        datetime.min.time(),
+        tzinfo=UTC,
+    ).isoformat()
+    assert second["outcome"] == "UP_TO_DATE"
+    assert second["history_boundary_event_id"] == first["history_boundary_event_id"]
+    assert len(requests) == 1
+    boundary_events = [
+        event
+        for event in ledger.recent(limit=500)
+        if event["event_type"] == "market.history.boundary.observed.v1"
+    ]
+    assert len(boundary_events) == 1
+    assert boundary_events[0]["payload"]["symbol"] == "ALAB"
+
+
 def test_autonomous_coordinator_rejects_unsupported_timeframe(
     settings,  # type: ignore[no-untyped-def]
 ) -> None:

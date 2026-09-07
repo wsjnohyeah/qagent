@@ -26,7 +26,9 @@ adoption, and adoption/start still require explicit confirmations.
 
 1. `collect_market_data`: incrementally ingest Alpaca `1Day` bars. A fresh production store
    starts with `COORDINATOR_INITIAL_LOOKBACK_DAYS` (default 1,826); development is still
-   capped by its bounded-data setting.
+   capped by its bounded-data setting. For a newly listed symbol, a fully exhausted leading-
+   window probe may persist `market.history.boundary.observed.v1` and validate from the first
+   observed bar forward. This does not relax any internal or trailing gap.
 2. `collect_research_evidence`: refresh bounded Alpaca News with a one-day overlap so
    provider corrections are captured idempotently.
 3. `materialize_features`: create idempotent point-in-time snapshots for completed bars.
@@ -73,6 +75,11 @@ retried only after confirmation of `workflow.retry_exhausted` in the Pipelines p
 credentials, paid research disabled, no accepted strategy proposal, insufficient validation
 evidence, or pending human confirmation. Do not convert these into silent success or bypass
 their gate.
+
+`WAITING_MARKET_HISTORY` means the provider returned no daily history for the requested
+symbol. A provider-observed boundary is not an IPO-date fact; inspect its cited ingestion runs
+before using it for broader historical-universe claims. Increasing the coordinator lookback
+beyond the recorded probe automatically requires a new leading-window query.
 
 Pause `coordinator` in Pipeline Controls before maintenance. The shadow runtime has a
 separate control and global new-exposure switch.

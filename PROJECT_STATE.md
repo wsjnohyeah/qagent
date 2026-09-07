@@ -135,6 +135,10 @@
   Invalid/failed LLM output falls back deterministically. The scanner can revise only the
   Candidate List; Trading Universe admission, validation, adoption, risk, and execution
   authority remain separate.
+- Newly listed scanner candidates use immutable provider-observed history boundaries after a
+  complete leading-window probe and strict validation from the first observed bar forward.
+  Lookback expansion forces a new probe; internal/trailing gaps and insufficient ML/validation
+  samples still fail closed.
 - Later Research LLM calls receive a bounded, content-hashed, point-in-time outcome summary
   derived from backtests, validation reports, Shadow events, and Paper state already known at
   the cutoff. Forecast evidence also carries label semantics, untouched-holdout metrics,
@@ -153,7 +157,7 @@
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases. A verified `main` push publishes an immutable GHCR
   commit-SHA image with matching embedded/OCI source provenance; deployment rejects mismatches.
-- The current end-to-end audit passes 161 tests, strict typing across 59 source files,
+- The current end-to-end audit passes 162 tests, strict typing across 59 source files,
   authenticated local and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, fresh schema
   upgrade/downgrade/re-upgrade checks, zero PostgreSQL schema drift, and the repository secret
   scan.
@@ -305,3 +309,5 @@
 - ADR 0028: discover a bounded dynamic research universe from market activity, theme seeds,
   and operator focus; permit only budgeted constrained LLM re-ranking; keep all execution
   authority behind the governed Trading Universe and existing deterministic/human gates.
+- ADR 0029: distinguish provider-observed listing-era history starts from internal data gaps;
+  retain immutable probe evidence and never weaken completeness after the observed boundary.

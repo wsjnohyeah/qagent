@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import Any, Callable
 
 import exchange_calendars as exchange_calendars  # type: ignore[import-untyped]
+from sqlalchemy import select
 
 from agentic_quant.archive import RawArchive
 from agentic_quant.config import AppEnvironment, Settings
@@ -12,7 +13,14 @@ from agentic_quant.control_plane import SystemObjectStore
 from agentic_quant.data_quality import MarketDataQualityService
 from agentic_quant.document_ingestion import DocumentIngestionService
 from agentic_quant.document_store import DocumentStore
-from agentic_quant.domain import BacktestCostModel, ResearchAnalysisStatus, WorkflowJob
+from agentic_quant.database import ledger_events
+from agentic_quant.domain import (
+    BacktestCostModel,
+    EventEnvelope,
+    ResearchAnalysisStatus,
+    WorkflowJob,
+)
+from agentic_quant.ids import stable_uuid
 from agentic_quant.intelligence import (
     ANALYSIS_PROMPT_VERSION,
     EvidenceBoundResearchAnalyst,
@@ -51,6 +59,9 @@ from agentic_quant.validation import (
     validation_execution_contract,
     validation_input_fingerprint,
 )
+
+
+MARKET_HISTORY_BOUNDARY_EVENT = "market.history.boundary.observed.v1"
 
 
 def daily_bar_gap_windows(
@@ -144,6 +155,86 @@ class ResearchCoordinatorHandler:
         self.pipeline_enabled = pipeline_enabled
         self.features = PointInTimeFeatureBuilder(research)
 
+    def _known_history_boundary(
+        self,
+        *,
+        symbol: str,
+        timeframe: str,
+        desired_start: datetime,
+    ) -> tuple[str, datetime] | None:
+        with self.ledger.engine.connect() as connection:
+            rows = connection.execute(
+                select(ledger_events.c.event_id, ledger_events.c.payload)
+                .where(
+                    ledger_events.c.event_type == MARKET_HISTORY_BOUNDARY_EVENT,
+                    ledger_events.c.payload["symbol"].as_string()
+                    == symbol.upper(),
+                    ledger_events.c.payload["timeframe"].as_string()
+                    == timeframe,
+                )
+                .order_by(ledger_events.c.sequence.desc())
+                .limit(100)
+            ).all()
+        for row in rows:
+            payload = dict(row.payload)
+            if (
+                payload.get("source") != "alpaca"
+                or payload.get("feed") != self.settings.alpaca_stock_feed
+            ):
+                continue
+            probed_start = datetime.fromisoformat(str(payload["probed_start"]))
+            observed_start = datetime.fromisoformat(str(payload["observed_start"]))
+            if probed_start <= desired_start:
+                return str(row.event_id), max(desired_start, observed_start)
+        return None
+
+    def _record_history_boundary(
+        self,
+        *,
+        symbol: str,
+        timeframe: str,
+        probed_start: datetime,
+        observed_start: datetime,
+        observed_at: datetime,
+        ingestion_run_ids: list[str],
+    ) -> str:
+        event_id = stable_uuid(
+            "market-history-boundary",
+            self.settings.deployment_environment_id,
+            symbol.upper(),
+            timeframe,
+            self.settings.alpaca_stock_feed,
+            probed_start.isoformat(),
+            observed_start.isoformat(),
+        )
+        self.ledger.append(
+            EventEnvelope(
+                event_id=event_id,
+                event_type=MARKET_HISTORY_BOUNDARY_EVENT,
+                event_time=observed_at,
+                emitted_at=datetime.now(UTC),
+                producer="research-coordinator",
+                correlation_id=stable_uuid(
+                    "market-history-boundary",
+                    self.settings.deployment_environment_id,
+                    symbol.upper(),
+                    timeframe,
+                ),
+                payload={
+                    "symbol": symbol.upper(),
+                    "timeframe": timeframe,
+                    "source": "alpaca",
+                    "feed": self.settings.alpaca_stock_feed,
+                    "probed_start": probed_start.isoformat(),
+                    "observed_start": observed_start.isoformat(),
+                    "observed_at": observed_at.isoformat(),
+                    "evidence_ingestion_run_ids": ingestion_run_ids,
+                    "interpretation": "PROVIDER_OBSERVED_HISTORY_START",
+                },
+            )
+        )
+        return event_id
+
     async def __call__(
         self,
         job: WorkflowJob,
@@ -202,16 +293,24 @@ class ResearchCoordinatorHandler:
             time.min,
             tzinfo=UTC,
         )
+        symbol = str(context["symbol"]).upper()
+        timeframe = str(context["timeframe"])
+        known_boundary = self._known_history_boundary(
+            symbol=symbol,
+            timeframe=timeframe,
+            desired_start=desired_start,
+        )
+        coverage_start = known_boundary[1] if known_boundary else desired_start
         stored = self.market.bars_between(
-            symbol=str(context["symbol"]),
+            symbol=symbol,
             timeframe="1Day",
-            start=desired_start,
+            start=coverage_start,
             end=as_of,
             source="alpaca",
             feed=self.settings.alpaca_stock_feed,
         )
         windows = daily_bar_gap_windows(
-            start=desired_start,
+            start=coverage_start,
             end=as_of,
             existing_event_times=tuple(item.event_time for item in stored),
             calendar_name=self.settings.market_calendar,
@@ -224,16 +323,20 @@ class ResearchCoordinatorHandler:
                 calendar_name=self.settings.market_calendar,
             ).require_bars(
                 stored,
-                symbol=str(context["symbol"]),
+                symbol=symbol,
                 timeframe="1Day",
                 code_git_sha=self.settings.source_git_sha or "UNAVAILABLE",
-                expected_start=desired_start,
+                expected_start=coverage_start,
                 expected_end=as_of,
             )
             return {
                 "outcome": "UP_TO_DATE",
                 "latest_bar_event_time": latest.isoformat() if latest else None,
-                "verified_window_start": desired_start.isoformat(),
+                "requested_window_start": desired_start.isoformat(),
+                "verified_window_start": coverage_start.isoformat(),
+                "history_boundary_event_id": (
+                    known_boundary[0] if known_boundary else None
+                ),
                 "data_quality_report_id": quality.data_quality_report_id,
             }
         provider = AlpacaMarketDataProvider(
@@ -256,40 +359,75 @@ class ResearchCoordinatorHandler:
             for window_start, window_end in windows:
                 summary = await service.ingest_stock_bars(
                     StockBarsRequest(
-                        symbol=str(context["symbol"]),
+                        symbol=symbol,
                         start=window_start,
                         end=window_end,
                         timeframe="1Day",
                         feed=self.settings.alpaca_stock_feed,
                         adjustment="raw",
-                    )
+                    ),
+                    validate_quality=False,
                 )
                 summaries.append(summary.model_dump(mode="json"))
         repaired = self.market.bars_between(
-            symbol=str(context["symbol"]),
+            symbol=symbol,
             timeframe="1Day",
-            start=desired_start,
+            start=coverage_start,
             end=as_of,
             source="alpaca",
             feed=self.settings.alpaca_stock_feed,
         )
+        if not repaired:
+            return {
+                "outcome": "WAITING_MARKET_HISTORY",
+                "requested_window_start": desired_start.isoformat(),
+                "verified_window_start": None,
+                "gap_windows_repaired": len(windows),
+                "ingestions": summaries,
+            }
+        boundary_event_id = known_boundary[0] if known_boundary else None
+        if known_boundary is None and windows:
+            earliest = repaired[0].event_time
+            if windows[0][0].date() < earliest.date():
+                coverage_start = datetime.combine(
+                    earliest.date(),
+                    time.min,
+                    tzinfo=UTC,
+                )
+                repaired = tuple(
+                    item for item in repaired if item.event_time >= coverage_start
+                )
         quality = MarketDataQualityService(
             self.market.engine,
             self.ledger,
             calendar_name=self.settings.market_calendar,
         ).require_bars(
             repaired,
-            symbol=str(context["symbol"]),
+            symbol=symbol,
             timeframe="1Day",
             code_git_sha=self.settings.source_git_sha or "UNAVAILABLE",
-            expected_start=desired_start,
+            expected_start=coverage_start,
             expected_end=as_of,
         )
+        if known_boundary is None and coverage_start > desired_start:
+            boundary_event_id = self._record_history_boundary(
+                symbol=symbol,
+                timeframe=timeframe,
+                probed_start=desired_start,
+                observed_start=coverage_start,
+                observed_at=as_of,
+                ingestion_run_ids=[
+                    str(item["ingestion_run_id"]) for item in summaries
+                ],
+            )
         return {
             "outcome": "COMPLETED",
             "gap_windows_repaired": len(windows),
             "ingestions": summaries,
             "data_quality_report_id": quality.data_quality_report_id,
+            "requested_window_start": desired_start.isoformat(),
+            "verified_window_start": coverage_start.isoformat(),
+            "history_boundary_event_id": boundary_event_id,
         }
 
     async def _collect_research_evidence(

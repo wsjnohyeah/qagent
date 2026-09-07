@@ -48,10 +48,20 @@ class MarketDataIngestionService:
             calendar_name=calendar_name,
         )
 
-    async def ingest_stock_bars(self, request: StockBarsRequest) -> IngestionSummary:
+    async def ingest_stock_bars(
+        self,
+        request: StockBarsRequest,
+        *,
+        validate_quality: bool = True,
+    ) -> IngestionSummary:
         requested_at = datetime.now(UTC)
         run_id = uuid7()
-        request_metadata = request.model_dump(mode="json")
+        request_metadata = {
+            **request.model_dump(mode="json"),
+            "quality_validation": (
+                "IMMEDIATE" if validate_quality else "DEFERRED_TO_COORDINATOR_WINDOW"
+            ),
+        }
         data_type = f"stock_bars_{request.timeframe.casefold()}"
         self.store.start_run(
             ingestion_run_id=run_id,
@@ -118,14 +128,15 @@ class MarketDataIngestionService:
                 source=self.provider.name,
                 feed=request.feed,
             )
-            self.data_quality.require_bars(
-                stored_bars,
-                symbol=request.symbol,
-                timeframe=request.timeframe,
-                code_git_sha=self.code_git_sha,
-                expected_start=request.start,
-                expected_end=request.end,
-            )
+            if validate_quality:
+                self.data_quality.require_bars(
+                    stored_bars,
+                    symbol=request.symbol,
+                    timeframe=request.timeframe,
+                    code_git_sha=self.code_git_sha,
+                    expected_start=request.start,
+                    expected_end=request.end,
+                )
         except Exception as exc:
             self.store.finish_run(
                 ingestion_run_id=run_id,

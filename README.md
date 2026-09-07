@@ -138,6 +138,12 @@ validation, Shadow, and Paper outcomes plus the forecast model's label, untouche
 metrics, calibration, drift, and gate status. Paid LLM stages default off, and the coordinator
 cannot promote, adopt, or submit orders.
 
+Newly listed symbols do not fabricate pre-listing gaps. After a complete leading-window
+provider probe, the coordinator records an immutable provider-observed history boundary and
+strictly validates every session from that boundary forward. Expanding the requested lookback
+beyond the recorded probe forces a new query; internal/trailing gaps still fail closed, and
+insufficient post-listing history still stops at the existing research gates.
+
 An optional bounded market scanner now supplies that per-symbol DAG. Each hour it merges
 Alpaca most-active and mover feeds with a reviewed 83-symbol theme catalog and the Focus
 Watchlist, applies deterministic price/liquidity/restriction/benchmark filters, and keeps at
@@ -460,7 +466,7 @@ produce a diff and passing test record before a separate commit approval can be 
 See `runbooks/control_center.md`, `runbooks/shadow_runtime.md`, ADR 0017, and ADR 0018.
 Coordinator operation is documented in `runbooks/autonomous_coordinator.md`; shared-account
 and environment-isolation decisions are recorded in ADR 0022; dynamic discovery is recorded
-in ADR 0028. Subject-aware validation and
+in ADR 0028. Provider-observed history starts are governed by ADR 0029. Subject-aware validation and
 open-price execution review are recorded in ADR 0023. The independent review of
 `3b3926e` and its current disposition are recorded in
 `docs/REVIEW_REMEDIATION_3B3926E_2026-09-06.md`.

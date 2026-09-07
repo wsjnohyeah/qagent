@@ -10,7 +10,7 @@ present, but order authorization remains code-blocked until a separately validat
 execution lifecycle exists; paid research, off-site backup/alerting, and statistical/elapsed
 production evidence remain open
 
-Current documented baseline: C038 — `Add bounded dynamic market discovery`
+Current documented baseline: C039 — `Handle newly listed research histories`
 
 ## Purpose and authority
 
@@ -196,6 +196,10 @@ A Git commit cannot contain its own content-derived hash without changing that h
   Each coordinator job retains the immutable scan ID. The dynamic Candidate List has no
   execution authority; a name must still enter the governed Trading Universe before Shadow
   adoption can be offered.
+- A full leading-window provider probe may establish an immutable provider-observed history
+  boundary for a newly listed symbol. Completeness remains strict from the first observed bar
+  onward, internal/trailing gaps still fail, and an expanded earlier lookback forces another
+  probe. A boundary is not treated as legal listing-date or historical-membership evidence.
 - Research retrieval adds `research_outcome_feedback@0.1.0` when prior results exist. It is a
   bounded, content-hashed summary of backtests, validations, Shadow events, and Paper records
   whose durable timestamps are no later than the new analysis cutoff. The resulting evidence
@@ -835,6 +839,7 @@ year or more of data.
 | Shared account | `src/agentic_quant/virtual_account.py` | atomic cash/risk reservations, sleeve attribution, and immutable risk revisions |
 | Research coordinator | `src/agentic_quant/coordinator.py`, `coordinator_runtime.py` | resumable nine-stage daily DAG with full-window gap repair and bounded news refresh |
 | Market scanner | `src/agentic_quant/market_scanner.py`, `configs/market_scanner.yaml` | bounded activity/theme discovery, deterministic eligibility/ranking, optional constrained LLM re-rank, immutable scan lineage |
+| History boundaries | `src/agentic_quant/coordinator_runtime.py` | immutable provider-observed starts after complete leading probes; strict post-boundary gap validation |
 | Production bootstrap | `src/agentic_quant/production_bootstrap.py`, `infra/deploy/` | immutable image provenance, environment identity, defaults, forced pause, migration/startup health, and backup verification |
 | Event ledger | `src/agentic_quant/ledger.py` | append-only SQL event storage and lineage queries |
 | Vertical slice | `src/agentic_quant/pipeline.py` | synthetic catalyst through shadow-order record |
@@ -3046,6 +3051,53 @@ lifecycle. No Paper order was used as a build or deployment test.
     Production remains on C037 until that immutable image passes CI and is explicitly deployed.
     Scanner activation will not resume new exposure, enable Paper, or enable the paid strategy-
     research stages.
+
+### D043 — New listings require an evidenced start boundary, not fabricated gaps
+
+- Date: 2026-09-07 PDT.
+- The first production dynamic scan showed that applying a five-year expected window to ALAB
+  classified its pre-listing sessions as missing. Accepting the first stored bar without a
+  full provider probe would create the opposite error by hiding a truncated download.
+- Decision: a coordinator repair may defer per-request completeness only to its assembled
+  window. After every leading gap has been queried to exhaustion, it may validate strictly
+  from the earliest returned daily bar and append an immutable provider-observed boundary
+  with the probe range and ingestion-run evidence.
+- Decision: reuse requires the old probe to begin no later than the new requested start.
+  Internal/trailing gaps remain failures, an entirely empty response waits for history, and
+  all later minimum-history/statistical gates remain unchanged.
+- Formal record: ADR 0029.
+
+### C039 — `Handle newly listed research histories`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-07 PDT.
+- User intent: complete and production-validate dynamic market discovery rather than treating
+  the first healthy deployment as sufficient.
+- Scope:
+  - Reproduced ALAB's production `collect_market_data` failure: the old five-year completeness
+    window incorrectly included exchange sessions before the company had provider history.
+  - Added deferred per-partition quality only inside the coordinator's assembled-window path,
+    immutable `market.history.boundary.observed.v1` evidence, reusable probe coverage, strict
+    post-boundary completeness, and `WAITING_MARKET_HISTORY` for a truly empty history.
+  - Added a regression proving one complete leading probe, a passing listing-era window, and
+    no repeated pre-listing download on the next coordinator cycle; documented ADR 0029.
+- Architecture/decision impact:
+  - Provider-observed history start is now explicit operational evidence, not silently treated
+    as a legal listing date or point-in-time universe-membership fact.
+  - C038's scan itself remains correct and deployed, but its first broad coordinator cycle
+    revealed this scale-dependent follow-up before the release could be considered complete.
+- Validation:
+  - `make release-check` passed: Flake8, strict mypy across 59 source files, all 162 tests,
+    authenticated local doctor, secret scan, Docker rebuild/doctor, and PostgreSQL Alembic
+    zero-drift at `20260907_0031`.
+  - The focused regression preserves failure on an internal missing session while accepting
+    only a fully probed leading pre-history interval. No paid LLM request, Paper order, or
+    live-money operation was executed for this correction.
+- Expected global state after commit:
+  - Source is ready for a second immutable CI/GHCR rollout over C038. Production remains on
+    C038 until that image passes and is deployed; the failed ALAB job remains safely retryable
+    and will be repaired under the evidenced-boundary contract afterward.
+- Corrections/follow-ups: this entry records the production-discovered correction to C038.
 
 ## Template for future commit entries
 
