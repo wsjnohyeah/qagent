@@ -246,6 +246,7 @@ def test_unauthenticated_llm_controls_fail_closed_in_production(
             "admin_username": "admin",
             "admin_password_hash": SecretStr("not-used-test-hash"),
             "session_secret": SecretStr("x" * 64),
+            "source_git_sha": "a" * 40,
         }
     )
     routes = {

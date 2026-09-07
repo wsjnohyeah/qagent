@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
+import re
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -46,6 +47,8 @@ class Settings(BaseSettings):
     coordinator_paid_research_enabled: bool = False
     coordinator_poll_seconds: int = Field(default=3_600, ge=60, le=86_400)
     coordinator_initial_lookback_days: int = Field(default=1_826, ge=30, le=3_650)
+    coordinator_document_lookback_days: int = Field(default=90, ge=1, le=365)
+    coordinator_document_max_pages: int = Field(default=10, ge=1, le=100)
     auto_migrate: bool = True
     deployment_environment_id: str = "local-development"
     database_url: str = "sqlite+pysqlite:///./work/agentic_quant.db"
@@ -114,6 +117,12 @@ class Settings(BaseSettings):
                 raise ValueError("Production requires AUTH_REQUIRED=true")
             if self.admin_password is not None:
                 raise ValueError("Production authentication requires ADMIN_PASSWORD_HASH")
+            if (
+                not self.has_immutable_source_git_sha
+            ):
+                raise ValueError(
+                    "Production requires a lowercase 40-character SOURCE_GIT_SHA"
+                )
         if self.auth_required:
             if not self.admin_username or not self.admin_username.strip():
                 raise ValueError("AUTH_REQUIRED=true requires ADMIN_USERNAME")
@@ -160,6 +169,13 @@ class Settings(BaseSettings):
         return bool(
             self.llm_meta_api_key
             and self.llm_meta_api_key.get_secret_value().strip()
+        )
+
+    @property
+    def has_immutable_source_git_sha(self) -> bool:
+        return bool(
+            self.source_git_sha
+            and re.fullmatch(r"[0-9a-f]{40}", self.source_git_sha.strip())
         )
 
     @property

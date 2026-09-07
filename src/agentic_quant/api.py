@@ -281,6 +281,11 @@ def create_app(
         and not app_settings.auth_required
     ):
         raise ValueError("Production API requires administrator authentication")
+    if (
+        app_settings.app_env == AppEnvironment.PRODUCTION
+        and not app_settings.has_immutable_source_git_sha
+    ):
+        raise ValueError("Production API requires an immutable source Git SHA")
     ledger = EventLedger(app_settings.database_url)
     document_store = DocumentStore(ledger.engine)
     research_store = ResearchStore(ledger.engine)
@@ -466,6 +471,7 @@ def create_app(
         llm_gateway,
         objects,
         shadow,
+        paper,
         actions,
         steward_system_status,
     )
@@ -525,6 +531,7 @@ def create_app(
                 ledger=ledger,
                 objects=objects,
                 market=application.state.market_store,
+                documents=document_store,
                 research=research_store,
                 ml=ml_store,
                 ml_policy=ml_policy,
@@ -535,6 +542,7 @@ def create_app(
                 restrictions=restrictions,
                 archive=archive,
                 publisher=publisher,
+                pipeline_enabled=actions.pipeline_enabled,
             ),
         )
         application.state.coordinator = coordinator
@@ -930,6 +938,7 @@ def create_app(
             "new_exposure_paused": runtime_is_paused(),
             "database": "healthy" if ledger.health() else "unhealthy",
             "phase": "phase7-paper-integration",
+            "source_git_sha": app_settings.source_git_sha or "UNAVAILABLE",
             "data_operating_scope": app_settings.data_operating_scope,
             "development_max_backfill_days": (
                 app_settings.development_max_backfill_days
@@ -987,6 +996,10 @@ def create_app(
             "sec_configured": bool(app_settings.sec_user_agent),
             "social_aggregates_enabled": app_settings.enable_social_aggregates,
         }
+
+    @application.get("/v1/outbox/dead")
+    def dead_outbox(limit: int = Query(default=100, ge=1, le=1_000)) -> list[dict[str, Any]]:
+        return ledger.outbox_entries(status="DEAD", limit=limit)
 
     @application.get("/v1/control/summary")
     def control_summary() -> dict[str, Any]:

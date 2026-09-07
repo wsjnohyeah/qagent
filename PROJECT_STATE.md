@@ -77,9 +77,10 @@
   confirmation revision. There is no operator token ceiling. Changes preserve current-period
   spend and immediately recalculate percentage usage against the new cap; the YAML project
   daily limit remains a hard cap.
-- One System Steward reads a bounded current-state snapshot, returns validated object
-  citations, persists conversations, and can propose allowlisted admin actions. It cannot
-  execute them; a separate exact confirmation is required.
+- One System Steward reads a bounded current-state snapshot, including detailed Paper account,
+  position, enrollment, order, and run state; returns validated object citations; persists
+  conversations; and can propose allowlisted admin actions. It cannot execute them; a separate
+  exact confirmation is required.
 - The persistent broker-free shadow runtime admits only the exact static strategy ID and
   execution contract covered by a gate-eligible, human-confirmed validation certificate.
   It records candidate → deterministic risk decision → approved plan → execution-price risk
@@ -107,11 +108,16 @@
   requires `alpaca_day_limit_bracket_one_session@0.1.0`; no current validator issues it, so
   Paper enrollment/submission is intentionally fail-closed. Read-only account probing and
   reconciliation remain available. The live host remains impossible.
-- A persistent hourly coordinator owns the market-data → feature → ML → forecast → Research
-  LLM → constrained strategy → exact-validation → shadow-readiness DAG. It recovers older
-  incomplete hourly groups before current work, records `WAITING_*` business gates, defaults
-  paid research off, and cannot promote/adopt/execute without human confirmation. Validation
-  reuse is bound to the exact contract plus market-data and window fingerprints.
+- A persistent hourly coordinator owns the gap-repaired market-data → refreshed Alpaca News →
+  feature → ML → forecast → Research LLM → constrained strategy → exact-validation →
+  shadow-readiness DAG. It checks the full configured XNYS window instead of trusting only the
+  latest bar, recovers older incomplete hourly groups, records `WAITING_*` business gates,
+  defaults paid research off, and cannot promote/adopt/execute without human confirmation.
+  Validation reuse is bound to the exact contract plus market-data and window fingerprints.
+  Every stage honors its persisted subsystem pause control.
+- Later Research LLM calls receive a bounded, content-hashed, point-in-time outcome summary
+  derived from backtests, validation reports, Shadow events, and Paper state already known at
+  the cutoff. This closes the research-feedback wiring without granting the LLM runtime power.
 - The global new-exposure pause is enforced inside the shadow tick boundary, so a manually
   confirmed tick cannot bypass the scheduler's kill switch.
 - Tactical risk evaluation now requires explicit, auditable catalyst, restriction-status,
@@ -121,10 +127,11 @@
   stop/target geometry used identically by research and shadow. Candidate/snapshot mismatches
   and future signal/feature timestamps also reject.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; local and remote `main`
-  were synchronized at `c4e0a34` before this implementation iteration.
+  were synchronized at `de4c3d0` before this implementation iteration.
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
-  `astral-sh/setup-uv@v10.0.1` releases.
-- The current end-to-end audit passes 138 tests, strict typing across 58 source files,
+  `astral-sh/setup-uv@v10.0.1` releases. A verified `main` push publishes an immutable GHCR
+  commit-SHA image with matching embedded/OCI source provenance; deployment rejects mismatches.
+- The current end-to-end audit passes 144 tests, strict typing across 58 source files,
   authenticated local and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, fresh schema
   upgrade/downgrade/re-upgrade checks, zero PostgreSQL schema drift, and the repository secret
   scan.
@@ -165,32 +172,41 @@
   archive is mounted on a persistent named volume.
 - Production Compose separates the authenticated API from dedicated persistent shadow and
   coordinator workers with SQL heartbeats. Workflow jobs have dependency-aware leases and ownership checks; ledger
-  events have a retryable SQL outbox with stable event IDs and dead-letter visibility.
+  events have a retryable SQL outbox with stable event IDs, payload-redacted dead-letter
+  visibility, and confirmation-gated single-event requeue.
 - Phase 6.1 data pages support dataset-specific drill-down, date grouping, pagination,
   normalized-object views, and collapsed raw payloads. Strategy pages now explicitly
   distinguish deterministic baselines from hybrid candidates and show the full point-in-time
   data → ML → Research LLM → generator → critic → exact spec → validation → shadow chain in
   readable cards; JSON is relegated to Advanced diagnostics. Pipeline jobs and quality
-  reports are individually inspectable, and coordinator cycles show all eight stage states.
+  reports are individually inspectable, and coordinator cycles show all nine stage states.
 - The guarded deploy command now migrates once, runs an idempotent production bootstrap,
   registers a non-reusable environment identity, creates account/list defaults, forces the
   global pause, and then verifies API/worker health. Development runtime data is never copied
   as production evidence.
+- VPS helpers create and structurally verify checksummed PostgreSQL plus raw-object backups.
+  Off-site copy and an isolated restore drill remain required operational evidence.
+- The detailed source/module-to-North-Star disposition is recorded in
+  `docs/PRE_DEPLOY_NORTH_STAR_REVIEW_2026-09-06.md` and ADR 0026.
 
 ## Next
 
-1. Select cloud/VPS, domain/TLS, backup/monitoring, and secret-delivery inputs; then run the
-   existing one-command bootstrap on a fresh production data plane.
+1. Select cloud/VPS, domain/TLS, off-site backup/monitoring, and secret-delivery inputs; verify
+   the exact CI-published GHCR image; then run the guarded bootstrap on a fresh production data
+   plane and perform an isolated restore drill.
 2. Run the read-only Alpaca Paper account probe in the intended environment. Before any
    enrollment or external order, build the matching Paper execution validator, nested-order
    lifecycle, and deterministic session-close position exit required by ADR 0025.
-3. Run production-scale backfill, enable paid coordinator stages only after budget review,
-   and collect Phase 5 statistical plus continuous-shadow evidence.
+3. Approve licensed corporate-action/historical-universe and primary evidence refresh inputs,
+   run production-scale backfill, enable paid coordinator stages only after budget review, and
+   collect Phase 5 statistical plus continuous-shadow evidence and ML-only versus ML+LLM
+   ablations.
 4. Continue interactive Phase 6.1 UI review with real operator navigation and refine labels;
    the Strategy lineage redesign is implemented locally and awaits operator feedback.
 5. Extend fill realism with multi-bar partial fills, order cancellation, quote-derived
    rather than configured spread, and symbol-change/delisting replay.
-6. Add operator-driven dead-letter replay and provider-lag/sequence-gap notification channels.
+6. Add an operator-selected provider-lag/sequence-gap notification channel; dead-letter replay
+   is now inspectable and confirmation-gated in the Control Center.
 
 ## Blocked
 
@@ -245,3 +261,5 @@
   risk reconciliation, and per-deployment administrator confirmation; retain no live path.
 - ADR 0025: reject Shadow certificates at the Paper boundary; require a separately validated
   Paper lifecycle, reauthorize every POST, and keep positions open until broker-flat evidence.
+- ADR 0026: continuously repair daily data and refresh news, feed point-in-time outcomes back
+  into research, publish commit-addressed images, and distinguish backup integrity from restore.

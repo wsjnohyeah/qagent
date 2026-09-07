@@ -14,10 +14,11 @@ from agentic_quant.api import create_app
 from agentic_quant.config import Settings
 from agentic_quant.database import (
     admin_sessions,
+    event_outbox,
     validation_reports,
     virtual_accounts,
 )
-from agentic_quant.domain import BacktestCostModel, StockBar
+from agentic_quant.domain import BacktestCostModel, EventEnvelope, StockBar
 from agentic_quant.domain import LLMUsage
 from agentic_quant.ids import uuid7
 from agentic_quant.ledger import EventLedger
@@ -59,6 +60,9 @@ def test_admin_session_is_required_and_csrf_protects_writes(
         assert "Alpaca paper trading" in page.text
         assert "Paper order submission is fail-closed" in page.text
         assert "Live money is impossible" in page.text
+        assert "No live-money execution" in page.text
+        assert "Source revision" in page.text
+        assert "Dead-letter recovery" in page.text
         assert client.get("/health/live").status_code == 200
         assert client.get("/v1/system/status").status_code == 401
         assert client.post(
@@ -186,6 +190,48 @@ def test_lists_are_versioned_and_admin_actions_require_exact_confirmation(
         assert cancelled.json()["status"] == "CANCELLED"
 
 
+def test_dead_outbox_requeue_is_visible_and_confirmation_gated(
+    settings: Settings,
+) -> None:
+    with TestClient(create_app(settings)) as client:
+        ledger = EventLedger(settings.database_url)
+        event = EventEnvelope(
+            event_id=uuid7(),
+            event_type="fixture.dead.v1",
+            event_time=datetime.now(UTC),
+            emitted_at=datetime.now(UTC),
+            producer="test",
+            correlation_id=uuid7(),
+            payload={"value": 1},
+        )
+        ledger.append(event)
+        with ledger.engine.begin() as connection:
+            connection.execute(
+                update(event_outbox)
+                .where(event_outbox.c.event_id == event.event_id)
+                .values(status="DEAD", attempt_count=8, last_error="RuntimeError")
+            )
+
+        assert client.get("/v1/outbox/dead").json()[0]["event_id"] == event.event_id
+        proposed = client.post(
+            "/v1/actions",
+            json={
+                "action_type": "outbox.requeue_dead",
+                "target_type": "outbox",
+                "target_id": event.event_id,
+                "parameters": {},
+                "reason": "Operator inspected the dead event",
+            },
+        ).json()
+        assert client.get("/v1/outbox/dead").json()[0]["event_id"] == event.event_id
+        confirmed = client.post(
+            f"/v1/actions/{proposed['action_request_id']}/confirm",
+            json={"confirmation_phrase": proposed["confirmation_phrase"]},
+        )
+        assert confirmed.status_code == 200
+        assert client.get("/v1/outbox/dead").json() == []
+
+
 def test_code_change_session_is_scoped_and_does_not_expose_a_shell(
     settings: Settings,
 ) -> None:
@@ -298,10 +344,45 @@ def test_concrete_coordinator_fails_closed_without_data_credentials(
             )
         )
         assert result["completed"] is True
-        assert result["business_waiting_count"] == 8
+        assert result["business_waiting_count"] == 9
         jobs = client.get("/v1/coordinator/status").json()["cycles"][0]["jobs"]
         assert jobs[0]["result"]["outcome"] == "WAITING_CREDENTIALS"
+        assert jobs[1]["result"]["outcome"] == "WAITING_CREDENTIALS"
         assert jobs[-1]["result"]["outcome"] == "WAITING_EXACT_VALIDATION"
+
+
+def test_coordinator_honors_stage_specific_pipeline_pause(
+    settings: Settings,
+) -> None:
+    with TestClient(create_app(settings)) as client:
+        proposed = client.post(
+            "/v1/actions",
+            json={
+                "action_type": "pipeline.pause",
+                "target_type": "pipeline",
+                "target_id": "documents",
+                "parameters": {},
+                "reason": "Pause evidence refresh for maintenance",
+            },
+        ).json()
+        assert client.post(
+            f"/v1/actions/{proposed['action_request_id']}/confirm",
+            json={"confirmation_phrase": proposed["confirmation_phrase"]},
+        ).status_code == 200
+        asyncio.run(
+            client.app.state.coordinator.run_once(
+                symbols=("AAPL",),
+                as_of=datetime(2026, 9, 6, 21, tzinfo=UTC),
+            )
+        )
+        jobs = client.get("/v1/coordinator/status").json()["cycles"][0]["jobs"]
+        evidence = next(
+            item
+            for item in jobs
+            if item["payload"]["stage"] == "collect_research_evidence"
+        )
+        assert evidence["result"]["outcome"] == "WAITING_PIPELINE_PAUSED"
+        assert evidence["result"]["paused_pipelines"] == ["documents"]
 
 
 def test_production_rejects_plaintext_admin_password() -> None:
@@ -719,6 +800,7 @@ def test_system_steward_cites_snapshot_and_only_proposes_actions(
     ) -> LLMProviderResult:
         assert "system_snapshot" in request.input_text
         assert "direct_user_request" in request.input_text
+        assert "paper" in request.input_text
         assert "GitHub-flavored Markdown" in request.instructions
         assert "Never put raw HTML" in request.instructions
         return LLMProviderResult(

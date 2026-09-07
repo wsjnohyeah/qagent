@@ -126,12 +126,14 @@ reservation and settles P&L once. The default `$130` per-trade and `$780` concur
 an editable, versioned starting policy—not hard-coded claims about optimal sizing. A confirmed
 risk revision invalidates prior execution certificates until exact validation is rerun.
 
-The autonomous coordinator persists an hourly, per-symbol eight-stage DAG from market-data
-collection through feature/ML/LLM research, constrained generation, exact validation, and
-human-gated shadow readiness. It resumes incomplete groups across hour boundaries without
-repeating completed parents. Validation reuse requires both the exact execution contract and
-the actual market-data/window fingerprint. Paid LLM stages default off, and the coordinator
-cannot promote, adopt, or submit orders.
+The autonomous coordinator persists an hourly, per-symbol nine-stage DAG from full-window,
+gap-repaired market data and refreshed Alpaca News through feature/ML/LLM research,
+constrained generation, exact validation, and human-gated shadow readiness. It resumes
+incomplete groups across hour boundaries without repeating completed parents. Validation
+reuse requires both the exact execution contract and the actual market-data/window fingerprint.
+Later Research LLM calls receive bounded, point-in-time summaries of already-known backtest,
+validation, Shadow, and Paper outcomes. Paid LLM stages default off, and the coordinator cannot
+promote, adopt, or submit orders.
 
 ## Commands
 
@@ -177,6 +179,8 @@ SHADOW_POLL_SECONDS=30
 PAPER_TRADING_ENABLED=false
 PAPER_POLL_SECONDS=30
 ALPACA_PAPER_BASE_URL=https://paper-api.alpaca.markets
+COORDINATOR_DOCUMENT_LOOKBACK_DAYS=90
+COORDINATOR_DOCUMENT_MAX_PAGES=10
 LLM_OPENAI_API_KEY=
 LLM_META_API_KEY=
 LLM_ROUTING_PATH=./configs/model_routing.yaml
@@ -559,6 +563,7 @@ AGENTS.md                mandatory operating rules for coding/deployment agents
 - `GET /v1/paper/enrollments`, `/v1/paper/orders`, `/v1/paper/events`, `/v1/paper/runs`
 - `POST /v1/paper/probe` — authenticated, read-only Alpaca Paper connectivity check
 - `GET /v1/runtime/controls` and confirmation-gated pipeline controls
+- `GET /v1/outbox/dead` and confirmation-gated single-event dead-letter requeue
 - `GET /v1/code-changes` and tested-candidate intake
 
 All non-health interaction is locked behind the single administrator session when
@@ -585,6 +590,14 @@ read-only production Paper account probe may proceed; the matching Paper executi
 validator/lifecycle, production-scale backfill, statistical promotion evidence, and continuous
 shadow/Paper observation remain. No Paper order has been sent as
 part of local build verification.
+
+Main-branch CI publishes an immutable GHCR commit-SHA image after all checks pass. The guarded
+deploy verifies that the image tag and embedded source revision agree. VPS backup creation and
+non-destructive archive verification are provided by `infra/deploy/backup_vps.sh` and
+`infra/deploy/verify_backup.sh`; `infra/deploy/restore_drill_vps.sh` exercises an isolated
+disposable restore without touching production. Off-site retention and an executed restore
+drill remain operator gates. The detailed North Star comparison is in
+`docs/PRE_DEPLOY_NORTH_STAR_REVIEW_2026-09-06.md`.
 
 The source repository is [wsjnohyeah/qagent](https://github.com/wsjnohyeah/qagent), with
 local `main` tracking `origin/main`.

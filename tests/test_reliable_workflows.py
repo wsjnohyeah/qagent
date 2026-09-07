@@ -14,6 +14,7 @@ from agentic_quant.data_quality import (
     inspect_market_bars,
 )
 from agentic_quant.coordinator import AutonomousCoordinator, COORDINATOR_STAGES
+from agentic_quant.coordinator_runtime import daily_bar_gap_windows
 from agentic_quant.database import event_outbox, workflow_jobs
 from agentic_quant.domain import (
     BacktestCostModel,
@@ -258,7 +259,7 @@ def test_autonomous_coordinator_resumes_failed_stage_without_repeating_parents(
     assert first["status_counts"] == {
         "PENDING": 5,
         "RUNNING": 0,
-        "COMPLETED": 2,
+        "COMPLETED": 3,
         "FAILED": 1,
     }
     second = asyncio.run(
@@ -269,6 +270,50 @@ def test_autonomous_coordinator_resumes_failed_stage_without_repeating_parents(
     assert calls.count("materialize_features") == 1
     assert calls.count("train_ml") == 2
     assert calls[-1] == COORDINATOR_STAGES[-1]
+
+
+def test_daily_gap_planner_repairs_internal_and_trailing_sessions() -> None:
+    start = datetime(2026, 8, 31, tzinfo=UTC)
+    end = datetime(2026, 9, 5, tzinfo=UTC)
+    windows = daily_bar_gap_windows(
+        start=start,
+        end=end,
+        existing_event_times=(
+            datetime(2026, 8, 31, 4, tzinfo=UTC),
+            datetime(2026, 9, 2, 4, tzinfo=UTC),
+        ),
+    )
+    assert windows == (
+        (
+            datetime(2026, 9, 1, tzinfo=UTC),
+            datetime(2026, 9, 2, tzinfo=UTC),
+        ),
+        (
+            datetime(2026, 9, 3, tzinfo=UTC),
+            datetime(2026, 9, 5, tzinfo=UTC),
+        ),
+    )
+
+
+def test_autonomous_coordinator_rejects_unsupported_timeframe(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+
+    async def handler(job, dependencies):  # type: ignore[no-untyped-def]
+        del job, dependencies
+        return {}
+
+    coordinator = AutonomousCoordinator(
+        WorkflowJobStore(EventLedger(settings.database_url).engine),
+        handler=handler,
+    )
+    with pytest.raises(ValueError, match="only 1Day"):
+        coordinator.plan(
+            symbols=("AAPL",),
+            as_of=datetime(2026, 9, 5, 22, tzinfo=UTC),
+            timeframe="1Min",
+        )
 
 
 def test_autonomous_coordinator_recovers_failed_group_after_hour_rollover(
@@ -499,6 +544,42 @@ def test_event_outbox_retries_with_stable_event_identity(
     assert second == {"published": 1, "failed": 0}
     assert publisher.calls == [event.event_id, event.event_id]
     assert ledger.outbox_health()["event_outbox_published"] == 1
+
+
+def test_dead_outbox_event_requires_explicit_requeue(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    event = EventEnvelope(
+        event_id=uuid7(),
+        event_type="fixture.dead.v1",
+        event_time=datetime.now(UTC),
+        emitted_at=datetime.now(UTC),
+        producer="test",
+        correlation_id=uuid7(),
+        payload={"value": 1},
+    )
+    ledger.append(event)
+    with ledger.engine.begin() as connection:
+        connection.execute(
+            update(event_outbox)
+            .where(event_outbox.c.event_id == event.event_id)
+            .values(
+                status="DEAD",
+                attempt_count=8,
+                last_error="RuntimeError",
+            )
+        )
+
+    dead = ledger.outbox_entries(status="DEAD")
+    assert [item["event_id"] for item in dead] == [event.event_id]
+    requeued = ledger.requeue_dead(event.event_id)
+    assert requeued["status"] == "PENDING"
+    assert requeued["attempt_count"] == 0
+    assert requeued["last_error"] is None
+    with pytest.raises(ValueError, match="Only a dead"):
+        ledger.requeue_dead(event.event_id)
 
 
 def test_governed_reference_import_is_idempotent(settings) -> None:  # type: ignore[no-untyped-def]

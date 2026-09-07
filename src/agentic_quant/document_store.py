@@ -449,6 +449,28 @@ class DocumentStore:
                 for row in connection.execute(statement)
             ]
 
+    def latest_document_published_at(
+        self,
+        *,
+        symbol: str,
+        provider: str,
+    ) -> datetime | None:
+        """Return the newest provider publication time stored for one symbol."""
+        statement = (
+            select(func.max(source_documents.c.published_at))
+            .join(
+                document_symbols,
+                document_symbols.c.document_id == source_documents.c.document_id,
+            )
+            .where(document_symbols.c.symbol == symbol.upper())
+            .where(source_documents.c.provider == provider)
+        )
+        with self.engine.connect() as connection:
+            value = connection.execute(statement).scalar_one()
+        if not isinstance(value, datetime):
+            return None
+        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
     def research_documents_as_of(
         self,
         *,

@@ -19,9 +19,10 @@ sleeve deployments retain attribution. Risk limits are versioned account revisio
 only through the existing two-step administrator confirmation flow; a revision changes the
 validation contract and therefore requires new exact validation evidence.
 
-Run research as a persistent, dependency-aware eight-stage DAG backed by `workflow_jobs`:
-market data, features, ML training, ML forecast, evidence-bound LLM analysis, constrained
-strategy generation, exact validation, and shadow-adoption readiness. Missing data, disabled
+Run research as a persistent, dependency-aware nine-stage DAG backed by `workflow_jobs`:
+gap-repaired market data, bounded document refresh, features, ML training, ML forecast,
+evidence-bound LLM analysis, constrained strategy generation, exact validation, and
+shadow-adoption readiness. Missing data, disabled
 paid research, failed statistical gates, and pending human approval are successful
 `WAITING_*` outcomes, not infrastructure failures. Infrastructure exceptions retain bounded
 attempt counts and lease fencing and resume on a later scheduler poll.
@@ -42,3 +43,6 @@ production data plane rather than copied through Git.
   all calls remain governed by per-workload USD limits.
 - Production deployment is reproducible after secrets/infrastructure inputs exist, but cloud
   uptime, backup/restore, TLS, and empirical strategy evidence cannot be certified locally.
+
+The 2026-09-06 extension from eight to nine stages is governed by ADR 0026. It adds document
+refresh and full-window gap repair without changing the human promotion boundary.

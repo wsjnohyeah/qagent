@@ -10,7 +10,7 @@ remediation passes. Alpaca Paper probing/reconciliation is present, but order au
 code-blocked until a separately validated Paper execution lifecycle exists; cloud deployment
 and statistical/elapsed production evidence remain open
 
-Current documented baseline: C034 — `Close Paper authorization and recovery gaps`
+Current documented baseline: C035 — `Close pre-deploy North Star gaps`
 
 ## Purpose and authority
 
@@ -112,8 +112,9 @@ A Git commit cannot contain its own content-derived hash without changing that h
   required; current-day spend is preserved and percentages immediately recalculate against
   the new cap.
 - One persistent System Steward receives a bounded current-state snapshot across data,
-  quality, jobs, validations, analyses, models, strategies, lists, shadow state, and admin
-  actions. It must cite supplied object IDs and may only propose allowlisted actions.
+  quality, jobs, validations, analyses, models, strategies, lists, Shadow state, detailed
+  Paper account/position/enrollment/order/run state, and admin actions. It must cite supplied
+  object IDs and may only propose allowlisted actions.
 - Sensitive operations are two-step: a proposal records parameters and preview, then expires
   after 15 minutes unless the administrator submits its exact single-use confirmation phrase.
 - The broker-free shadow runtime admits only the exact static strategy and execution contract
@@ -146,7 +147,7 @@ A Git commit cannot contain its own content-derived hash without changing that h
   shell; a trusted external coding worker must produce a diff and passing test record before
   a separate local-commit approval. Push and deployment remain external actions.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; this iteration starts from
-  synchronized commit `c4e0a34`. No cloud host is configured yet.
+  synchronized commit `de4c3d0`. No cloud host is configured yet.
 - The independent `06b6853` fix verification is mapped item-by-item in
   `docs/REVIEW_REMEDIATION_2026-09-05.md`. The deterministic F01–F11 counterexamples are
   followed by the corrections from the `56bb979` review in
@@ -167,13 +168,18 @@ A Git commit cannot contain its own content-derived hash without changing that h
   concurrent risk. These are conservative bootstrap defaults, not permanent policy. An
   `account.risk.update` action requires explicit confirmation, appends a revision, and changes
   the exact validation contract so older certificates cannot silently authorize new limits.
-- A durable autonomous research coordinator now owns eight dependency-linked stages per
-  symbol and UTC-hour cycle: market data, point-in-time features, ML training, forecast,
-  Research LLM, constrained strategy generation, exact validation, and human-gated shadow
-  readiness. Completed stages are not repeated after restart. Data/budget/human prerequisites
-  are explicit `WAITING_*` outcomes; infrastructure failures use fenced bounded retries.
-  Older incomplete hourly groups are consumed before current work. Validation reuse requires
-  the full execution contract plus the exact market-data/window fingerprint.
+- A durable autonomous research coordinator now owns nine dependency-linked stages per symbol
+  and UTC-hour cycle: full-window daily gap repair, bounded Alpaca News refresh, point-in-time
+  features, ML training, forecast, Research LLM, constrained strategy generation, exact
+  validation, and human-gated Shadow readiness. Completed stages are not repeated after
+  restart. Data/budget/human prerequisites are explicit `WAITING_*` outcomes; infrastructure
+  failures use fenced bounded retries. Older incomplete hourly groups are consumed before
+  current work. Validation reuse requires the full execution contract plus the exact market-
+  data/window fingerprint. Non-daily coordinator requests now fail closed.
+- Research retrieval adds `research_outcome_feedback@0.1.0` when prior results exist. It is a
+  bounded, content-hashed summary of backtests, validations, Shadow events, and Paper records
+  whose durable timestamps are no later than the new analysis cutoff. The resulting evidence
+  is stored in the analysis bundle and can be cited; it grants no execution authority.
 - Static exact-spec validation now has a subject-specific gate: multi-candidate breadth and
   PBO are N/A rather than impossible requirements, while folds, regimes, drawdown, positive
   OOS rate and Deflated Sharpe remain enforced. Deflated Sharpe uses the recorded market-
@@ -192,6 +198,10 @@ A Git commit cannot contain its own content-derived hash without changing that h
 - One-shot production bootstrap requires PostgreSQL/Redis, registers an immutable environment
   identity, initializes governed lists and the shared account idempotently, and forces new
   exposure paused. Development data remains local and is not treated as production evidence.
+- Verified main-branch CI now publishes an immutable GHCR commit-SHA image. Production requires
+  a 40-character source SHA, and deployment verifies the tag against the image's OCI revision
+  label while forbidding an environment override. Backup helpers capture PostgreSQL and the
+  raw-object volume together and verify their hashes/catalog structure.
 - `/health/ready` now fails with HTTP 503 when any required dependency reports false.
 
 ### Repository state
@@ -267,6 +277,10 @@ Development service ports bind only to loopback. The local Compose credentials a
   authenticated local and Docker doctors, secret scan, JavaScript compilation, PostgreSQL
   Alembic zero-drift, and fresh SQLite base-to-`20260906_0030` plus downgrade/re-upgrade.
   PostgreSQL reports migration head `20260906_0030` and zero Paper orders.
+- C035 local release gate passes 144 tests, Flake8, strict mypy across 58 source files,
+  authenticated local and Docker doctors, repository secret scan, image rebuild with an
+  explicit dirty-development revision marker, and PostgreSQL Alembic zero-drift. The clean
+  pushed image receives the exact commit SHA in CI. No Paper order was sent.
 - The current local PostgreSQL Strategy registry contains nine historical deterministic
   baseline versions and no hybrid ML + LLM strategy yet. The revised UI now states this
   explicitly instead of implying missing lineage; a hybrid lineage will appear only after a
@@ -505,6 +519,7 @@ flowchart LR
     LEDGER --> DB["SQLite local-lite / PostgreSQL Compose"]
     ALPACA["Alpaca SIP / OPRA read-only"] --> INGEST["Historical + snapshot + stream adapters"]
     SOURCES["SEC / approved IR / Alpaca News"] --> DOCINGEST["Document + facts adapters"]
+    COORD --> DOCINGEST
     DOCINGEST --> CATALYST["Entity resolution + catalyst dedup"]
     DOCINGEST --> MINIO
     DOCINGEST --> DB
@@ -529,6 +544,10 @@ flowchart LR
     BASELINE --> EXPERIMENT["Immutable experiment + trades + events"]
     EXPERIMENT --> DB
     EXPERIMENT --> LEDGER
+    EXPERIMENT --> FEEDBACK["Point-in-time outcome feedback"]
+    REPORT --> FEEDBACK
+    SHADOW --> FEEDBACK
+    FEEDBACK --> RETRIEVE
     EXPERIMENT --> VALIDATE["Rolling train / embargo / test validation"]
     VALIDATE --> REPORT["Immutable folds + regime/selection diagnostics"]
     REPORT --> DB
@@ -773,8 +792,8 @@ year or more of data.
 | IDs | `src/agentic_quant/ids.py` | RFC 9562 UUIDv7 generation |
 | Risk engine | `src/agentic_quant/risk.py` | deterministic gates and equity position sizing |
 | Shared account | `src/agentic_quant/virtual_account.py` | atomic cash/risk reservations, sleeve attribution, and immutable risk revisions |
-| Research coordinator | `src/agentic_quant/coordinator.py`, `coordinator_runtime.py` | resumable dependency DAG and concrete data/features/ML/LLM/validation stages |
-| Production bootstrap | `src/agentic_quant/production_bootstrap.py`, `infra/deploy/deploy_vps.sh` | environment identity, defaults, forced pause, migration/startup health gates |
+| Research coordinator | `src/agentic_quant/coordinator.py`, `coordinator_runtime.py` | resumable nine-stage daily DAG with full-window gap repair and bounded news refresh |
+| Production bootstrap | `src/agentic_quant/production_bootstrap.py`, `infra/deploy/` | immutable image provenance, environment identity, defaults, forced pause, migration/startup health, and backup verification |
 | Event ledger | `src/agentic_quant/ledger.py` | append-only SQL event storage and lineage queries |
 | Vertical slice | `src/agentic_quant/pipeline.py` | synthetic catalyst through shadow-order record |
 | Control API | `src/agentic_quant/api.py` | authenticated object APIs, stewardship, confirmation actions, health, research, models, Shadow, and Paper operations |
@@ -2484,17 +2503,21 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 Ordered near-term work:
 
-1. Select the VPS/cloud provider, domain/TLS, backup/monitoring, and secret-delivery inputs;
-   then execute the guarded bootstrap against a fresh production data plane.
+1. Select the VPS/cloud provider, domain/TLS, off-site backup/monitoring, and secret-delivery
+   inputs; verify the exact CI-published image; then execute the guarded bootstrap against a
+   fresh production data plane and perform an isolated restore drill.
 2. Run a read-only Alpaca Paper probe in the intended environment. Build and validate the
    separate Paper execution profile, nested-child lifecycle, and deterministic session-close
    exit before any enrollment or external order.
-3. Run production long-horizon backfill, enable paid coordinator stages only after route/USD-
-   budget review, and collect Phase 5 statistical plus continuous-shadow evidence.
+3. Approve licensed corporate-action/historical-universe and primary evidence refresh inputs,
+   run production long-horizon backfill, enable paid coordinator stages only after route/USD-
+   budget review, and collect Phase 5 statistical plus continuous-Shadow evidence and
+   controlled ML-only versus ML+LLM ablations.
 4. Continue interactive UI review and add account/coordinator affordances where operator use
    shows they are needed.
 5. Add a governed point-in-time macro-event calendar and remaining licensed data sources.
-6. Extend fill realism and add dead-letter replay plus provider-lag/sequence notifications.
+6. Extend fill realism and add an operator-selected provider-lag/sequence notification channel.
+   Dead-letter inspection and single-event requeue are now confirmation-gated.
 7. Build a labeled corpus and measure catalyst-dedup precision/recall.
 
 ## Blocked or unresolved decisions
@@ -2751,6 +2774,58 @@ position-exit lifecycle. No Paper order was used as a build test.
   - Local source is ready for a guarded, paused cloud bootstrap and read-only Paper probe. The
     first external Paper order remains code-blocked pending a matching execution validator,
     nested child-order lifecycle, and deterministic position exit. No live-money path exists.
+
+### C035 — `Close pre-deploy North Star gaps`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-06 PDT.
+- User intent: perform a fresh module-level pre-server review against the durable North Star
+  and autonomously implement every locally resolvable omission.
+- Scope:
+  - Changed autonomous daily collection from newest-bar continuation to complete configured-
+    window XNYS session reconciliation, with minimal coalesced repairs for internal and trailing
+    gaps, and rejected unsupported coordinator timeframes.
+  - Added bounded, overlapping Alpaca News refresh as the second coordinator stage so event
+    evidence no longer depends on manual commands.
+  - Added time-safe `research_outcome_feedback@0.1.0` evidence derived from prior backtests,
+    validations, Shadow events, and Paper records, closing the stored-result-to-next-analysis
+    wiring while preserving cutoff and execution boundaries.
+  - Added detailed Paper account/position/enrollment/order/run state and citations to the
+    System Steward's routed snapshot.
+  - Added payload-redacted dead-letter inspection plus an exact, confirmation-gated single-
+    event requeue action to the API, Steward, and pipeline UI.
+  - Bound every coordinator stage to its persisted market-data, documents, research, ML, or
+    LLM pipeline control; a paused subsystem now yields `WAITING_PIPELINE_PAUSED` rather than
+    continuing in the background.
+  - Corrected the Overview's obsolete “no broker order path” copy to distinguish the existing
+    gated Paper path from the invariant that no live-money path exists, and exposed the image
+    source revision there.
+  - Pinned the Python/`uv` build bases and production PostgreSQL/Redis images by digest so an
+    unchanged deployment manifest cannot silently pull different infrastructure code.
+  - Added verified-main GHCR publication, embedded source revision, production SHA validation,
+    deploy-time tag/label verification, and PostgreSQL/raw-object backup plus structural-
+    verification helpers.
+  - Updated the pipeline UI, manifest, README, deployment runbook, project state, ADR 0022,
+    added ADR 0026, and recorded the detailed review in
+    `docs/PRE_DEPLOY_NORTH_STAR_REVIEW_2026-09-06.md`.
+- Architecture/decision impact:
+  - “Continuous research” now includes both source refresh and feedback from prior outcomes;
+    those inputs remain immutable evidence, never LLM execution authority.
+  - A deployable artifact is now the verified immutable image, not merely a repository commit.
+    Backup-file integrity is distinct from a restore drill.
+  - Guarded Shadow-first bootstrap remains separable from Paper authorization and statistical
+    promotion. Licensed reference sources, cloud controls, empirical evidence, and exact Paper
+    execution parity are explicit later gates rather than falsely completed local work.
+- Validation:
+  - Targeted coordinator, Control Center, intelligence, and safety tests plus Flake8 and strict
+    mypy passed during implementation. The full release gate and final artifact checks are run
+    before commit and recorded in the handoff.
+  - No Paper order or live-money operation was executed.
+- Expected global state after commit:
+  - Local source is ready for a guarded, paused, Shadow-first server bootstrap once the exact
+    pushed commit's CI/GHCR job passes. Remaining pre-bootstrap items require operator-owned
+    infrastructure inputs. Paper remains code-blocked until its matching validator and exit
+    lifecycle exist.
 
 ## Template for future commit entries
 

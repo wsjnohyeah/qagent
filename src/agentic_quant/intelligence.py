@@ -9,10 +9,15 @@ from pydantic import ValidationError
 from sqlalchemy import Engine, func, insert, select
 
 from agentic_quant.database import (
+    experiment_runs,
     ml_forecasts,
     ml_models,
     ml_training_runs,
+    paper_order_events,
+    paper_orders,
     research_analyses,
+    shadow_events,
+    validation_reports,
 )
 from agentic_quant.document_store import DocumentStore
 from agentic_quant.domain import (
@@ -143,6 +148,13 @@ class ResearchEvidenceRetriever:
                     ),
                 )
             )
+        outcome_feedback = self._outcome_feedback_item(
+            symbol=feature_snapshot.symbol,
+            timeframe=feature_snapshot.timeframe,
+            as_of=as_of,
+        )
+        if outcome_feedback is not None:
+            items.append(outcome_feedback)
         ordered = tuple(
             sorted(items, key=lambda item: (item.evidence_type, item.citation_id))
         )
@@ -162,6 +174,127 @@ class ResearchEvidenceRetriever:
             forecast_id=forecast.forecast_id if forecast else None,
             items=ordered,
             evidence_bundle_hash=bundle_hash,
+        )
+
+    def _outcome_feedback_item(
+        self,
+        *,
+        symbol: str,
+        timeframe: str,
+        as_of: datetime,
+    ) -> ResearchEvidenceItem | None:
+        """Summarize only outcomes that were durably known by the research cutoff."""
+        with self.document_store.engine.connect() as connection:
+            experiments = [
+                dict(row._mapping)
+                for row in connection.execute(
+                    select(
+                        experiment_runs.c.experiment_run_id,
+                        experiment_runs.c.strategy_spec_id,
+                        experiment_runs.c.as_of_start,
+                        experiment_runs.c.as_of_end,
+                        experiment_runs.c.status,
+                        experiment_runs.c.metrics_json,
+                        experiment_runs.c.finished_at,
+                    )
+                    .where(experiment_runs.c.symbol == symbol.upper())
+                    .where(experiment_runs.c.timeframe == timeframe)
+                    .where(experiment_runs.c.finished_at <= as_of)
+                    .order_by(experiment_runs.c.finished_at.desc())
+                    .limit(5)
+                )
+            ]
+            validations = [
+                dict(row._mapping)
+                for row in connection.execute(
+                    select(
+                        validation_reports.c.validation_report_id,
+                        validation_reports.c.validation_subject,
+                        validation_reports.c.validated_strategy_spec_ids,
+                        validation_reports.c.aggregate_metrics,
+                        validation_reports.c.gate_assessment,
+                        validation_reports.c.created_at,
+                    )
+                    .where(validation_reports.c.symbol == symbol.upper())
+                    .where(validation_reports.c.timeframe == timeframe)
+                    .where(validation_reports.c.created_at <= as_of)
+                    .order_by(validation_reports.c.created_at.desc())
+                    .limit(3)
+                )
+            ]
+            shadow = [
+                dict(row._mapping)
+                for row in connection.execute(
+                    select(
+                        shadow_events.c.event_type,
+                        func.count().label("event_count"),
+                        func.sum(shadow_events.c.realized_pnl_delta).label(
+                            "realized_pnl"
+                        ),
+                        func.max(shadow_events.c.created_at).label("available_from"),
+                    )
+                    .where(shadow_events.c.symbol == symbol.upper())
+                    .where(shadow_events.c.event_time <= as_of)
+                    .where(shadow_events.c.created_at <= as_of)
+                    .group_by(shadow_events.c.event_type)
+                )
+            ]
+            paper = [
+                dict(row._mapping)
+                for row in connection.execute(
+                    select(
+                        paper_order_events.c.broker_status.label("status"),
+                        func.count().label("order_count"),
+                        func.sum(paper_order_events.c.filled_quantity).label(
+                            "filled_quantity"
+                        ),
+                        func.max(paper_order_events.c.created_at).label(
+                            "available_from"
+                        ),
+                    )
+                    .join(
+                        paper_orders,
+                        paper_orders.c.paper_order_id
+                        == paper_order_events.c.paper_order_id,
+                    )
+                    .where(paper_orders.c.symbol == symbol.upper())
+                    .where(paper_order_events.c.created_at <= as_of)
+                    .group_by(paper_order_events.c.broker_status)
+                )
+            ]
+        if not any((experiments, validations, shadow, paper)):
+            return None
+        payload = {
+            "schema_version": "research_outcome_feedback@0.1.0",
+            "symbol": symbol.upper(),
+            "timeframe": timeframe,
+            "as_of": as_of.isoformat(),
+            "recent_backtests": experiments,
+            "recent_validations": validations,
+            "shadow_summary": shadow,
+            "paper_summary": paper,
+        }
+        text = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+        content_sha256 = hashlib.sha256(text.encode()).hexdigest()
+        timestamps = [
+            value
+            for value in (
+                *(item.get("finished_at") for item in experiments),
+                *(item.get("created_at") for item in validations),
+                *(item.get("available_from") for item in shadow),
+                *(item.get("available_from") for item in paper),
+            )
+            if isinstance(value, datetime)
+        ]
+        available_from = max((_utc(value) for value in timestamps), default=as_of)
+        return ResearchEvidenceItem(
+            citation_id=f"OUTCOMES:{symbol.upper()}:{content_sha256[:16]}",
+            evidence_type="research_outcome_feedback",
+            event_time=available_from,
+            available_from=available_from,
+            source="research_outcome_feedback@0.1.0",
+            text=text,
+            content_sha256=content_sha256,
         )
 
     @staticmethod

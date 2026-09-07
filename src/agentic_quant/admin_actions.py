@@ -44,6 +44,7 @@ ALLOWED_ACTIONS = {
     "paper.tick",
     "paper.cancel_order",
     "account.risk.update",
+    "outbox.requeue_dead",
     "code_change.open",
     "code_change.approve_commit",
 }
@@ -393,6 +394,19 @@ class AdminActionService:
                 )
             except (KeyError, TypeError) as exc:
                 raise ValueError("Code change request and scope are required") from exc
+        if action_type == "outbox.requeue_dead":
+            if self.ledger is None:
+                raise ValueError("Event ledger is unavailable")
+            event = self.ledger.outbox_entry(target_id)
+            if event is None or event["status"] != "DEAD":
+                raise ValueError("Dead outbox event not found")
+            return {
+                "summary": f"Requeue dead event {event['event_type']}",
+                "event_id": target_id,
+                "attempt_count": event["attempt_count"],
+                "last_error": event["last_error"],
+                "automatic_execution": False,
+            }
         summaries = {
             "runtime.pause": "Pause all new shadow exposure",
             "runtime.resume": "Resume eligible shadow exposure",
@@ -413,6 +427,7 @@ class AdminActionService:
             "account.risk.update": (
                 "Activate a new shared virtual-account risk revision"
             ),
+            "outbox.requeue_dead": "Requeue one dead event for bounded delivery retry",
             "code_change.open": "Queue an isolated, scoped code-change session",
             "code_change.approve_commit": "Approve a tested diff for local commit",
         }
@@ -560,6 +575,10 @@ class AdminActionService:
             )
         if action_type == "paper.cancel_order":
             return await self.paper.cancel_order(target_id)
+        if action_type == "outbox.requeue_dead":
+            if self.ledger is None:
+                raise ValueError("Event ledger is unavailable")
+            return self.ledger.requeue_dead(target_id)
         if action_type == "code_change.open":
             return self.code_changes.open(
                 request=str(parameters["request"]),

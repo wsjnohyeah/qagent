@@ -295,6 +295,88 @@ class EventLedger:
             for status in ("pending", "publishing", "failed", "dead", "published")
         }
 
+    def outbox_entries(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        if status is not None and status not in {
+            "PENDING",
+            "PUBLISHING",
+            "FAILED",
+            "DEAD",
+            "PUBLISHED",
+        }:
+            raise ValueError("Unknown outbox status")
+        statement = select(
+            event_outbox.c.event_id,
+            event_outbox.c.event_type,
+            event_outbox.c.status,
+            event_outbox.c.attempt_count,
+            event_outbox.c.next_attempt_at,
+            event_outbox.c.last_error,
+            event_outbox.c.created_at,
+            event_outbox.c.updated_at,
+            event_outbox.c.published_at,
+        )
+        if status is not None:
+            statement = statement.where(event_outbox.c.status == status)
+        statement = statement.order_by(event_outbox.c.updated_at.desc()).limit(limit)
+        with self.engine.connect() as connection:
+            return [dict(row._mapping) for row in connection.execute(statement)]
+
+    def requeue_dead(self, event_id: str) -> dict[str, Any]:
+        """Return exactly one dead delivery to the retry queue after human approval."""
+        now = datetime.now(UTC)
+        with self.engine.begin() as connection:
+            row = connection.execute(
+                select(event_outbox).where(event_outbox.c.event_id == event_id)
+            ).one_or_none()
+            if row is None:
+                raise ValueError("Outbox event not found")
+            if row.status != "DEAD":
+                raise ValueError("Only a dead outbox event can be requeued")
+            changed = connection.execute(
+                update(event_outbox)
+                .where(
+                    (event_outbox.c.event_id == event_id)
+                    & (event_outbox.c.status == "DEAD")
+                )
+                .values(
+                    status="PENDING",
+                    attempt_count=0,
+                    lease_owner=None,
+                    lease_expires_at=None,
+                    next_attempt_at=now,
+                    last_error=None,
+                    updated_at=now,
+                    published_at=None,
+                )
+            )
+            if int(changed.rowcount or 0) != 1:
+                raise ValueError("Dead outbox event was already requeued")
+        result = self.outbox_entry(event_id)
+        assert result is not None
+        return result
+
+    def outbox_entry(self, event_id: str) -> dict[str, Any] | None:
+        with self.engine.connect() as connection:
+            result = connection.execute(
+                select(
+                    event_outbox.c.event_id,
+                    event_outbox.c.event_type,
+                    event_outbox.c.status,
+                    event_outbox.c.attempt_count,
+                    event_outbox.c.next_attempt_at,
+                    event_outbox.c.last_error,
+                    event_outbox.c.created_at,
+                    event_outbox.c.updated_at,
+                    event_outbox.c.published_at,
+                ).where(event_outbox.c.event_id == event_id)
+            ).one_or_none()
+        return dict(result._mapping) if result is not None else None
+
     def _mark_published(self, event_id: str) -> None:
         now = datetime.now(UTC)
         with self.engine.begin() as connection:

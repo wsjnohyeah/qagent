@@ -7,7 +7,9 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from sqlalchemy import insert
 
+from agentic_quant.database import validation_reports
 from agentic_quant.document_store import DocumentStore
 from agentic_quant.domain import (
     EvidencePacket,
@@ -253,6 +255,64 @@ def test_retrieval_is_point_in_time_and_analysis_is_citation_bound(
     assert budget_summary["limits"]["project_monthly"] == {
         "max_estimated_cost_usd": "200.00",
     }
+
+
+def test_retrieval_includes_only_point_in_time_outcome_feedback(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    research = ResearchStore(ledger.engine)
+    document_store = DocumentStore(ledger.engine)
+    feature = _feature(research)
+    common = {
+        "symbol": "AAPL",
+        "timeframe": "1Day",
+        "strategy_types": ["momentum"],
+        "validation_subject": "static_strategy",
+        "validated_strategy_spec_ids": {"momentum": "strategy-1"},
+        "execution_contract_json": {},
+        "execution_contract_sha256": "c" * 64,
+        "selection_metric": "sharpe_ratio",
+        "train_bars": 40,
+        "test_bars": 10,
+        "step_bars": 10,
+        "embargo_bars": 1,
+        "aggregate_metrics": {"mean_test_sharpe": "0.5"},
+        "regime_metrics": {},
+        "robustness_metrics": {},
+        "gate_assessment": {"eligible_for_human_review": False},
+        "code_git_sha": "test-sha",
+    }
+    with ledger.engine.begin() as connection:
+        connection.execute(
+            insert(validation_reports),
+            [
+                {
+                    **common,
+                    "validation_report_id": "known-report",
+                    "report_hash": "d" * 64,
+                    "created_at": AS_OF - timedelta(minutes=1),
+                },
+                {
+                    **common,
+                    "validation_report_id": "future-report",
+                    "report_hash": "e" * 64,
+                    "created_at": AS_OF + timedelta(minutes=1),
+                },
+            ],
+        )
+
+    bundle = ResearchEvidenceRetriever(document_store).retrieve(
+        feature_snapshot=feature,
+        as_of=AS_OF,
+    )
+    feedback = next(
+        item for item in bundle.items if item.evidence_type == "research_outcome_feedback"
+    )
+    assert feedback.citation_id.startswith("OUTCOMES:AAPL:")
+    assert "known-report" in feedback.text
+    assert "future-report" not in feedback.text
 
 
 def test_unknown_citation_rejects_llm_output(

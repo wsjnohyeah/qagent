@@ -57,7 +57,7 @@ alpaca-probe:
 	$(UV) run quant-alpaca probe
 
 docker-up:
-	SOURCE_GIT_SHA=$$(git rev-parse --verify HEAD) ./scripts/compose.sh up --build -d
+	SOURCE_GIT_SHA=$$(./scripts/source_revision.sh) ./scripts/compose.sh up --build -d
 
 docker-doctor:
 	./scripts/docker_doctor.sh

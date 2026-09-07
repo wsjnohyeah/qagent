@@ -38,3 +38,12 @@ The source is suitable for a paused cloud bootstrap and read-only Alpaca Paper p
 not authorized for unattended Paper submission until the separately validated Paper execution
 profile, child-order lifecycle, and deterministic position-exit behavior are implemented and
 tested.
+
+## Subsequent C035 status
+
+The later pre-deploy North Star review closes the locally actionable portions of G01 and G02:
+the coordinator repairs internal/trailing daily gaps, refreshes bounded news evidence, and
+feeds already-known backtest/validation/Shadow/Paper outcomes into later Research LLM evidence.
+Licensed corporate-action/historical-universe refresh, controlled ablation evidence, real VPS
+operations, and the Paper execution profile remain explicit gates. See
+`PRE_DEPLOY_NORTH_STAR_REVIEW_2026-09-06.md` and ADR 0026.

@@ -21,6 +21,8 @@ def bootstrap_production(settings: Settings) -> dict[str, object]:
         raise ValueError("Production bootstrap requires APP_ENV=production")
     if settings.auto_migrate:
         raise ValueError("Production bootstrap requires AUTO_MIGRATE=false")
+    if not settings.has_immutable_source_git_sha:
+        raise ValueError("Production bootstrap requires an immutable source Git SHA")
     if settings.database_url.startswith("sqlite"):
         raise ValueError("Production bootstrap requires PostgreSQL, not SQLite")
     if not settings.redis_url:

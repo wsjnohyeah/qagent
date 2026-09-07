@@ -24,7 +24,7 @@ research:
     backtest_cash_share_simulation: event_driven
     symbol_change_replay: pending_fail_closed
   backtest_engine:
-    version: event_driven_portfolio@0.2.0
+    version: event_driven_portfolio@0.4.0
     order_timing: next_bar_open
     exit_timing: declared_session_close
     max_volume_participation_default: 0.05

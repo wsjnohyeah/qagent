@@ -8,8 +8,21 @@ if [ ! -f .env.production ]; then
   echo "Refusing deployment: .env.production is missing. See docs/DEPLOYMENT.md."
   exit 1
 fi
+env_mode=$(stat -c '%a' .env.production)
+if [ "$env_mode" != "600" ]; then
+  echo "Refusing deployment: .env.production permissions must be 0600."
+  exit 1
+fi
 if ! grep -Eq '^APP_ENV=production$' .env.production; then
   echo "Refusing deployment: APP_ENV must be production."
+  exit 1
+fi
+if ! grep -Eq '^APP_IMAGE=ghcr\.io/[a-z0-9._/-]+:[0-9a-f]{40}$' .env.production; then
+  echo "Refusing deployment: APP_IMAGE must be an immutable lowercase GHCR commit-SHA tag."
+  exit 1
+fi
+if grep -Eq '^SOURCE_GIT_SHA=' .env.production; then
+  echo "Refusing deployment: SOURCE_GIT_SHA must come from the immutable image, not the environment file."
   exit 1
 fi
 if ! grep -Eq '^AUTO_MIGRATE=false$' .env.production; then
@@ -75,6 +88,15 @@ if ! awk -F= '/^SESSION_SECRET=/{if (length($2) >= 32) ok=1} END{exit !ok}' \
 fi
 
 docker compose --env-file .env.production -f compose.production.yml pull
+app_image=$(sed -n 's/^APP_IMAGE=//p' .env.production)
+expected_sha=${app_image##*:}
+image_sha=$(docker image inspect \
+  --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
+  "$app_image")
+if [ "$image_sha" != "$expected_sha" ]; then
+  echo "Refusing deployment: image revision label does not match APP_IMAGE commit tag."
+  exit 1
+fi
 docker compose --env-file .env.production -f compose.production.yml up -d postgres redis
 
 attempt=0

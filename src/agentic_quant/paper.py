@@ -178,6 +178,46 @@ class PaperTradingRuntime:
     def status(self) -> dict[str, Any]:
         latest = self.latest_account()
         recent_runs = self.runs(limit=1)
+        latest_summary = (
+            {
+                key: latest.get(key)
+                for key in (
+                    "broker_account_id",
+                    "status",
+                    "currency",
+                    "cash",
+                    "buying_power",
+                    "equity",
+                    "portfolio_value",
+                    "last_equity",
+                    "pattern_day_trader",
+                    "trading_blocked",
+                    "transfers_blocked",
+                    "account_blocked",
+                    "observed_at",
+                )
+            }
+            if latest is not None
+            else None
+        )
+        latest_run = (
+            {
+                key: recent_runs[0].get(key)
+                for key in (
+                    "paper_run_id",
+                    "trigger",
+                    "status",
+                    "enrollment_count",
+                    "orders_submitted",
+                    "orders_reconciled",
+                    "started_at",
+                    "finished_at",
+                    "error_code",
+                )
+            }
+            if recent_runs
+            else None
+        )
         with self.engine.connect() as connection:
             counts = {
                 "enrollments": int(
@@ -242,8 +282,8 @@ class PaperTradingRuntime:
             "compatible_active_enrollments": compatible_active_enrollments,
             "required_execution_profile": PAPER_EXECUTION_PROFILE_VERSION,
             "execution_policy": "separately_validated_profile_only",
-            "latest_account": latest,
-            "latest_run": recent_runs[0] if recent_runs else None,
+            "latest_account": latest_summary,
+            "latest_run": latest_run,
             **counts,
         }
 

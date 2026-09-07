@@ -14,6 +14,7 @@ from agentic_quant.workflow import WorkflowJobStore
 
 COORDINATOR_STAGES = (
     "collect_market_data",
+    "collect_research_evidence",
     "materialize_features",
     "train_ml",
     "forecast_ml",
@@ -63,6 +64,8 @@ class AutonomousCoordinator:
     ) -> tuple[str, tuple[WorkflowJob, ...]]:
         if as_of.tzinfo is None:
             raise ValueError("Coordinator cutoff must be timezone-aware")
+        if timeframe != "1Day":
+            raise ValueError("Autonomous research currently supports only 1Day bars")
         normalized = tuple(sorted({value.strip().upper() for value in symbols if value.strip()}))
         if not normalized:
             raise ValueError("Coordinator requires at least one governed symbol")

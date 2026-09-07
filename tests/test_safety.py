@@ -161,9 +161,21 @@ def test_development_backfills_are_bounded_but_production_is_not() -> None:
         admin_username="admin",
         admin_password_hash="not-used-test-hash",
         session_secret="x" * 64,
+        source_git_sha="a" * 40,
     )
     assert production.data_operating_scope == "durable_long_horizon"
     production.validate_backfill_window(start=start, end=end, timeframe="1Min")
+
+    with pytest.raises(ValidationError, match="40-character SOURCE_GIT_SHA"):
+        Settings(
+            _env_file=None,
+            app_env=AppEnvironment.PRODUCTION,
+            auto_migrate=False,
+            auth_required=True,
+            admin_username="admin",
+            admin_password_hash="not-used-test-hash",
+            session_secret="x" * 64,
+        )
 
 
 def test_production_boots_paused_and_never_auto_migrates() -> None:
@@ -203,6 +215,7 @@ def test_production_bootstrap_rejects_local_database(settings: Settings) -> None
             "global_new_exposure_paused": True,
             "redis_url": "redis://redis:6379/0",
             "deployment_environment_id": "prod-test",
+            "source_git_sha": "a" * 40,
         }
     )
     with pytest.raises(ValueError, match="requires PostgreSQL"):
@@ -233,6 +246,7 @@ def test_production_worker_restart_pauses_but_api_restart_preserves_control(
             "session_secret": SecretStr("x" * 64),
             "global_new_exposure_paused": True,
             "shadow_runtime_enabled": False,
+            "source_git_sha": "a" * 40,
         }
     )
     with TestClient(create_app(production, process_role="api")) as client:

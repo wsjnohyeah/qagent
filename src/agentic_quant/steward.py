@@ -12,6 +12,7 @@ from agentic_quant.control_plane import SystemObjectStore
 from agentic_quant.database import (
     admin_action_requests,
     data_quality_reports,
+    event_outbox,
     ingestion_runs,
     llm_budget_reservations,
     ml_models,
@@ -24,6 +25,7 @@ from agentic_quant.database import (
 from agentic_quant.domain import LLMProviderName, LLMWorkload
 from agentic_quant.ids import uuid7
 from agentic_quant.llm import LLMGateway, LLMRequest
+from agentic_quant.paper import PaperTradingRuntime
 from agentic_quant.shadow import ShadowRuntime
 
 
@@ -36,6 +38,7 @@ class SystemSteward:
         llm_gateway: LLMGateway,
         objects: SystemObjectStore,
         shadow: ShadowRuntime,
+        paper: PaperTradingRuntime,
         actions: AdminActionService,
         system_status: Callable[[], dict[str, Any]],
     ) -> None:
@@ -43,6 +46,7 @@ class SystemSteward:
         self.llm_gateway = llm_gateway
         self.objects = objects
         self.shadow = shadow
+        self.paper = paper
         self.actions = actions
         self.system_status = system_status
 
@@ -287,6 +291,93 @@ class SystemSteward:
         lists = self.objects.lists()
         strategies = self.objects.strategies(limit=25)
         deployments = self.shadow.deployments(limit=25)
+        paper_enrollments = [
+            {
+                key: item.get(key)
+                for key in (
+                    "paper_enrollment_id",
+                    "shadow_deployment_id",
+                    "status",
+                    "symbol",
+                    "strategy_name",
+                    "strategy_version",
+                    "created_at",
+                    "updated_at",
+                )
+            }
+            for item in self.paper.enrollments(limit=25)
+        ]
+        paper_orders = [
+            {
+                key: item.get(key)
+                for key in (
+                    "paper_order_id",
+                    "paper_enrollment_id",
+                    "shadow_trade_plan_id",
+                    "symbol",
+                    "side",
+                    "quantity",
+                    "filled_quantity",
+                    "status",
+                    "lifecycle_complete",
+                    "submitted_at",
+                    "last_reconciled_at",
+                    "updated_at",
+                )
+            }
+            for item in self.paper.orders(limit=25)
+        ]
+        paper_runs = [
+            {
+                key: item.get(key)
+                for key in (
+                    "paper_run_id",
+                    "trigger",
+                    "status",
+                    "enrollment_count",
+                    "orders_submitted",
+                    "orders_reconciled",
+                    "finished_at",
+                    "error_code",
+                )
+            }
+            for item in self.paper.runs(limit=10)
+        ]
+        raw_paper_account = self.paper.latest_account()
+        paper_account = (
+            {
+                key: raw_paper_account.get(key)
+                for key in (
+                    "broker_account_id",
+                    "status",
+                    "currency",
+                    "cash",
+                    "buying_power",
+                    "equity",
+                    "trading_blocked",
+                    "account_blocked",
+                    "observed_at",
+                )
+            }
+            if raw_paper_account is not None
+            else None
+        )
+        paper_positions = [
+            {
+                key: item.get(key)
+                for key in (
+                    "symbol",
+                    "side",
+                    "quantity",
+                    "average_entry_price",
+                    "current_price",
+                    "market_value",
+                    "unrealized_pnl",
+                    "observed_at",
+                )
+            }
+            for item in self.paper.latest_positions()[:25]
+        ]
         virtual_account = self.shadow.virtual_account()
         virtual_account["sleeve_count"] = len(virtual_account.pop("sleeves", []))
         with self.engine.connect() as connection:
@@ -398,6 +489,21 @@ class SystemSteward:
                     .limit(10)
                 )
             ]
+            dead_outbox = [
+                dict(row._mapping)
+                for row in connection.execute(
+                    select(
+                        event_outbox.c.event_id,
+                        event_outbox.c.event_type,
+                        event_outbox.c.attempt_count,
+                        event_outbox.c.last_error,
+                        event_outbox.c.updated_at,
+                    )
+                    .where(event_outbox.c.status == "DEAD")
+                    .order_by(event_outbox.c.updated_at.desc())
+                    .limit(10)
+                )
+            ]
         citations: set[str] = {"SYSTEM:summary"}
         for item in lists:
             item["citation_id"] = f"LIST:{item['slug']}"
@@ -407,6 +513,15 @@ class SystemSteward:
             citations.add(item["citation_id"])
         for item in deployments:
             item["citation_id"] = f"SHADOW:{item['shadow_deployment_id']}"
+            citations.add(item["citation_id"])
+        for item in paper_enrollments:
+            item["citation_id"] = f"PAPER_ENROLLMENT:{item['paper_enrollment_id']}"
+            citations.add(item["citation_id"])
+        for item in paper_orders:
+            item["citation_id"] = f"PAPER_ORDER:{item['paper_order_id']}"
+            citations.add(item["citation_id"])
+        for item in paper_runs:
+            item["citation_id"] = f"PAPER_RUN:{item['paper_run_id']}"
             citations.add(item["citation_id"])
         for item in jobs:
             item["citation_id"] = f"JOB:{item['workflow_job_id']}"
@@ -428,6 +543,9 @@ class SystemSteward:
             citations.add(item["citation_id"])
         for item in pending_actions:
             item["citation_id"] = f"ACTION:{item['action_request_id']}"
+            citations.add(item["citation_id"])
+        for item in dead_outbox:
+            item["citation_id"] = f"OUTBOX:{item['event_id']}"
             citations.add(item["citation_id"])
         catalog = self.objects.data_catalog()
         for dataset in catalog["raw_datasets"]:
@@ -470,6 +588,14 @@ class SystemSteward:
                 "data_catalog": catalog,
                 "strategies": strategies,
                 "shadow_deployments": deployments,
+                "paper": {
+                    "status": self.paper.status(),
+                    "account": paper_account,
+                    "positions": paper_positions,
+                    "enrollments": paper_enrollments,
+                    "orders": paper_orders,
+                    "recent_runs": paper_runs,
+                },
                 "virtual_account": virtual_account,
                 "recent_workflow_jobs": jobs,
                 "recent_ingestions": ingestions,
@@ -478,6 +604,7 @@ class SystemSteward:
                 "recent_research_analyses": analyses,
                 "recent_ml_models": models,
                 "recent_admin_actions": pending_actions,
+                "dead_outbox": dead_outbox,
                 "pipeline_controls": self.actions.pipeline_controls(),
                 "constraints": {
                     "live_money_execution_exists": False,
@@ -520,7 +647,9 @@ class SystemSteward:
             "recent_research_analyses": ("analysis", "research", "分析", "研究"),
             "recent_ml_models": ("model", "ml", "模型"),
             "shadow_deployments": ("shadow", "trade", "交易", "模拟"),
+            "paper": ("paper", "broker", "order", "position", "券商", "订单", "持仓"),
             "recent_admin_actions": ("action", "audit", "change", "操作", "审计"),
+            "dead_outbox": ("outbox", "dead letter", "event", "事件", "死信"),
         }
         context_sections = {
             "list": {"lists"},
@@ -529,11 +658,13 @@ class SystemSteward:
             "strategy": {"strategies", "recent_validations"},
             "validation": {"strategies", "recent_validations"},
             "shadow": {"shadow_deployments"},
+            "paper": {"paper"},
             "job": {"recent_workflow_jobs"},
             "quality": {"recent_data_quality"},
             "analysis": {"recent_research_analyses"},
             "model": {"recent_ml_models"},
             "action": {"recent_admin_actions"},
+            "outbox": {"dead_outbox"},
         }
         matched = False
         for section, terms in section_terms.items():
@@ -549,15 +680,29 @@ class SystemSteward:
                 "data_catalog",
                 "strategies",
                 "shadow_deployments",
+                "paper",
                 "recent_workflow_jobs",
                 "recent_data_quality",
                 "recent_validations",
                 "recent_research_analyses",
                 "recent_ml_models",
                 "recent_admin_actions",
+                "dead_outbox",
             ):
                 value = snapshot[section]
-                selected[section] = value[:3] if isinstance(value, list) else value
+                if section == "paper":
+                    selected[section] = {
+                        "status": value["status"],
+                        "account": value["account"],
+                        "positions": value["positions"][:3],
+                        "enrollments": value["enrollments"][:3],
+                        "orders": value["orders"][:3],
+                        "recent_runs": value["recent_runs"][:3],
+                    }
+                else:
+                    selected[section] = (
+                        value[:3] if isinstance(value, list) else value
+                    )
         return selected
 
     @staticmethod

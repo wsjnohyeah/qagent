@@ -56,6 +56,8 @@ ALPACA_PAPER_BASE_URL=https://paper-api.alpaca.markets
 AUTONOMOUS_COORDINATOR_ENABLED=true
 COORDINATOR_POLL_SECONDS=3600
 COORDINATOR_INITIAL_LOOKBACK_DAYS=1826
+COORDINATOR_DOCUMENT_LOOKBACK_DAYS=90
+COORDINATOR_DOCUMENT_MAX_PAGES=10
 # Leave false until routes and USD budgets are reviewed after bootstrap.
 COORDINATOR_PAID_RESEARCH_ENABLED=false
 AUTO_MIGRATE=false
@@ -93,7 +95,12 @@ approved secret manager. Do not set `ADMIN_PASSWORD` in production.
 
 ## Build and publish
 
-From the clean, reviewed commit:
+Pushes to `main` run the full verification job and then publish
+`ghcr.io/OWNER/REPO:COMMIT_SHA`. The build embeds the same commit as both
+`SOURCE_GIT_SHA` and the OCI revision label. The deploy script rejects a non-GHCR/mutable tag,
+an image-label mismatch, or an environment-file override of `SOURCE_GIT_SHA`.
+
+For an explicitly approved manual publish from a clean, reviewed commit:
 
 ```sh
 make check
@@ -131,9 +138,30 @@ and separate research-coordinator worker so CPU-heavy training cannot delay shad
 API does not own production schedulers. Deployment fails if API readiness or either worker
 heartbeat is unhealthy. `AUTO_MIGRATE` remains false in long-running services.
 
+The coordinator validates the complete configured daily window on each cycle and repairs
+internal as well as trailing XNYS-session gaps. It then refreshes bounded Alpaca News before
+feature/ML/LLM work. Paid LLM research remains a separate switch.
+
 Never copy the development SQLite database or local object-store directory into production.
 The cloud coordinator backfills and derives its own data, feature, model, validation, and
 shadow evidence. Git transports code, configuration, migrations, and documentation only.
+
+## Backup and verification
+
+After the first healthy bootstrap and before enabling durable research, create a local backup:
+
+```sh
+./infra/deploy/backup_vps.sh /opt/agentic-quant/backups
+./infra/deploy/verify_backup.sh /opt/agentic-quant/backups/TIMESTAMP
+./infra/deploy/restore_drill_vps.sh /opt/agentic-quant/backups/TIMESTAMP
+```
+
+The backup contains a PostgreSQL custom-format dump, the raw-object volume, a release manifest,
+and SHA-256 checksums. Redis is intentionally excluded because durable workflow/outbox truth is
+in PostgreSQL. Copy the completed directory to approved off-site storage. The restore-drill
+helper restores into a disposable, unnetworked PostgreSQL container and temporary object path;
+it never targets the production database. Record a successful drill before calling the
+production backup plan complete.
 
 ## Post-deploy verification
 
