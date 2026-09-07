@@ -10,7 +10,7 @@ present, but order authorization remains code-blocked until a separately validat
 execution lifecycle exists; paid research, off-site backup/alerting, and statistical/elapsed
 production evidence remain open
 
-Current documented baseline: C039 — `Handle newly listed research histories`
+Current documented baseline: C040 — `Record dynamic scanner production rollout`
 
 ## Purpose and authority
 
@@ -3098,6 +3098,42 @@ lifecycle. No Paper order was used as a build or deployment test.
     C038 until that image passes and is deployed; the failed ALAB job remains safely retryable
     and will be repaired under the evidenced-boundary contract afterward.
 - Corrections/follow-ups: this entry records the production-discovered correction to C038.
+
+### C040 — `Record dynamic scanner production rollout`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-07 PDT.
+- User intent: develop and validate the broader hot-stock discovery workflow locally, publish
+  it through GitHub CI, and deploy the exact verified artifact rather than editing production.
+- Scope:
+  - Recorded the completed immutable rollout of C038 and its C039 new-listing correction.
+  - Updated the durable project state with the exact running functional commit and independent
+    local-versus-production scan evidence.
+- Architecture/decision impact:
+  - The local repository remains the only source of code changes. Production consumes an
+    immutable commit-SHA image after GitHub verification; it is not an editing environment.
+- Validation:
+  - GitHub Actions runs `34100647224` for C038 and `34101838418` for C039 passed verification
+    and image publication.
+  - Pre-deploy backups `/opt/agentic-quant/backups/20260907T083141Z` and
+    `/opt/agentic-quant/backups/20260907T084342Z` passed checksum and catalog verification.
+  - Production runs `6cb434b156b3ed941c8a6402d5cf3e9f8f388944`; all five containers are
+    healthy, HTTPS readiness passes, anonymous system access returns 401, authenticated UI
+    access works, and the session cookie is Secure.
+  - Production scan `126fe8ee-3471-5d91-9aa8-c54666af95b0` merged 258 source names, retained
+    40 review candidates, selected 20 deep-research names, and completed a bounded Meta
+    re-rank for estimated cost `$0.003905`. Candidate-list revision 2 has 20 names; the
+    governed trading-universe revision remains `[AAPL, IWM, QQQ, SPY]`.
+  - The originally failed ALAB data job recovered on attempt 2 after the corrected image was
+    deployed. It completed against observed history beginning `2024-03-20`, with immutable
+    boundary event `2fb2f9fb-94a3-57fd-86d6-1def6070bb35`. The cycle then had no failed or
+    exhausted jobs. No Shadow exposure, Paper order, or live-money operation was created.
+- Global state after commit:
+  - Dynamic discovery and bounded routine LLM re-ranking are operational in production. Deep
+    research proceeds asynchronously from the selected candidate set, while the separate
+    Trading Universe gate, global new-exposure pause, disabled Paper submission, and permanent
+    live-money prohibition remain intact.
+- Corrections/follow-ups: none.
 
 ## Template for future commit entries
 

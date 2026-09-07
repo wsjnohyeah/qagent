@@ -11,9 +11,10 @@
   intentionally insufficient.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  image, PostgreSQL, Redis, API, Shadow worker, and independent research coordinator behind
-  Caddy TLS. New exposure is paused; paid LLM research, Paper submission, and live money are
-  disabled.
+  `6cb434b156b3ed941c8a6402d5cf3e9f8f388944` image, PostgreSQL, Redis, API, Shadow worker,
+  and independent research coordinator behind Caddy TLS. Dynamic market scanning and its
+  bounded Meta re-ranking are enabled; new exposure is paused, while paid strategy research,
+  Paper submission, and live money remain disabled.
 - Local-lite uses Python 3.12, a project-local `uv`, SQLite, and filesystem object storage.
 - The Control API, single-admin object-centric web console, persistent System Steward,
   append-only event ledger, deterministic risk engine, and shadow runtime exist.
@@ -152,8 +153,8 @@
   strategy is separately approved for that event. The policy also owns the baseline
   stop/target geometry used identically by research and shadow. Candidate/snapshot mismatches
   and future signal/feature timestamps also reject.
-- GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; the first production bootstrap
-  used verified commit `34a76b0` before the worker-health timing correction in this iteration.
+- GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; production currently runs the
+  verified immutable functional commit `6cb434b156b3ed941c8a6402d5cf3e9f8f388944`.
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases. A verified `main` push publishes an immutable GHCR
   commit-SHA image with matching embedded/OCI source provenance; deployment rejects mismatches.
@@ -161,10 +162,13 @@
   authenticated local and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, fresh schema
   upgrade/downgrade/re-upgrade checks, zero PostgreSQL schema drift, and the repository secret
   scan.
-- A real read-only dynamic scan merged 258 source names, retained 40 review candidates and 20
-  deep-research stocks, included SNDK, and excluded sampled leveraged/single-stock ETFs. A
-  real budgeted Meta scanner re-rank completed for an estimated `$0.008322`, moving SNDK from
+- A local real read-only dynamic scan merged 258 source names, retained 40 review candidates
+  and 20 deep-research stocks, included SNDK, and excluded sampled leveraged/single-stock
+  ETFs. Its budgeted Meta re-rank cost an estimated `$0.008322` and moved SNDK from
   deterministic rank 8 to final rank 4 without introducing a symbol or execution authority.
+  Production independently reproduced the 258 → 40 → 20 funnel with estimated LLM cost
+  `$0.003905`; the resulting candidate-list revision contains 20 names while the governed
+  trading universe remains the separate four-symbol revision `[AAPL, IWM, QQQ, SPY]`.
 - A real bounded AAPL coordinator run trained 734 point-in-time examples, persisted two ML
   candidates and a one-bar forecast, supplied 14 time-safe feature/forecast/document items to
   `gpt-5.6-sol`, and received a citation-valid `ABSTAIN` at 0.90 confidence. The selected ML
