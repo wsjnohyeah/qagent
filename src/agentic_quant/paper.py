@@ -16,6 +16,7 @@ from sqlalchemy.engine import Engine
 from agentic_quant.database import (
     paper_account_snapshots,
     paper_enrollments,
+    paper_order_legs,
     paper_order_events,
     paper_orders,
     paper_position_snapshots,
@@ -31,6 +32,7 @@ from agentic_quant.providers.alpaca_paper import (
     AlpacaPaperResponseError,
     normalize_long_bracket_prices,
 )
+from agentic_quant.risk import BASELINE_EXECUTION_PROFILE_VERSION
 from agentic_quant.shadow import ShadowRuntime
 
 
@@ -60,12 +62,20 @@ class PaperBroker(Protocol):
 
     async def cancel_order(self, broker_order_id: str) -> None: ...
 
+    async def submit_market_exit_order(
+        self,
+        *,
+        client_order_id: str,
+        symbol: str,
+        quantity: Decimal,
+        time_in_force: str,
+    ) -> dict[str, Any]: ...
+
 
 BrokerFactory = Callable[[], PaperBroker]
 _ZERO = Decimal("0")
-PAPER_EXECUTION_PROFILE_VERSION = (
-    "alpaca_day_limit_bracket_one_session@0.1.0"
-)
+PAPER_EXECUTION_PROFILE_VERSION = BASELINE_EXECUTION_PROFILE_VERSION
+_SESSION_CLOSE_LEAD = timedelta(minutes=20)
 _TERMINAL_FAILURES = {
     "canceled",
     "expired",
@@ -74,6 +84,7 @@ _TERMINAL_FAILURES = {
     "stopped",
     "suspended",
 }
+_TERMINAL_STATUSES = _TERMINAL_FAILURES | {"filled"}
 
 
 def _utc(value: datetime | None) -> datetime | None:
@@ -244,6 +255,11 @@ class PaperTradingRuntime:
                         .where(paper_orders.c.lifecycle_complete.is_(False))
                     ).scalar_one()
                 ),
+                "broker_order_legs": int(
+                    connection.execute(
+                        select(func.count()).select_from(paper_order_legs)
+                    ).scalar_one()
+                ),
             }
         active_enrollments = [
             item
@@ -281,7 +297,8 @@ class PaperTradingRuntime:
             ),
             "compatible_active_enrollments": compatible_active_enrollments,
             "required_execution_profile": PAPER_EXECUTION_PROFILE_VERSION,
-            "execution_policy": "separately_validated_profile_only",
+            "execution_policy": "shared_validated_deployable_profile_only",
+            "automatic_session_close_enabled": True,
             "latest_account": latest_summary,
             "latest_run": latest_run,
             **counts,
@@ -319,8 +336,8 @@ class PaperTradingRuntime:
             != PAPER_EXECUTION_PROFILE_VERSION
         ):
             raise ValueError(
-                "This validation uses a Shadow-only execution profile; Alpaca Paper "
-                "requires a separately validated compatible execution profile"
+                "This deployment uses an obsolete execution profile; Alpaca Paper "
+                "requires a current unified deployable validation"
             )
         with self.engine.connect() as connection:
             existing = connection.execute(
@@ -518,7 +535,7 @@ class PaperTradingRuntime:
         if bool(order["lifecycle_complete"]):
             raise ValueError("Paper order lifecycle is already complete")
         return {
-            "summary": f"Cancel Alpaca paper order for {order['symbol']}",
+            "summary": f"Cancel and flatten Alpaca paper lifecycle for {order['symbol']}",
             "paper_order_id": paper_order_id,
             "broker_order_id": order["broker_order_id"],
             "client_order_id": order["client_order_id"],
@@ -532,6 +549,15 @@ class PaperTradingRuntime:
         statement = (
             select(paper_order_events)
             .order_by(paper_order_events.c.observed_at.desc())
+            .limit(limit)
+        )
+        with self.engine.connect() as connection:
+            return [dict(row._mapping) for row in connection.execute(statement)]
+
+    def order_legs(self, *, limit: int = 500) -> list[dict[str, Any]]:
+        statement = (
+            select(paper_order_legs)
+            .order_by(paper_order_legs.c.updated_at.desc())
             .limit(limit)
         )
         with self.engine.connect() as connection:
@@ -582,11 +608,15 @@ class PaperTradingRuntime:
             if token is None:
                 raise ValueError("Paper runtime is reconciling broker state; retry cancel")
             try:
-                return await self._cancel_order_locked(paper_order_id)
+                return await self._cancel_order_locked(paper_order_id, token)
             finally:
                 self._release_lease(token)
 
-    async def _cancel_order_locked(self, paper_order_id: str) -> dict[str, Any]:
+    async def _cancel_order_locked(
+        self,
+        paper_order_id: str,
+        lease_token: str,
+    ) -> dict[str, Any]:
         assert self.broker_factory is not None
         with self.engine.connect() as connection:
             row = connection.execute(
@@ -621,13 +651,23 @@ class PaperTradingRuntime:
             observed_at=requested_at,
         )
         async with self.broker_factory() as broker:
-            await broker.cancel_order(str(row.broker_order_id))
+            account = await broker.fetch_account()
+            broker_account_id = str(account.get("id") or "")
+            if not broker_account_id:
+                raise RuntimeError("Alpaca paper account response has no account ID")
+            self._pin_account(broker_account_id)
+            if str(row.broker_account_id or "") != broker_account_id:
+                raise RuntimeError("Paper order is bound to a different broker account")
+            original = await broker.fetch_order_by_client_id(str(row.client_order_id))
+            if original is None:
+                original = {"id": str(row.broker_order_id), "status": row.status, "legs": []}
+            await self._cancel_entry_group(broker, original)
             payload = await broker.fetch_order_by_client_id(str(row.client_order_id))
             positions = await broker.fetch_positions()
+        position_quantity = self._position_quantity(
+            positions, symbol=str(row.symbol)
+        )
         if payload is not None:
-            position_quantity = self._position_quantity(
-                positions, symbol=str(row.symbol)
-            )
             self._apply_broker_order(
                 str(row.paper_order_id),
                 payload,
@@ -635,10 +675,31 @@ class PaperTradingRuntime:
                 position_quantity=position_quantity,
             )
             if position_quantity != _ZERO:
-                self._mark_submission_blocked(
-                    str(row.paper_order_id),
-                    ("POSITION_OPEN_REQUIRES_EXIT",),
+                if not self._entry_group_quiescent(payload):
+                    self._mark_submission_blocked(
+                        str(row.paper_order_id),
+                        ("MANUAL_CANCEL_PENDING",),
+                    )
+                else:
+                    async with self.broker_factory() as exit_broker:
+                        await self._submit_or_reconcile_exit(
+                            exit_broker,
+                            self._order(str(row.paper_order_id)),
+                            position_quantity=position_quantity,
+                            emergency=True,
+                            lease_token=lease_token,
+                        )
+        elif position_quantity != _ZERO:
+            async with self.broker_factory() as exit_broker:
+                await self._submit_or_reconcile_exit(
+                    exit_broker,
+                    self._order(str(row.paper_order_id)),
+                    position_quantity=position_quantity,
+                    emergency=True,
+                    lease_token=lease_token,
                 )
+        else:
+            self._complete_cancelled_flat_order(str(row.paper_order_id))
         return next(
             item for item in self.orders(limit=1_000)
             if item["paper_order_id"] == paper_order_id
@@ -727,6 +788,7 @@ class PaperTradingRuntime:
                     expected_positions[symbol] = (
                         expected_positions.get(symbol, _ZERO)
                         + _decimal(order["filled_quantity"])
+                        - self._exit_filled_quantity(str(order["paper_order_id"]))
                     )
                 managed_symbols = set(expected_positions)
                 unmanaged_symbols = sorted(
@@ -764,6 +826,74 @@ class PaperTradingRuntime:
                 for order in all_orders:
                     if bool(order["lifecycle_complete"]):
                         continue
+                    order_id = str(order["paper_order_id"])
+                    exit_leg = self._leg(
+                        order_id,
+                        "EMERGENCY_EXIT",
+                        "SESSION_CLOSE",
+                    )
+                    if exit_leg is not None:
+                        exit_payload = await broker.fetch_order_by_client_id(
+                            str(exit_leg["client_order_id"])
+                        )
+                        positions = await broker.fetch_positions()
+                        position_quantity = self._position_quantity(
+                            positions,
+                            symbol=str(order["symbol"]),
+                        )
+                        if exit_payload is not None:
+                            self._assert_lease(lease_token)
+                            self._apply_exit_order(
+                                order,
+                                exit_leg,
+                                exit_payload,
+                                position_quantity=position_quantity,
+                                observed_at=self._now(),
+                            )
+                            reconciled += 1
+                        elif (
+                            position_quantity != _ZERO
+                            and str(exit_leg["status"]) not in _TERMINAL_FAILURES
+                        ):
+                            await self._submit_or_reconcile_exit(
+                                broker,
+                                order,
+                                position_quantity=position_quantity,
+                                emergency=str(exit_leg["leg_role"]) == "EMERGENCY_EXIT",
+                                lease_token=lease_token,
+                            )
+                            submitted += 1
+                        if position_quantity != _ZERO:
+                            refreshed_exit = self._leg(
+                                order_id,
+                                "EMERGENCY_EXIT",
+                                "SESSION_CLOSE",
+                            )
+                            if (
+                                refreshed_exit is not None
+                                and str(refreshed_exit["status"]).lower()
+                                in _TERMINAL_FAILURES
+                                and str(refreshed_exit["leg_role"]) == "SESSION_CLOSE"
+                            ):
+                                await self._submit_or_reconcile_exit(
+                                    broker,
+                                    order,
+                                    position_quantity=position_quantity,
+                                    emergency=True,
+                                    lease_token=lease_token,
+                                )
+                                submitted += 1
+                            blocker = "PAPER_EXIT_IN_PROGRESS:" + str(order["symbol"])
+                            submission_blockers.append(blocker)
+                            blocked = True
+                        elif exit_payload is None:
+                            blocker = (
+                                "EXIT_ORDER_NOT_FOUND_BUT_ACCOUNT_FLAT:"
+                                + str(order["symbol"])
+                            )
+                            submission_blockers.append(blocker)
+                            blocked = True
+                        continue
                     payload = await broker.fetch_order_by_client_id(
                         str(order["client_order_id"])
                     )
@@ -788,18 +918,12 @@ class PaperTradingRuntime:
                         reconciled += 1
                         current = self._order(str(order["paper_order_id"]))
                         expires_at = _utc(current["plan_expires_at"])
-                        broker_status = str(payload.get("status") or "unknown").lower()
                         if (
                             expires_at is not None
-                            and expires_at <= self._now()
+                            and expires_at - _SESSION_CLOSE_LEAD <= self._now()
                             and not bool(current["lifecycle_complete"])
-                            and current["broker_order_id"] is not None
-                            and broker_status not in _TERMINAL_FAILURES
-                            and broker_status != "filled"
                         ):
-                            await broker.cancel_order(
-                                str(current["broker_order_id"])
-                            )
+                            await self._cancel_entry_group(broker, payload)
                             cancelled = await broker.fetch_order_by_client_id(
                                 str(current["client_order_id"])
                             )
@@ -814,9 +938,11 @@ class PaperTradingRuntime:
                                     self._now(),
                                     position_quantity=position_quantity,
                                 )
-                            if position_quantity != _ZERO:
+                            if cancelled is None or not self._entry_group_quiescent(
+                                cancelled
+                            ):
                                 blocker = (
-                                    "POSITION_OPEN_REQUIRES_EXIT:"
+                                    "SESSION_CLOSE_CANCELLATION_PENDING:"
                                     + str(current["symbol"])
                                 )
                                 submission_blockers.append(blocker)
@@ -825,21 +951,32 @@ class PaperTradingRuntime:
                                     str(current["paper_order_id"]),
                                     (blocker,),
                                 )
-                        elif (
-                            expires_at is not None
-                            and expires_at <= self._now()
-                            and position_quantity != _ZERO
-                        ):
-                            blocker = (
-                                "POSITION_OPEN_REQUIRES_EXIT:"
-                                + str(current["symbol"])
-                            )
-                            submission_blockers.append(blocker)
-                            blocked = True
-                            self._mark_submission_blocked(
-                                str(current["paper_order_id"]),
-                                (blocker,),
-                            )
+                            elif position_quantity != _ZERO:
+                                emergency = self._now() >= expires_at - timedelta(
+                                    minutes=10
+                                )
+                                exit_ready = await self._submit_or_reconcile_exit(
+                                    broker,
+                                    current,
+                                    position_quantity=position_quantity,
+                                    emergency=emergency,
+                                    lease_token=lease_token,
+                                )
+                                submitted += 1
+                                if not exit_ready and not emergency:
+                                    await self._submit_or_reconcile_exit(
+                                        broker,
+                                        current,
+                                        position_quantity=position_quantity,
+                                        emergency=True,
+                                        lease_token=lease_token,
+                                    )
+                                    submitted += 1
+                                blocker = "PAPER_EXIT_IN_PROGRESS:" + str(
+                                    current["symbol"]
+                                )
+                                submission_blockers.append(blocker)
+                                blocked = True
                         continue
                     if order["broker_order_id"] is not None:
                         submission_blockers.append(
@@ -1164,6 +1301,21 @@ class PaperTradingRuntime:
         )
         if required > buying_power:
             blockers.append("PAPER_BUYING_POWER")
+        with self.engine.connect() as connection:
+            conflicting = connection.execute(
+                select(func.count())
+                .select_from(paper_orders)
+                .where(
+                    (paper_orders.c.symbol == symbol)
+                    & (paper_orders.c.lifecycle_complete.is_(False))
+                    & (
+                        paper_orders.c.paper_order_id
+                        != str(order["paper_order_id"])
+                    )
+                )
+            ).scalar_one()
+        if int(conflicting):
+            blockers.append("PAPER_SYMBOL_LIFECYCLE_CONFLICT")
         return blockers
 
     def _mark_submission_blocked(
@@ -1409,6 +1561,36 @@ class PaperTradingRuntime:
             observed_at=now,
         )
 
+    def _complete_cancelled_flat_order(self, order_id: str) -> None:
+        now = self._now()
+        order = self._order(order_id)
+        with self.engine.begin() as connection:
+            connection.execute(
+                update(paper_orders)
+                .where(paper_orders.c.paper_order_id == order_id)
+                .values(
+                    status="CANCELED_FLAT",
+                    lifecycle_complete=True,
+                    error_code=None,
+                    error_message=None,
+                    last_reconciled_at=now,
+                    updated_at=now,
+                )
+            )
+        self._append_order_event(
+            order_id,
+            broker_status="CANCELED_FLAT",
+            filled_quantity=_decimal(order["filled_quantity"]),
+            filled_average_price=(
+                _decimal(order["filled_average_price"])
+                if order["filled_average_price"] is not None
+                else None
+            ),
+            lifecycle_complete=True,
+            payload={"reason": "CANCEL_ACKNOWLEDGED_AND_ACCOUNT_FLAT"},
+            observed_at=now,
+        )
+
     def _apply_broker_order(
         self,
         order_id: str,
@@ -1418,6 +1600,7 @@ class PaperTradingRuntime:
         position_quantity: Decimal = _ZERO,
     ) -> None:
         safe = _safe_payload(payload)
+        self._sync_broker_order_legs(order_id, safe, observed_at)
         status = str(safe.get("status") or "unknown").lower()
         filled_quantity = _decimal(safe.get("filled_qty"))
         filled_average_price = (
@@ -1482,6 +1665,366 @@ class PaperTradingRuntime:
                 payload=safe,
                 observed_at=observed_at,
             )
+
+    def _sync_broker_order_legs(
+        self,
+        order_id: str,
+        payload: dict[str, Any],
+        observed_at: datetime,
+    ) -> None:
+        order = self._order(order_id)
+        parent_id = str(payload.get("id") or "") or None
+        values = [
+            self._broker_leg_values(
+                order=order,
+                payload=payload,
+                role="ENTRY",
+                parent_broker_order_id=None,
+                observed_at=observed_at,
+            )
+        ]
+        for child in payload.get("legs") or []:
+            if not isinstance(child, dict):
+                continue
+            role = "STOP_LOSS" if child.get("stop_price") is not None else "TAKE_PROFIT"
+            values.append(
+                self._broker_leg_values(
+                    order=order,
+                    payload=_safe_payload(child),
+                    role=role,
+                    parent_broker_order_id=parent_id,
+                    observed_at=observed_at,
+                )
+            )
+        for value in values:
+            self._upsert_leg(value)
+
+    def _broker_leg_values(
+        self,
+        *,
+        order: dict[str, Any],
+        payload: dict[str, Any],
+        role: str,
+        parent_broker_order_id: str | None,
+        observed_at: datetime,
+    ) -> dict[str, Any]:
+        status = str(payload.get("status") or "unknown").lower()
+        broker_order_id = str(payload.get("id") or "") or None
+        client_order_id = str(payload.get("client_order_id") or "") or None
+        return {
+            "paper_order_leg_id": stable_uuid("paper-order-leg", order["paper_order_id"], role),
+            "paper_order_id": order["paper_order_id"],
+            "leg_role": role,
+            "client_order_id": client_order_id,
+            "broker_order_id": broker_order_id,
+            "parent_broker_order_id": parent_broker_order_id,
+            "symbol": str(payload.get("symbol") or order["symbol"]).upper(),
+            "side": str(payload.get("side") or ("buy" if role == "ENTRY" else "sell")),
+            "order_type": str(
+                payload.get("type")
+                or ("limit" if role in {"ENTRY", "TAKE_PROFIT"} else "stop")
+            ),
+            "time_in_force": str(payload.get("time_in_force") or "day"),
+            "quantity": _decimal(payload.get("qty"), str(order["quantity"])),
+            "filled_quantity": _decimal(payload.get("filled_qty")),
+            "filled_average_price": (
+                _decimal(payload.get("filled_avg_price"))
+                if payload.get("filled_avg_price") not in {None, ""}
+                else None
+            ),
+            "limit_price": (
+                _decimal(payload.get("limit_price"))
+                if payload.get("limit_price") not in {None, ""}
+                else None
+            ),
+            "stop_price": (
+                _decimal(payload.get("stop_price"))
+                if payload.get("stop_price") not in {None, ""}
+                else None
+            ),
+            "status": status,
+            "lifecycle_complete": status in _TERMINAL_STATUSES,
+            "submission_attempts": 0,
+            "broker_payload_json": payload,
+            "error_code": None,
+            "error_message": None,
+            "submitted_at": _utc(order.get("submitted_at")) or observed_at,
+            "last_reconciled_at": observed_at,
+            "created_at": observed_at,
+            "updated_at": observed_at,
+        }
+
+    def _upsert_leg(self, values: dict[str, Any]) -> None:
+        dialect_insert: Any
+        if self.engine.dialect.name == "postgresql":
+            dialect_insert = postgresql_insert
+        elif self.engine.dialect.name == "sqlite":
+            dialect_insert = sqlite_insert
+        else:
+            raise RuntimeError(f"Unsupported SQL dialect: {self.engine.dialect.name}")
+        mutable = {
+            key: value
+            for key, value in values.items()
+            if key not in {"paper_order_leg_id", "paper_order_id", "leg_role", "created_at"}
+        }
+        with self.engine.begin() as connection:
+            connection.execute(
+                dialect_insert(paper_order_legs)
+                .values(**values)
+                .on_conflict_do_update(
+                    index_elements=["paper_order_id", "leg_role"],
+                    set_=mutable,
+                )
+            )
+
+    def _leg(self, order_id: str, *roles: str) -> dict[str, Any] | None:
+        with self.engine.connect() as connection:
+            row = connection.execute(
+                select(paper_order_legs)
+                .where(
+                    (paper_order_legs.c.paper_order_id == order_id)
+                    & (paper_order_legs.c.leg_role.in_(roles))
+                )
+                .order_by(paper_order_legs.c.created_at.desc())
+                .limit(1)
+            ).one_or_none()
+        return dict(row._mapping) if row is not None else None
+
+    def _exit_filled_quantity(self, order_id: str) -> Decimal:
+        with self.engine.connect() as connection:
+            value = connection.execute(
+                select(func.sum(paper_order_legs.c.filled_quantity)).where(
+                    (paper_order_legs.c.paper_order_id == order_id)
+                    & paper_order_legs.c.leg_role.in_(
+                        ("SESSION_CLOSE", "EMERGENCY_EXIT")
+                    )
+                )
+            ).scalar_one_or_none()
+        return _decimal(value)
+
+    @staticmethod
+    def _entry_group_quiescent(payload: dict[str, Any]) -> bool:
+        if str(payload.get("status") or "unknown").lower() not in _TERMINAL_STATUSES:
+            return False
+        return all(
+            str(child.get("status") or "unknown").lower() in _TERMINAL_STATUSES
+            for child in payload.get("legs") or []
+            if isinstance(child, dict)
+        )
+
+    async def _cancel_entry_group(
+        self,
+        broker: PaperBroker,
+        payload: dict[str, Any],
+    ) -> None:
+        active_ids: list[str] = []
+        if str(payload.get("status") or "unknown").lower() not in _TERMINAL_STATUSES:
+            if payload.get("id"):
+                active_ids.append(str(payload["id"]))
+        for child in payload.get("legs") or []:
+            if (
+                isinstance(child, dict)
+                and str(child.get("status") or "unknown").lower()
+                not in _TERMINAL_STATUSES
+                and child.get("id")
+            ):
+                active_ids.append(str(child["id"]))
+        for broker_order_id in dict.fromkeys(active_ids):
+            await broker.cancel_order(broker_order_id)
+
+    def _ensure_exit_intent(
+        self,
+        order: dict[str, Any],
+        *,
+        quantity: Decimal,
+        emergency: bool,
+    ) -> dict[str, Any]:
+        role = "EMERGENCY_EXIT" if emergency else "SESSION_CLOSE"
+        existing = self._leg(str(order["paper_order_id"]), role)
+        if existing is not None:
+            if _decimal(existing["quantity"]) != quantity:
+                raise RuntimeError("Paper exit intent quantity no longer matches position")
+            return existing
+        now = self._now()
+        suffix = "emergency" if emergency else "moc"
+        client_order_id = "qagent-x-" + hashlib.sha256(
+            f"{order['paper_order_id']}:{suffix}".encode()
+        ).hexdigest()[:30]
+        values = {
+            "paper_order_leg_id": stable_uuid(
+                "paper-order-leg", order["paper_order_id"], role
+            ),
+            "paper_order_id": order["paper_order_id"],
+            "leg_role": role,
+            "client_order_id": client_order_id,
+            "broker_order_id": None,
+            "parent_broker_order_id": order.get("broker_order_id"),
+            "symbol": str(order["symbol"]).upper(),
+            "side": "sell",
+            "order_type": "market",
+            "time_in_force": "day" if emergency else "cls",
+            "quantity": quantity,
+            "filled_quantity": _ZERO,
+            "filled_average_price": None,
+            "limit_price": None,
+            "stop_price": None,
+            "status": "PENDING_SUBMISSION",
+            "lifecycle_complete": False,
+            "submission_attempts": 0,
+            "broker_payload_json": {},
+            "error_code": None,
+            "error_message": None,
+            "submitted_at": None,
+            "last_reconciled_at": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+        self._upsert_leg(values)
+        created = self._leg(str(order["paper_order_id"]), role)
+        assert created is not None
+        return created
+
+    def _apply_exit_order(
+        self,
+        order: dict[str, Any],
+        leg: dict[str, Any],
+        payload: dict[str, Any],
+        *,
+        position_quantity: Decimal,
+        observed_at: datetime,
+    ) -> None:
+        safe = _safe_payload(payload)
+        status = str(safe.get("status") or "unknown").lower()
+        values = {
+            **leg,
+            "broker_order_id": str(safe.get("id") or "") or leg.get("broker_order_id"),
+            "status": status,
+            "filled_quantity": _decimal(safe.get("filled_qty")),
+            "filled_average_price": (
+                _decimal(safe.get("filled_avg_price"))
+                if safe.get("filled_avg_price") not in {None, ""}
+                else None
+            ),
+            "lifecycle_complete": status in _TERMINAL_STATUSES,
+            "broker_payload_json": safe,
+            "error_code": None,
+            "error_message": None,
+            "submitted_at": _utc(leg.get("submitted_at")) or observed_at,
+            "last_reconciled_at": observed_at,
+            "updated_at": observed_at,
+        }
+        self._upsert_leg(values)
+        lifecycle_complete = position_quantity == _ZERO and status in _TERMINAL_STATUSES
+        overall_status = "CLOSED" if lifecycle_complete else f"{leg['leg_role']}_{status}".upper()
+        with self.engine.begin() as connection:
+            connection.execute(
+                update(paper_orders)
+                .where(paper_orders.c.paper_order_id == order["paper_order_id"])
+                .values(
+                    status=overall_status,
+                    lifecycle_complete=lifecycle_complete,
+                    error_code=(
+                        None
+                        if status not in _TERMINAL_FAILURES
+                        else "PAPER_EXIT_ORDER_FAILED"
+                    ),
+                    error_message=(
+                        None
+                        if status not in _TERMINAL_FAILURES
+                        else f"{leg['leg_role']} ended {status} with position {position_quantity}"
+                    ),
+                    last_reconciled_at=observed_at,
+                    updated_at=observed_at,
+                )
+            )
+        self._append_order_event(
+            str(order["paper_order_id"]),
+            broker_status=overall_status,
+            filled_quantity=_decimal(order["filled_quantity"]),
+            filled_average_price=(
+                _decimal(order["filled_average_price"])
+                if order.get("filled_average_price") is not None
+                else None
+            ),
+            lifecycle_complete=lifecycle_complete,
+            payload={"leg_role": leg["leg_role"], "broker_order": safe},
+            observed_at=observed_at,
+        )
+
+    async def _submit_or_reconcile_exit(
+        self,
+        broker: PaperBroker,
+        order: dict[str, Any],
+        *,
+        position_quantity: Decimal,
+        emergency: bool,
+        lease_token: str,
+    ) -> bool:
+        leg = self._ensure_exit_intent(
+            order,
+            quantity=position_quantity,
+            emergency=emergency,
+        )
+        client_order_id = str(leg["client_order_id"])
+        payload = await broker.fetch_order_by_client_id(client_order_id)
+        if payload is None:
+            with self.engine.begin() as connection:
+                connection.execute(
+                    update(paper_order_legs)
+                    .where(
+                        paper_order_legs.c.paper_order_leg_id
+                        == leg["paper_order_leg_id"]
+                    )
+                    .values(
+                        status="SUBMITTING",
+                        submission_attempts=paper_order_legs.c.submission_attempts + 1,
+                        updated_at=self._now(),
+                    )
+                )
+            try:
+                payload = await broker.submit_market_exit_order(
+                    client_order_id=client_order_id,
+                    symbol=str(order["symbol"]),
+                    quantity=position_quantity,
+                    time_in_force=str(leg["time_in_force"]),
+                )
+            except AlpacaPaperResponseError as exc:
+                terminal = 400 <= exc.status_code < 500
+                with self.engine.begin() as connection:
+                    connection.execute(
+                        update(paper_order_legs)
+                        .where(
+                            paper_order_legs.c.paper_order_leg_id
+                            == leg["paper_order_leg_id"]
+                        )
+                        .values(
+                            status="REJECTED" if terminal else "SUBMISSION_UNKNOWN",
+                            lifecycle_complete=terminal,
+                            error_code=f"HTTP_{exc.status_code}",
+                            error_message=exc.detail[:2_000],
+                            updated_at=self._now(),
+                        )
+                    )
+                if terminal:
+                    return False
+                raise
+        self._assert_lease(lease_token)
+        positions = await broker.fetch_positions()
+        current_quantity = self._position_quantity(
+            positions,
+            symbol=str(order["symbol"]),
+        )
+        self._assert_lease(lease_token)
+        refreshed_leg = self._leg(str(order["paper_order_id"]), str(leg["leg_role"]))
+        assert refreshed_leg is not None
+        self._apply_exit_order(
+            order,
+            refreshed_leg,
+            payload,
+            position_quantity=current_quantity,
+            observed_at=self._now(),
+        )
+        return True
 
     def _append_order_event(
         self,

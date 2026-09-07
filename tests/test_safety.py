@@ -32,6 +32,8 @@ from agentic_quant.risk import (
     RestrictionRegistry,
     RiskPolicy,
     baseline_long_exit,
+    deployable_long_exit,
+    deployable_long_limit_fill,
     evaluate_candidate,
 )
 
@@ -64,6 +66,40 @@ def test_baseline_bracket_executes_stop_first_when_intrabar_order_is_unknown() -
         target=Decimal("104"),
     )
     assert (price, reason) == (Decimal("98"), "protective_stop")
+
+
+def test_deployable_limit_entry_caps_price_and_rejects_untouched_order() -> None:
+    assert deployable_long_limit_fill(
+        open_price=Decimal("99"),
+        low_price=Decimal("97"),
+        limit_price=Decimal("100"),
+    ) == (Decimal("99"), "opening_auction")
+    assert deployable_long_limit_fill(
+        open_price=Decimal("103"),
+        low_price=Decimal("99"),
+        limit_price=Decimal("100"),
+    ) == (Decimal("100"), "intraday_limit")
+    assert (
+        deployable_long_limit_fill(
+            open_price=Decimal("103"),
+            low_price=Decimal("101"),
+            limit_price=Decimal("100"),
+        )
+        is None
+    )
+
+
+def test_intraday_limit_fill_never_claims_ambiguous_profit_target() -> None:
+    price, reason = deployable_long_exit(
+        entry_kind="intraday_limit",
+        open_price=Decimal("103"),
+        high_price=Decimal("110"),
+        low_price=Decimal("99"),
+        close_price=Decimal("101"),
+        invalidation=Decimal("98"),
+        target=Decimal("104"),
+    )
+    assert (price, reason) == (Decimal("101"), "market_on_close")
 
 
 def candidate(symbol: str = "DEMO", stop: str = "16.65") -> SignalCandidate:

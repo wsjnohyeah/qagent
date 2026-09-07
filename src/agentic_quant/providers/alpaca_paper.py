@@ -2,15 +2,32 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
+from decimal import Decimal
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 
+from agentic_quant.risk import (
+    normalize_deployable_long_prices,
+)
+
 
 ALPACA_PAPER_BASE_URL = "https://paper-api.alpaca.markets"
 QueryValue = str | int | float | bool | None
+
+
+def normalize_long_bracket_prices(
+    *,
+    entry_limit_price: Decimal,
+    take_profit_price: Decimal,
+    stop_loss_price: Decimal,
+) -> tuple[Decimal, Decimal, Decimal]:
+    return normalize_deployable_long_prices(
+        entry_limit_price=entry_limit_price,
+        take_profit_price=take_profit_price,
+        stop_loss_price=stop_loss_price,
+    )
 
 
 class AlpacaPaperConfigurationError(RuntimeError):
@@ -25,33 +42,6 @@ class AlpacaPaperResponseError(RuntimeError):
         self.status_code = status_code
         self.endpoint = endpoint
         self.detail = detail
-
-
-def alpaca_price_increment(price: Decimal) -> Decimal:
-    if price <= 0:
-        raise ValueError("Alpaca order prices must be positive")
-    return Decimal("0.01") if price >= Decimal("1") else Decimal("0.0001")
-
-
-def normalize_long_bracket_prices(
-    *,
-    entry_limit_price: Decimal,
-    take_profit_price: Decimal,
-    stop_loss_price: Decimal,
-) -> tuple[Decimal, Decimal, Decimal]:
-    """Apply Alpaca price increments with conservative long-order rounding."""
-    entry = entry_limit_price.quantize(
-        alpaca_price_increment(entry_limit_price), rounding=ROUND_FLOOR
-    )
-    target = take_profit_price.quantize(
-        alpaca_price_increment(take_profit_price), rounding=ROUND_FLOOR
-    )
-    stop = stop_loss_price.quantize(
-        alpaca_price_increment(stop_loss_price), rounding=ROUND_CEILING
-    )
-    if not stop < entry < target:
-        raise ValueError("Rounded Alpaca bracket prices must satisfy stop < entry < target")
-    return entry, target, stop
 
 
 def require_paper_endpoint(base_url: str) -> str:
@@ -252,6 +242,50 @@ class AlpacaPaperTradingProvider:
             "order_class": "bracket",
             "take_profit": {"limit_price": str(take_profit_price)},
             "stop_loss": {"stop_price": str(stop_loss_price)},
+            "extended_hours": False,
+        }
+        try:
+            response = await self._request(
+                "POST",
+                endpoint,
+                json_body=payload,
+                retry_safe=False,
+            )
+        except AlpacaPaperResponseError:
+            recovered = await self.fetch_order_by_client_id(client_order_id)
+            if recovered is not None:
+                return recovered
+            raise
+        if response.status_code == 422:
+            recovered = await self.fetch_order_by_client_id(client_order_id)
+            if recovered is not None:
+                return recovered
+        self._raise_for_error(response, endpoint)
+        return _json_object(response, endpoint)
+
+    async def submit_market_exit_order(
+        self,
+        *,
+        client_order_id: str,
+        symbol: str,
+        quantity: Decimal,
+        time_in_force: str,
+    ) -> dict[str, Any]:
+        if quantity <= 0:
+            raise ValueError("Paper exit quantity must be positive")
+        if time_in_force not in {"cls", "day"}:
+            raise ValueError("Paper market exit requires cls or day time-in-force")
+        existing = await self.fetch_order_by_client_id(client_order_id)
+        if existing is not None:
+            return existing
+        endpoint = "/v2/orders"
+        payload: dict[str, object] = {
+            "client_order_id": client_order_id,
+            "symbol": symbol.upper(),
+            "qty": str(quantity),
+            "side": "sell",
+            "type": "market",
+            "time_in_force": time_in_force,
             "extended_hours": False,
         }
         try:

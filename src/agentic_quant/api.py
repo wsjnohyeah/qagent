@@ -652,30 +652,29 @@ def create_app(
             while not stop_paper.is_set():
                 delay = app_settings.paper_poll_seconds
                 try:
-                    if not actions.pipeline_enabled("paper"):
-                        actions.record_pipeline_heartbeat(
-                            pipeline="paper",
-                            status="PAUSED",
-                            detail="Paper pipeline control is disabled",
-                        )
-                    else:
-                        result = await paper.tick(
-                            trigger="scheduler",
-                            new_exposure_paused=runtime_is_paused(),
-                        )
-                        actions.record_pipeline_heartbeat(
-                            pipeline="paper",
-                            status=(
-                                "WAITING"
-                                if runtime_is_paused()
-                                else "IDLE"
-                            ),
-                            detail=(
-                                f"submitted={result['orders_submitted']} "
-                                f"reconciled={result['orders_reconciled']} "
-                                f"paused={result['new_exposure_paused']}"
-                            ),
-                        )
+                    pipeline_enabled = actions.pipeline_enabled("paper")
+                    entry_paused = runtime_is_paused() or not pipeline_enabled
+                    # Pipeline/global pause may stop only new exposure. Broker
+                    # reconciliation and risk-reducing exits must keep running.
+                    result = await paper.tick(
+                        trigger="scheduler",
+                        new_exposure_paused=entry_paused,
+                    )
+                    actions.record_pipeline_heartbeat(
+                        pipeline="paper",
+                        status=(
+                            "PAUSED"
+                            if not pipeline_enabled
+                            else "WAITING"
+                            if entry_paused
+                            else "IDLE"
+                        ),
+                        detail=(
+                            f"submitted={result['orders_submitted']} "
+                            f"reconciled={result['orders_reconciled']} "
+                            f"new_entry_paused={entry_paused}"
+                        ),
+                    )
                     failure_streak = 0
                 except Exception as exc:
                     failure_streak += 1
@@ -705,7 +704,11 @@ def create_app(
 
         paper_task = (
             asyncio.create_task(paper_loop(), name="paper-runtime")
-            if app_settings.paper_trading_enabled and process_role != "coordinator"
+            if app_settings.paper_trading_enabled
+            and (
+                process_role == "worker"
+                or app_settings.app_env == AppEnvironment.DEVELOPMENT
+            )
             else None
         )
         application.state.paper_task = paper_task
@@ -1253,6 +1256,12 @@ def create_app(
         limit: int = Query(default=500, ge=1, le=5_000),
     ) -> list[dict[str, Any]]:
         return paper.events(limit=limit)
+
+    @application.get("/v1/paper/order-legs")
+    def paper_order_leg_list(
+        limit: int = Query(default=500, ge=1, le=5_000),
+    ) -> list[dict[str, Any]]:
+        return paper.order_legs(limit=limit)
 
     @application.get("/v1/paper/runs")
     def paper_run_list(

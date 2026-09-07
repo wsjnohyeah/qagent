@@ -1553,6 +1553,47 @@ paper_orders = Table(
     ),
 )
 
+paper_order_legs = Table(
+    "paper_order_legs",
+    metadata,
+    Column("paper_order_leg_id", String(36), primary_key=True),
+    Column(
+        "paper_order_id",
+        String(36),
+        ForeignKey("paper_orders.paper_order_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("leg_role", String(32), nullable=False, index=True),
+    Column("client_order_id", String(48), nullable=True, unique=True),
+    Column("broker_order_id", String(80), nullable=True, unique=True),
+    Column("parent_broker_order_id", String(80), nullable=True, index=True),
+    Column("symbol", String(24), nullable=False, index=True),
+    Column("side", String(8), nullable=False),
+    Column("order_type", String(24), nullable=False),
+    Column("time_in_force", String(16), nullable=False),
+    Column("quantity", Numeric(24, 10), nullable=False),
+    Column("filled_quantity", Numeric(24, 10), nullable=False),
+    Column("filled_average_price", Numeric(20, 8), nullable=True),
+    Column("limit_price", Numeric(20, 8), nullable=True),
+    Column("stop_price", Numeric(20, 8), nullable=True),
+    Column("status", String(40), nullable=False, index=True),
+    Column("lifecycle_complete", Boolean, nullable=False),
+    Column("submission_attempts", Integer, nullable=False),
+    Column("broker_payload_json", JSON, nullable=False),
+    Column("error_code", String(120), nullable=True),
+    Column("error_message", Text, nullable=True),
+    Column("submitted_at", DateTime(timezone=True), nullable=True),
+    Column("last_reconciled_at", DateTime(timezone=True), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False, index=True),
+    UniqueConstraint(
+        "paper_order_id",
+        "leg_role",
+        name="uq_paper_order_legs_order_role",
+    ),
+)
+
 paper_order_events = Table(
     "paper_order_events",
     metadata,

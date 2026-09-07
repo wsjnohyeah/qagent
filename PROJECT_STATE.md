@@ -3,7 +3,7 @@
 ## Current
 
 - Implemented foundations through the corrected Phase 6.1 baseline, the four pre-cloud
-  hardening milestones, and a fail-closed Phase 7 Alpaca Paper boundary, including
+  hardening milestones, and a unified Phase 7 Alpaca Paper lifecycle, including
   Phase 1B open-session checks, corrected point-in-time research/ML contracts, constrained
   ML + LLM strategy generation, and the authenticated Control Center/System Steward/shadow
   decision lineage. Phase 5 statistical promotion and Phase 6 continuous-operation exit
@@ -52,7 +52,8 @@
 - Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
   experiment runs, backtest trades, corporate actions, historical universe membership,
   feature parity checks, and walk-forward reports are stored through Alembic revision
-  `20260907_0031`, including exact validation and ML-training contracts, shadow risk lineage, fenced workflow
+  `20260907_0032`, including exact validation and ML-training contracts, normalized Paper
+  order legs, shadow risk lineage, fenced workflow
   attempts, generation-attempt audit, runtime leases, and the event outbox.
 - The Phase 3 runner provides buy-and-hold, long/cash momentum, and long/cash
   mean-reversion baselines with next-bar execution, commission, slippage, metrics, hashes,
@@ -100,8 +101,10 @@
   It records candidate → deterministic risk decision → approved plan → execution-price risk
   review → modeled virtual order/fill lineage, cash, and P&L. Actual observation, approval,
   and persistence timestamps are separate from the market-data cutoff; a plan must exist
-  before its market open. The next open rechecks reward/risk and quantity, and missed/late
-  bars never become forward fills. Research-only buy-and-hold cannot be shadow-adopted.
+  before its market session. Its DAY limit is capped at the rounded decision close; a real
+  limit touch rechecks reward/risk and quantity, while an untouched order records no fill.
+  Missed/late bars never become forward fills. Research-only buy-and-hold cannot be
+  shadow-adopted.
 - All shadow deployments are attribution sleeves of one shared virtual master account. Open
   plans atomically reserve its cash and concurrent risk; fills/cancellations settle once.
   Account risk is an administrator-confirmed immutable revision, and changing it invalidates
@@ -112,18 +115,22 @@
 - A Shadow plan is first persisted as `PENDING_ACTIVATION` and becomes executable only after
   a post-commit clock check proves durability before the next session open. Shadow admission
   explicitly supports `1Day` only; unsupported minute strategies fail before deployment.
-- The Phase 7 Alpaca Paper adapter persists deterministic, broker-account-bound intents,
-  performs idempotent client-ID recovery, applies Alpaca price increments, submits DAY bracket
-  requests, and reconciles account/position/order state. Every POST rechecks current
-  enrollment, deployment, plan, contract, account, restriction, buying power, and final-price
-  risk. Partial entry expiry cancels the remainder, but a nonzero position remains
-  `POSITION_OPEN_REQUIRES_EXIT` and blocks expansion.
+- The deployable `next_session_day_limit_bracket_moc@0.1.0` contract now governs historical
+  validation, Forward Shadow, and Alpaca Paper. It includes identical conservative price
+  rounding, DAY limit-entry semantics, stop-first ambiguity, and no target credit after an
+  ordering-ambiguous intraday fill.
+- The Phase 7 Alpaca Paper adapter persists deterministic, broker-account-bound intents and
+  normalized entry/target/stop/scheduled-close/emergency-exit legs. It performs idempotent
+  client-ID recovery, cancels the bracket group twenty minutes before close, submits a
+  deterministic MOC exit, and falls back to a separately identified DAY market exit on a
+  late/rejected close. Partial fills no longer require an unimplemented manual exit; all new
+  exposure remains blocked until broker-flat evidence completes the lifecycle.
 - Paper order reconciliation refreshes positions after every observed order transition and
   submission acknowledgement, so a late partial fill cannot be closed using a stale snapshot.
-- Existing Shadow one-bar validation cannot authorize the different Paper lifecycle. Paper
-  requires `alpaca_day_limit_bracket_one_session@0.1.0`; no current validator issues it, so
-  Paper enrollment/submission is intentionally fail-closed. Read-only account probing and
-  reconciliation remain available. The live host remains impossible.
+- Old Shadow certificates cannot authorize Paper. Only a freshly generated exact validation
+  containing the complete current profile and parameters can enroll. Paper remains off by
+  default, account-pinned, single-lifecycle-per-symbol, and hard-pinned to the simulated host;
+  the live host remains impossible.
 - A persistent hourly coordinator owns the gap-repaired market-data → refreshed Alpaca News →
   feature → ML → forecast → Research LLM → constrained strategy → exact-validation →
   shadow-readiness DAG. It checks the full configured XNYS window instead of trusting only the
@@ -166,10 +173,10 @@
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases. A verified `main` push publishes an immutable GHCR
   commit-SHA image with matching embedded/OCI source provenance; deployment rejects mismatches.
-- The current end-to-end audit passes 165 tests, strict typing across 59 source files,
+- The current end-to-end audit passes 173 tests, strict typing across 59 source files,
   authenticated local and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, fresh schema
-  upgrade/downgrade/re-upgrade checks, zero PostgreSQL schema drift, and the repository secret
-  scan.
+  upgrade/downgrade/re-upgrade checks through `20260907_0032`, zero PostgreSQL schema drift,
+  and the repository secret scan.
 - A local real read-only dynamic scan merged 258 source names, retained 40 review candidates
   and 20 deep-research stocks, included SNDK, and excluded sampled leveraged/single-stock
   ETFs. Its budgeted Meta re-rank cost an estimated `$0.008322` and moved SNDK from
@@ -249,10 +256,10 @@
 1. Replace the temporary `sslip.io` hostname with the operator's permanent domain, select an
    off-site backup target and external alert destination, then automate both retention and
    notification checks.
-2. Run the read-only Alpaca Paper account probe in the intended environment. Before any
-   enrollment or external order, build the matching Paper execution validator, nested-order
-   lifecycle, and deterministic session-close position exit required by ADR 0025.
-3. Review production scanner results and theme coverage, approve licensed corporate-action/
+2. After deploying the unified execution profile, re-run the read-only Paper account probe,
+   generate a current exact validation, review/adopt it, start Shadow, and enroll that exact
+   deployment before allowing the first future Paper plan.
+3. Continue production scanner research and theme coverage, approve licensed corporate-action/
    historical-universe and primary evidence refresh inputs, run production-scale backfill,
    enable paid coordinator stages only after budget review, and collect Phase 5 statistical
    plus continuous-shadow evidence and ML-only versus ML+LLM ablations.
@@ -268,9 +275,10 @@
 - Durable disaster recovery and alerting need operator-selected off-site storage and a
   notification destination. The running stack currently has TLS, host firewalling, a local
   verified backup, and an isolated restore drill.
-- Sending the first Paper order is code-blocked until a compatible Paper execution profile
-  exists, and remains an explicit operator decision afterward. No fixture test or deployment
-  health check authorizes an external order.
+- Sending the first Paper order remains evidence-blocked until a newly generated strategy
+  passes the exact gate and is adopted, started in Shadow, and specifically enrolled. The
+  user has authorized Paper activation, but no fixture test or deployment health check may
+  manufacture a strategy or order.
 
 ## Decisions
 
@@ -327,3 +335,5 @@
   authority behind the governed Trading Universe and existing deterministic/human gates.
 - ADR 0029: distinguish provider-observed listing-era history starts from internal data gaps;
   retain immutable probe evidence and never weaken completeness after the observed boundary.
+- ADR 0033: use one deployable DAY-limit/bracket/MOC profile across validation, Shadow, and
+  Paper; persist every broker leg and recover deterministic emergency exits.

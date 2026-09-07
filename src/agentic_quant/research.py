@@ -41,9 +41,11 @@ from agentic_quant.research_store import ResearchStore, _canonical_hash
 from agentic_quant.risk import (
     RestrictionRegistry,
     RiskPolicy,
-    baseline_long_exit,
     baseline_long_geometry,
+    deployable_long_exit,
+    deployable_long_limit_fill,
     evaluate_candidate,
+    normalize_deployable_long_prices,
 )
 from agentic_quant.config import TradingMode
 
@@ -600,14 +602,23 @@ class ResearchBacktester:
                 if day != current_day:
                     current_day = day
                     day_start_cash = portfolio.cash
-                invalidation, target = baseline_long_geometry(
+                raw_invalidation, raw_target = baseline_long_geometry(
                     bars[index].close,
                     self.risk_policy,
                 )
-                # The bracket is committed from the completed decision bar, but
-                # quantity and reward/risk are approved again at the observable
-                # next-open price. This models a pre-authorized market-on-open
-                # instruction with an execution-time risk guard.
+                entry_limit, target, invalidation = normalize_deployable_long_prices(
+                    entry_limit_price=bars[index].close,
+                    take_profit_price=raw_target,
+                    stop_loss_price=raw_invalidation,
+                )
+                limit_fill = deployable_long_limit_fill(
+                    open_price=execution_bar.open,
+                    low_price=execution_bar.low,
+                    limit_price=entry_limit,
+                )
+                # The bracket and maximum quantity are committed from the completed
+                # decision bar. Replay rechecks final risk at the price that the same
+                # DAY limit contract could actually have filled.
                 candidate = SignalCandidate(
                     candidate_id=uuid7(),
                     symbol=symbol,
@@ -617,7 +628,11 @@ class ResearchBacktester:
                     as_of=snapshot.as_of,
                     feature_snapshot_id=snapshot.feature_snapshot_id,
                     catalyst_id="NOT_APPLICABLE_BASELINE",
-                    planned_entry=execution_bar.open,
+                    planned_entry=(
+                        limit_fill[0]
+                        if limit_fill is not None
+                        else entry_limit
+                    ),
                     invalidation=invalidation,
                     targets=(target,),
                     expires_at=execution_bar.available_from,
@@ -663,13 +678,11 @@ class ResearchBacktester:
                     )
                     curve.append(portfolio.cash)
                     continue
-                entered = portfolio.enter_long(
+                entered = limit_fill is not None and portfolio.enter_long(
                     signal_as_of=snapshot.as_of,
                     entry_time=entry_time,
-                    raw_price=execution_bar.open,
-                    # A next-open order cannot use the execution bar's final volume.
-                    # The latest completed decision bar is the newest knowable input.
-                    available_volume=bars[index].volume,
+                    raw_price=limit_fill[0],
+                    available_volume=execution_bar.volume,
                     feature_snapshot_id=snapshot.feature_snapshot_id,
                     quantity_limit=decision.max_quantity,
                 )
@@ -681,7 +694,9 @@ class ResearchBacktester:
                 cutoff=exit_time,
             )
             if entered:
-                exit_price, exit_reason = baseline_long_exit(
+                assert limit_fill is not None
+                exit_price, exit_reason = deployable_long_exit(
+                    entry_kind=limit_fill[1],
                     open_price=execution_bar.open,
                     high_price=execution_bar.high,
                     low_price=execution_bar.low,

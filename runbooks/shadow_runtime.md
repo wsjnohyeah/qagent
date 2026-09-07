@@ -43,11 +43,13 @@ No override can convert an insufficient/rejected validation report into an adopt
   candidate `as_of` remains the market-information cutoff. A plan cannot fill unless it was
   durably persisted before the simulated market open. Delayed historical arrivals therefore
   cannot enter the forward P&L ledger.
-- The plan is a conditional market-on-open instruction under
-  `next_open_market_revalidated_bracket_one_bar@0.2.0`. Its stop/target remain fixed from the
-  decision bar, while the actual open triggers a second reward/risk and quantity check. The
-  result is recorded as `EXECUTION_RISK_REVIEW`; an adverse gap cancels or downsizes rather
-  than silently exceeding the approved risk.
+- The plan uses `next_session_day_limit_bracket_moc@0.1.0`: a DAY limit capped at the
+  completed decision-bar close, fixed stop/target geometry, and same-session close. The
+  actual fill price triggers a second reward/risk and quantity check. An untouched limit is
+  recorded as `DAY_LIMIT_NOT_FILLED`; a fill is closed by stop, target, or modeled MOC.
+- Research, Shadow, and Paper share the same price-increment rounding. When only a daily bar
+  proves an intraday limit touch, replay never credits an ambiguous target print that may
+  have occurred before entry; it uses a later stop or the close.
 - Every deployment is an attribution sleeve under one `SHARED_MASTER` virtual account.
   Approved plans atomically reserve account cash and risk; fills/cancellations release the
   reservation, and realized P&L settles once into the master account. Strategies therefore
@@ -58,9 +60,9 @@ No override can convert an insufficient/rejected validation report into an adopt
   `REVALIDATION_REQUIRED`, cancels any open plan without erasing account history, and cannot
   be resumed until a current exact validation has been adopted.
 - Virtual fills model commission, half-spread, slippage, fixed impact, and maximum bar-volume
-  participation through the deterministic event-driven portfolio engine. Entry sizing uses
-  only the completed decision bar's volume; the future execution bar's final volume is never
-  used to size the opening order.
+  participation through the deterministic event-driven portfolio engine. Quantity is fixed
+  before the session from completed-bar evidence; execution-bar volume is used only to model
+  whether that already bounded order could fill.
 - Deployment/bar/event uniqueness and `last_processed_bar_time` make reruns idempotent.
 - Cash and realized P&L are virtual. This runtime has no broker SDK or submission call. The
   separate Phase 7 Paper runtime may mirror a newly approved plan only after an additional

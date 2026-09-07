@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
-from decimal import Decimal, ROUND_FLOOR
+from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 from pathlib import Path
 
 import yaml
@@ -54,8 +54,68 @@ class RiskPolicy(BaseModel):
 
 
 BASELINE_EXECUTION_PROFILE_VERSION = (
-    "next_open_market_revalidated_bracket_one_bar@0.2.0"
+    "next_session_day_limit_bracket_moc@0.1.0"
 )
+
+
+def deployable_execution_profile_parameters() -> dict[str, object]:
+    """Return the canonical replay/Shadow/Paper execution semantics."""
+    return {
+        "decision_bar": "completed_1Day_bar",
+        "entry": {
+            "side": "buy",
+            "type": "limit",
+            "time_in_force": "day",
+            "limit_basis": "decision_bar_close",
+            "whole_shares": True,
+            "extended_hours": False,
+        },
+        "attached_exits": {
+            "order_class": "bracket",
+            "take_profit": "risk_policy_target",
+            "stop_loss": "risk_policy_invalidation",
+            "same_session": True,
+        },
+        "scheduled_exit": {
+            "type": "market",
+            "time_in_force": "cls",
+            "cancel_entry_group_before_submit": True,
+            "submission_lead_minutes": 20,
+        },
+        "emergency_exit": {
+            "type": "market",
+            "time_in_force": "day",
+            "condition": "scheduled_exit_unavailable_or_operator_cancel",
+        },
+        "daily_bar_ambiguity": "stop_first_and_no_intraday_target_credit_after_limit_fill",
+    }
+
+
+def deployable_price_increment(price: Decimal) -> Decimal:
+    if price <= 0:
+        raise ValueError("Deployable order prices must be positive")
+    return Decimal("0.01") if price >= Decimal("1") else Decimal("0.0001")
+
+
+def normalize_deployable_long_prices(
+    *,
+    entry_limit_price: Decimal,
+    take_profit_price: Decimal,
+    stop_loss_price: Decimal,
+) -> tuple[Decimal, Decimal, Decimal]:
+    """Apply Alpaca-compatible increments with conservative long-order rounding."""
+    entry = entry_limit_price.quantize(
+        deployable_price_increment(entry_limit_price), rounding=ROUND_FLOOR
+    )
+    target = take_profit_price.quantize(
+        deployable_price_increment(take_profit_price), rounding=ROUND_FLOOR
+    )
+    stop = stop_loss_price.quantize(
+        deployable_price_increment(stop_loss_price), rounding=ROUND_CEILING
+    )
+    if not stop < entry < target:
+        raise ValueError("Rounded deployable bracket prices must satisfy stop < entry < target")
+    return entry, target, stop
 
 
 def baseline_long_geometry(
@@ -88,6 +148,58 @@ def baseline_long_exit(
     if high_price >= target:
         return target, "profit_target"
     return close_price, "session_close"
+
+
+def deployable_long_limit_fill(
+    *,
+    open_price: Decimal,
+    low_price: Decimal,
+    limit_price: Decimal,
+) -> tuple[Decimal, str] | None:
+    """Conservatively model the deployable long DAY limit entry.
+
+    A favorable opening auction fills at the opening price. Otherwise the daily bar can
+    prove only that the limit traded sometime during the session, so the fill is capped at
+    the limit and its exact intraday ordering remains unknown.
+    """
+    if open_price <= limit_price:
+        return open_price, "opening_auction"
+    if low_price <= limit_price:
+        return limit_price, "intraday_limit"
+    return None
+
+
+def deployable_long_exit(
+    *,
+    entry_kind: str,
+    open_price: Decimal,
+    high_price: Decimal,
+    low_price: Decimal,
+    close_price: Decimal,
+    invalidation: Decimal,
+    target: Decimal,
+) -> tuple[Decimal, str]:
+    """Resolve bracket/MOC execution without assuming unknowable intraday ordering.
+
+    For an opening-auction fill the full bar occurs after entry and the normal conservative
+    stop-first bracket rule applies. For an intraday limit fill, a daily bar cannot prove
+    that a target print happened after entry, so only a protective stop is credited before
+    the mandatory market-on-close exit.
+    """
+    if entry_kind == "opening_auction":
+        return baseline_long_exit(
+            open_price=open_price,
+            high_price=high_price,
+            low_price=low_price,
+            close_price=close_price,
+            invalidation=invalidation,
+            target=target,
+        )
+    if entry_kind != "intraday_limit":
+        raise ValueError(f"Unsupported deployable entry kind: {entry_kind}")
+    if low_price <= invalidation:
+        return invalidation, "protective_stop_conservative_intraday_ordering"
+    return close_price, "market_on_close"
 
 
 class Restriction(BaseModel):

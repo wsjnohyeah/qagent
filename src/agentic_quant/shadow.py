@@ -53,9 +53,12 @@ from agentic_quant.risk import (
     BASELINE_EXECUTION_PROFILE_VERSION,
     RestrictionRegistry,
     RiskPolicy,
-    baseline_long_exit,
     baseline_long_geometry,
+    deployable_long_exit,
+    deployable_long_limit_fill,
+    deployable_execution_profile_parameters,
     evaluate_candidate,
+    normalize_deployable_long_prices,
 )
 from agentic_quant.virtual_account import (
     MAIN_VIRTUAL_ACCOUNT_ID,
@@ -213,6 +216,7 @@ class ShadowRuntime:
                 dict(report.execution_contract_json or {}).get("initial_equity")
             ),
             "execution_profile": BASELINE_EXECUTION_PROFILE_VERSION,
+            "execution_profile_parameters": deployable_execution_profile_parameters(),
         }
         if dict(report.execution_contract_json or {}) != expected_contract:
             raise ValueError(
@@ -1560,6 +1564,11 @@ class ShadowRuntime:
                     )
                 }
             )
+            limit_fill = deployable_long_limit_fill(
+                open_price=Decimal(str(execution_bar.open)),
+                low_price=Decimal(str(execution_bar.low)),
+                limit_price=Decimal(str(pending["limit_price"])),
+            )
             execution_candidate = SignalCandidate(
                 candidate_id=str(pending["candidate_id"]),
                 symbol=str(pending["symbol"]),
@@ -1569,7 +1578,11 @@ class ShadowRuntime:
                 as_of=signal_as_of,
                 feature_snapshot_id=str(pending["feature_snapshot_id"]),
                 catalyst_id="NOT_APPLICABLE_BASELINE",
-                planned_entry=Decimal(str(execution_bar.open)),
+                planned_entry=(
+                    limit_fill[0]
+                    if limit_fill is not None
+                    else Decimal(str(pending["limit_price"]))
+                ),
                 invalidation=Decimal(str(pending["invalidation"])),
                 targets=tuple(
                     Decimal(str(value)) for value in pending["targets_json"]
@@ -1607,12 +1620,14 @@ class ShadowRuntime:
                 evaluated_at=entry_time,
                 new_exposure_paused=False,
             )
-            if execution_review.verdict != Verdict.APPROVE:
+            if limit_fill is None:
+                rejection_reasons.append("DAY_LIMIT_NOT_FILLED")
+            elif execution_review.verdict != Verdict.APPROVE:
                 rejection_reasons.extend(execution_review.reason_codes)
             else:
                 cash_limit = int(
                     Decimal(str(pending["reserved_cash"]))
-                    // Decimal(str(execution_bar.open))
+                    // limit_fill[0]
                 )
                 execution_quantity = min(
                     int(pending["quantity"]),
@@ -1708,6 +1723,7 @@ class ShadowRuntime:
                 quantity_limit=execution_quantity,
                 invalidation=Decimal(str(pending["invalidation"])),
                 target=Decimal(str(list(pending["targets_json"])[0])),
+                entry_limit_price=Decimal(str(pending["limit_price"])),
                 lineage={
                     "candidate_id": pending["candidate_id"],
                     "risk_decision_id": pending["risk_decision_id"],
@@ -1891,9 +1907,14 @@ class ShadowRuntime:
         list[dict[str, Any]],
     ]:
         policy = self.effective_risk_policy()
-        invalidation, target = baseline_long_geometry(
+        raw_invalidation, raw_target = baseline_long_geometry(
             planned_entry,
             policy,
+        )
+        planned_entry, target, invalidation = normalize_deployable_long_prices(
+            entry_limit_price=planned_entry,
+            take_profit_price=raw_target,
+            stop_loss_price=raw_invalidation,
         )
         candidate = SignalCandidate(
             candidate_id=uuid7(),
@@ -2072,6 +2093,7 @@ class ShadowRuntime:
         quantity_limit: int | None = None,
         invalidation: Decimal | None = None,
         target: Decimal | None = None,
+        entry_limit_price: Decimal | None = None,
         lineage: dict[str, str | None] | None = None,
     ) -> tuple[list[dict[str, Any]], Decimal, Decimal]:
         starting_cash = Decimal(str(deployment["cash_balance"]))
@@ -2085,18 +2107,25 @@ class ShadowRuntime:
         assert snapshot is not None
         portfolio.record_signal(snapshot=snapshot, action=action)
         if action == SignalAction.LONG:
-            entered = portfolio.enter_long(
+            limit_fill = deployable_long_limit_fill(
+                open_price=open_price,
+                low_price=low_price,
+                limit_price=entry_limit_price or open_price,
+            )
+            entered = limit_fill is not None and portfolio.enter_long(
                 signal_as_of=signal_time,
                 entry_time=entry_time,
-                raw_price=open_price,
-                available_volume=volume,
+                raw_price=limit_fill[0],
+                available_volume=exit_volume if exit_volume is not None else volume,
                 feature_snapshot_id=snapshot_id,
                 quantity_limit=quantity_limit,
             )
             if entered:
                 if invalidation is None or target is None:
                     raise ValueError("Approved shadow entry requires bracket geometry")
-                exit_price, exit_reason = baseline_long_exit(
+                assert limit_fill is not None
+                exit_price, exit_reason = deployable_long_exit(
+                    entry_kind=limit_fill[1],
                     open_price=open_price,
                     high_price=high_price,
                     low_price=low_price,

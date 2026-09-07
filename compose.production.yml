@@ -8,7 +8,7 @@ services:
       APP_ENV: production
       DEPLOYMENT_ENVIRONMENT_ID: ${DEPLOYMENT_ENVIRONMENT_ID:?Set a unique environment ID}
       LIVE_TRADING_ENABLED: "false"
-      PAPER_TRADING_ENABLED: "false"
+      PAPER_TRADING_ENABLED: "${PAPER_TRADING_ENABLED:-false}"
       GLOBAL_NEW_EXPOSURE_PAUSED: "true"
       AUTO_MIGRATE: "false"
       SHADOW_RUNTIME_ENABLED: "false"

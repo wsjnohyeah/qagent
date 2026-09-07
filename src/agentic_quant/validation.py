@@ -38,6 +38,7 @@ from agentic_quant.risk import (
     BASELINE_EXECUTION_PROFILE_VERSION,
     RestrictionRegistry,
     RiskPolicy,
+    deployable_execution_profile_parameters,
 )
 
 
@@ -68,6 +69,7 @@ def validation_execution_contract(
         "restriction_registry_version": restriction_registry_version,
         "initial_equity": str(initial_equity),
         "execution_profile": BASELINE_EXECUTION_PROFILE_VERSION,
+        "execution_profile_parameters": deployable_execution_profile_parameters(),
     }
 
 

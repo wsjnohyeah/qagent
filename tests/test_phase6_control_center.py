@@ -38,6 +38,7 @@ from agentic_quant.risk import (
     BASELINE_EXECUTION_PROFILE_VERSION,
     RestrictionRegistry,
     RiskPolicy,
+    deployable_execution_profile_parameters,
 )
 from agentic_quant.validation import (
     load_promotion_gate_policy,
@@ -508,6 +509,7 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
         ).version,
         "initial_equity": "100000",
         "execution_profile": BASELINE_EXECUTION_PROFILE_VERSION,
+        "execution_profile_parameters": deployable_execution_profile_parameters(),
     }
     with ledger.engine.begin() as connection:
         connection.execute(

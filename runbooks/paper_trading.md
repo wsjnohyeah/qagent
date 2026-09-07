@@ -17,9 +17,9 @@ LIVE_TRADING_ENABLED=false
 
 ## Staged activation
 
-Current state: steps 1–4 are available for a paused/read-only deployment. Step 5 intentionally
-fails for existing Shadow certificates because no current validator emits the required
-`alpaca_day_limit_bracket_one_session@0.1.0` execution profile. Do not bypass this gate.
+Current state: the validator, Shadow simulator, and broker runtime emit and require the same
+`next_session_day_limit_bracket_moc@0.1.0` contract. Certificates from any older profile fail
+closed and must be regenerated; never edit a certificate to bypass this check.
 
 1. Configure the Alpaca credentials in the ignored environment file or approved production
    secret store. Never place them in Git, logs, screenshots, or discussion posts.
@@ -28,10 +28,9 @@ fails for existing Shadow certificates because no current validator emits the re
 3. Resolve every unexpected existing position. The worker blocks new exposure when it sees a
    position not associated with a tracked open Paper lifecycle.
 4. Complete Strategy validation/adoption and start an active Shadow deployment.
-5. After the Paper-compatible validator and session-close lifecycle are implemented, review
-   and confirm `paper.enroll` for that exact compatible deployment. This does not submit an
-   order; it makes only future plans eligible.
-6. Change the worker environment to `TRADING_MODE=paper` and
+5. Review and confirm `paper.enroll` for that exact compatible deployment. This does not
+   submit an order; it makes only future plans eligible.
+6. Change the production environment to `TRADING_MODE=paper` and
    `PAPER_TRADING_ENABLED=true`, restart it, and verify the `paper` heartbeat. Keep global
    new exposure paused.
 7. Inspect the pinned broker account ID, account snapshot, risk limits, and enrollment. Then
@@ -46,16 +45,22 @@ fails for existing Shadow certificates because no current validator emits the re
   ID. It never creates a replacement identity for the same plan.
 - Entry is a whole-share DAY limit order capped at the validated plan price. Stop-loss and
   take-profit legs are attached as a bracket.
-- The worker cancels an unfilled or partially filled entry remainder after plan expiry. A
-  nonzero broker position keeps the lifecycle open as `POSITION_OPEN_REQUIRES_EXIT`, blocks
-  expansion, and requires operator resolution. Automatic close is not yet implemented.
+- Twenty minutes before the exchange close, the worker cancels all still-active entry/bracket
+  legs. After broker evidence says that group is quiescent, any remaining position receives
+  one deterministic `cls` market exit. A missed/rejected MOC uses a distinct deterministic
+  DAY market emergency exit; new entries stay blocked until the account is flat.
+- Parent, target, stop, scheduled-close, and emergency-exit rows are normalized in
+  `paper_order_legs`; raw nested broker snapshots remain in the append-only event journal.
+- Only one open Paper lifecycle per symbol is allowed, preventing one strategy's forced exit
+  from closing another strategy's position.
 - Reconciliation reads the broker order first and then refreshes positions before deciding
   lifecycle completion. A fill arriving after the tick's initial account snapshot therefore
   cannot be misclassified as flat or become an unmanaged position on the next tick.
 - New exposure requires an active exact contract, unblocked broker account, adequate buying
   power, account floor and daily-loss headroom, per-trade and portfolio-risk headroom, no
   unmanaged positions, enabled pipeline, and resumed global switch.
-- Pause blocks submission only. Reconciliation continues so fills/cancels are not lost.
+- Global pause, Paper pipeline pause, or enrollment pause blocks new entries only.
+  Reconciliation and risk-reducing exits continue so fills/cancels are not lost.
 
 ## Inspection
 
@@ -68,6 +73,7 @@ GET  /v1/paper/account
 GET  /v1/paper/positions
 GET  /v1/paper/enrollments
 GET  /v1/paper/orders
+GET  /v1/paper/order-legs
 GET  /v1/paper/events
 GET  /v1/paper/runs
 ```
@@ -81,6 +87,8 @@ are `paper.enroll`, `paper.pause`, `paper.resume`, `paper.retire`, `paper.tick`,
 1. Confirm global pause. Do not assume pause cancels existing orders.
 2. Inspect Paper orders, lifecycle journal, account, and positions.
 3. If cancellation is required, review and confirm `paper.cancel_order` for the exact order.
+   If any quantity has filled, the confirmed action also creates a deterministic DAY market
+   exit rather than leaving an unprotected position.
 4. If the broker account ID changes, enrollments become `ACCOUNT_MISMATCH`; old intents stay
    bound to the original account and cannot be forwarded. Verify and resolve the old account
    before creating any future enrollment.

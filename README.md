@@ -488,36 +488,35 @@ Only plans created after enrollment are eligible. The worker creates a durable l
 before network I/O, derives a stable Alpaca `client_order_id`, looks up that ID before every
 retry, and records each observed broker lifecycle change.
 
-The adapter supports long US-equity, whole-share, price-capped DAY bracket intents, broker
-price increments, pinned account identity, idempotent recovery, and position-aware
-reconciliation. Every POST rechecks current enrollment, plan, contract, restriction, buying
-power, account floor/daily loss, and per-trade/concurrent dollar risk. An expired partial
-entry has its remainder canceled, but a nonzero position stays open as
-`POSITION_OPEN_REQUIRES_EXIT`; automatic session-close liquidation and complete child-order
-tracking are not yet implemented.
+The deployable profile `next_session_day_limit_bracket_moc@0.1.0` is shared by historical
+validation, Forward Shadow, and Paper. It uses a whole-share, price-capped DAY limit entry,
+an intraday stop/target bracket, and a deterministic market-on-close exit after canceling the
+remaining entry group. Alpaca-compatible price increments are part of the same contract.
+Daily-bar replay never credits an ambiguous target that may have printed before an intraday
+limit fill.
 
-Most importantly, the existing Shadow profile
-`next_open_market_revalidated_bracket_one_bar@0.2.0` cannot authorize this broker behavior.
-Paper requires `alpaca_day_limit_bracket_one_session@0.1.0`, and the current validator does
-not issue that certificate. Enrollment and order submission therefore fail closed until a
-matching validator and lifecycle are implemented. Read-only broker probing remains available.
+Every parent, take-profit, stop-loss, scheduled-close, and emergency-exit order is normalized
+and persisted. Unknown responses recover by deterministic `client_order_id`; partial entries
+are flattened automatically. If a scheduled close is rejected or the worker reaches the
+cutoff late, a separately identified DAY market exit is the fail-safe. New entries remain
+blocked until broker-flat evidence completes the prior lifecycle, and only one lifecycle per
+symbol may be open.
 
 Submission is off by default. Staged setup is:
 
-1. Keep `TRADING_MODE=shadow`, confirm an eligible Strategy and Shadow deployment, and use
-   the Paper page's read-only connection test.
-2. Implement and pass the Paper-compatible execution validation/lifecycle milestone; do not
-   substitute an existing Shadow certificate.
-3. Only then confirm the exact deployment's `paper.enroll` preview. Historical plans remain
+1. Confirm an eligible current-profile Strategy and Shadow deployment, and use the Paper
+   page's read-only connection test.
+2. Confirm the exact deployment's `paper.enroll` preview. Historical plans remain
    excluded.
-4. Set `TRADING_MODE=paper` and `PAPER_TRADING_ENABLED=true` only in the intended worker
-   environment, restart, inspect account identity and pipeline heartbeat, then separately
-   confirm the global resume action.
+3. Set `TRADING_MODE=paper` and `PAPER_TRADING_ENABLED=true` in production, restart, keep
+   the boot-time global pause, and verify account identity plus the Paper heartbeat.
+4. Inspect the persisted broker-leg view, then separately confirm the global resume action.
+   Never use deployment health checks to manufacture an order.
 
 The broker base URL is hard-pinned to `https://paper-api.alpaca.markets`; configuration that
 enables Paper against the live Alpaca host fails startup. There is no `live` trading mode and
 `LIVE_TRADING_ENABLED=true` always fails. See `runbooks/paper_trading.md`, ADR 0024, and
-ADR 0025.
+ADR 0025 and its implemented resolution in ADR 0033.
 
 ## Repository map
 

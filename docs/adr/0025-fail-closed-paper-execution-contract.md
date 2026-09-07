@@ -1,6 +1,6 @@
 # ADR 0025: Require a separately validated Paper execution contract
 
-- Status: Accepted; amends ADR 0024
+- Status: Superseded by ADR 0033; retained as the fail-closed design history
 - Date: 2026-09-06
 
 ## Context
@@ -40,3 +40,9 @@ mean idempotency alone is not sufficient authorization.
   validation remain required before unattended Paper operation.
 - Historical Paper/Shadow evidence stays distinct and cannot be combined into one return
   series.
+
+## Resolution
+
+ADR 0033 implements the missing unified validator, nested-child persistence, and deterministic
+session-close/emergency-exit lifecycle. Older certificates remain invalid; this ADR's
+fail-closed transition was not bypassed.

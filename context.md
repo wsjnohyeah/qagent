@@ -3328,6 +3328,60 @@ lifecycle. No Paper order was used as a build or deployment test.
     validation or the administrator's separate strategy-adoption and Shadow-start confirmations.
 - Corrections/follow-ups: none.
 
+### D047 — One deployable execution contract must govern replay, Shadow, and Paper
+
+- Date: 2026-09-07 PDT.
+- The user authorized production research, Forward Shadow, and Alpaca Paper activation after
+  completing all remaining deployment work and repeated self-review.
+- Decision: do not treat configuration flags as completion. Replace the deliberately blocked
+  Paper scaffold with one versioned `next_session_day_limit_bracket_moc@0.1.0` contract shared
+  by historical validation, Forward Shadow, and Paper.
+- The contract uses a rounded prior-close DAY limit, rounded bracket geometry, conservative
+  daily-bar ordering, and a same-session MOC. A rejected/missed scheduled close uses a
+  deterministic DAY market emergency exit and blocks all new exposure until broker-flat.
+- Persist parent, target, stop, scheduled-close, and emergency-exit broker rows. Unknown
+  responses recover by client ID; only one open lifecycle per symbol is permitted.
+- Paper/global pipeline pause applies to new entries, never to reconciliation or
+  risk-reducing exits. Old execution certificates are invalid and must be regenerated.
+- Formal record: ADR 0033.
+
+### C046 — `Complete deployable Paper execution lifecycle`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-07 PDT.
+- User intent: complete remaining safe deployment work, then enable production research,
+  Shadow, and Alpaca Paper with repeated end-to-end review.
+- Scope:
+  - Unified backtest, Forward Shadow, and Paper price/fill/exit semantics under one hashed
+    execution profile, including Alpaca-compatible conservative rounding.
+  - Added durable normalized broker-leg state, MOC exit, deterministic emergency exit,
+    unknown-response recovery, account binding, and one-open-lifecycle-per-symbol fencing.
+  - Kept reconciliation/exits active while global or Paper pipeline entry controls are paused.
+  - Made the production API report Paper configuration without running a duplicate scheduler;
+    added broker-leg API/UI inspection and Alembic revision `20260907_0032`.
+  - Updated current setup/deployment/runbook guidance and ADR 0033; ADR 0025 remains as the
+    historical fail-closed transition.
+- Architecture/decision impact:
+  - Paper is no longer code-blocked by a deliberately unissuable certificate, but old
+    certificates cannot be reused. Exact validation, explicit adoption, Shadow start, Paper
+    enrollment, and account-flat checks still gate every future entry. Live money remains
+    structurally impossible.
+- Validation:
+  - `make release-check` passed with 171 tests before the final overlap/cancel regressions;
+    the final complete suite passes 173 tests, Flake8, and strict mypy across 59 source files.
+  - SQLite downgrade/re-upgrade reached `20260907_0032`; PostgreSQL Alembic autogenerate found
+    zero drift; authenticated local and container doctors and secret scan passed.
+  - Node 24 parsed the browser JavaScript. Fault tests cover partial fills, idempotent MOC,
+    unknown exit recovery, rejected-MOC emergency fallback, account change, and same-symbol
+    lifecycle conflict.
+- Expected global state after commit:
+  - Source is ready for GitHub CI and immutable production deployment. Production remains on
+    `5b1d6d74eed19378fc8ab48efc6b64d4ef392f7c` until that process completes; paid research,
+    Paper, and new exposure remain disabled/paused there.
+- Corrections/follow-ups: record the exact production rollout and runtime evidence in the
+  next entry; do not claim a strategy or Paper order unless the deterministic evidence gates
+  actually produce one.
+
 ## Template for future commit entries
 
 Copy this section before making a commit:
