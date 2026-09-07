@@ -34,6 +34,9 @@
 - The Alpaca Paper account endpoint passed a real read-only probe: account active, USD,
   trading/account blocks false, and zero positions. No order endpoint was called.
 - A real AAPL backfill stored 391 unique minute bars; replay inserted zero duplicates. A bounded OPRA request stored 10 unique option snapshots; replay inserted zero duplicates.
+- Alpaca zero-volume suspension placeholders preserve their raw payload, OHLC, volume, and
+  trade count while normalizing provider `vw: 0` to an unavailable VWAP. Zero volume remains
+  visible as a quality warning; non-positive VWAP on a traded bar still fails closed.
 - Raw Alpaca responses are content-addressed in MinIO, normalized rows are stored in PostgreSQL, and new-record events are published to Redis Streams.
 - The live collector has bounded reconnects and XNYS-calendar-aware intraday gap detection with automatic REST repair.
 - A real open-session SPY run persisted SIP trades, quotes, and minute bars. A controlled
@@ -158,7 +161,7 @@
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases. A verified `main` push publishes an immutable GHCR
   commit-SHA image with matching embedded/OCI source provenance; deployment rejects mismatches.
-- The current end-to-end audit passes 162 tests, strict typing across 59 source files,
+- The current end-to-end audit passes 163 tests, strict typing across 59 source files,
   authenticated local and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, fresh schema
   upgrade/downgrade/re-upgrade checks, zero PostgreSQL schema drift, and the repository secret
   scan.

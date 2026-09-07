@@ -248,6 +248,16 @@ class AlpacaMarketDataProvider:
         item: dict[str, Any],
     ) -> StockBar:
         event_time = datetime.fromisoformat(str(item["t"]).replace("Z", "+00:00")).astimezone(UTC)
+        volume = int(item["v"])
+        raw_vwap = item.get("vw")
+        vwap = Decimal(str(raw_vwap)) if raw_vwap is not None else None
+        # Alpaca emits zero-volume daily placeholders with ``vw: 0`` during
+        # extended trading suspensions. Zero is not a price; preserve the bar
+        # and its explicit zero volume while representing the unavailable VWAP
+        # as null. A non-positive VWAP on a traded bar still fails StockBar
+        # validation instead of being silently repaired.
+        if volume == 0 and vwap == 0:
+            vwap = None
         return StockBar(
             bar_id=stable_uuid("bar", "alpaca", feed, symbol.upper(), timeframe, event_time),
             symbol=symbol.upper(),
@@ -262,9 +272,9 @@ class AlpacaMarketDataProvider:
             high=Decimal(str(item["h"])),
             low=Decimal(str(item["l"])),
             close=Decimal(str(item["c"])),
-            volume=int(item["v"]),
+            volume=volume,
             trade_count=int(item["n"]) if item.get("n") is not None else None,
-            vwap=Decimal(str(item["vw"])) if item.get("vw") is not None else None,
+            vwap=vwap,
             source="alpaca",
             feed=feed,
             raw_object_id=raw_object_id,

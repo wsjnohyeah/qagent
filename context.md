@@ -10,7 +10,7 @@ present, but order authorization remains code-blocked until a separately validat
 execution lifecycle exists; paid research, off-site backup/alerting, and statistical/elapsed
 production evidence remain open
 
-Current documented baseline: C040 — `Record dynamic scanner production rollout`
+Current documented baseline: C041 — `Normalize suspended-session VWAP placeholders`
 
 ## Purpose and authority
 
@@ -3133,6 +3133,47 @@ lifecycle. No Paper order was used as a build or deployment test.
     research proceeds asynchronously from the selected candidate set, while the separate
     Trading Universe gate, global new-exposure pause, disabled Paper submission, and permanent
     live-money prohibition remain intact.
+- Corrections/follow-ups: C041 handles the NBIS suspension-placeholder case found as the
+  production coordinator advanced beyond the state captured here.
+
+### D044 — Zero-volume provider placeholders have no VWAP price
+
+- Date: 2026-09-07 PDT.
+- The broad production cycle exposed Alpaca daily placeholders for NBIS's extended suspension:
+  positive unchanged OHLC, zero volume/trades, and literal `vw: 0`.
+- Decision: preserve the raw record and normalized zero-volume bar, but represent zero VWAP as
+  missing only when volume is also zero. A non-positive VWAP on a traded bar still fails.
+- Zero volume remains an explicit data-quality warning and no completeness, promotion, or
+  execution gate is weakened.
+- Formal record: ADR 0030.
+
+### C041 — `Normalize suspended-session VWAP placeholders`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-07 PDT.
+- User intent: keep development local and deploy only verified commits while completing the
+  production dynamic-market workflow.
+- Scope:
+  - Reproduced the NBIS production failure against the real read-only Alpaca response: 1,212
+    daily records included 622 suspension placeholders whose zero-volume `vw: 0` could not
+    satisfy the positive-price domain contract.
+  - Normalized that exact provider sentinel to missing VWAP while preserving raw evidence and
+    every other bar field; added a focused provider regression and ADR 0030.
+- Architecture/decision impact:
+  - Provider quirks are translated at the adapter boundary. The internal model continues to
+    distinguish an absent VWAP from an invalid zero price, and quality/promotion gates remain
+    independent.
+- Validation:
+  - `make release-check` passed: Flake8, strict mypy across 59 source files, all 163 tests,
+    authenticated local doctor, secret scan, Docker rebuild/doctor, and PostgreSQL Alembic
+    zero-drift at `20260907_0031`.
+  - A bounded real NBIS fetch now normalizes all 1,212 bars, retaining all 622 zero-volume
+    warnings as missing VWAP values. No paid LLM, Paper order, Shadow exposure, or live-money
+    operation was executed.
+- Expected global state after commit:
+  - Source is ready for full release verification, GitHub CI, immutable-image deployment, and
+    automatic retry of the recoverable NBIS coordinator job. Production remains on C039 until
+    that exact functional image is verified and deployed.
 - Corrections/follow-ups: none.
 
 ## Template for future commit entries

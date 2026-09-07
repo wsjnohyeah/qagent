@@ -96,6 +96,56 @@ def test_alpaca_adapter_normalizes_raw_one_minute_bars() -> None:
     assert page.bars[0].available_from == datetime(2026, 9, 3, 14, 31, tzinfo=UTC)
 
 
+def test_alpaca_adapter_treats_zero_volume_placeholder_vwap_as_missing() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "bars": [
+                    {
+                        "t": "2024-08-19T04:00:00Z",
+                        "o": 18.94,
+                        "h": 18.94,
+                        "l": 18.94,
+                        "c": 18.94,
+                        "v": 0,
+                        "n": 0,
+                        "vw": 0,
+                    }
+                ],
+                "next_page_token": None,
+                "symbol": "NBIS",
+            },
+        )
+
+    async def scenario() -> StockBarsPage:
+        client = httpx.AsyncClient(
+            base_url="https://data.alpaca.markets",
+            transport=httpx.MockTransport(handler),
+        )
+        provider = AlpacaMarketDataProvider(
+            api_key="test-key",
+            api_secret="test-secret",
+            client=client,
+        )
+        result = await provider.fetch_stock_bars_page(
+            StockBarsRequest(
+                symbol="NBIS",
+                start=datetime(2024, 8, 19, tzinfo=UTC),
+                end=datetime(2024, 8, 20, tzinfo=UTC),
+                timeframe="1Day",
+            )
+        )
+        await client.aclose()
+        return result
+
+    page = asyncio.run(scenario())
+    assert len(page.bars) == 1
+    assert page.bars[0].volume == 0
+    assert page.bars[0].trade_count == 0
+    assert page.bars[0].vwap is None
+
+
 def test_stock_bar_request_requires_a_valid_timezone_aware_window() -> None:
     with pytest.raises(ValueError, match="timezone-aware"):
         StockBarsRequest(
