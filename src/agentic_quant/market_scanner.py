@@ -425,21 +425,31 @@ class MarketUniverseScanner:
             previous_admission = dict(
                 previous.get("trading_pool_admission") or {}
             ) if previous else {}
+            prior_is_current = self._admission_matches_current_pool(
+                previous_admission,
+                current,
+            )
             return {
                 "enabled": True,
                 "status": (
                     "HELD_PREVIOUS_LLM_REVIEW"
-                    if previous_members
+                    if prior_is_current
                     else "WAITING_LLM_REVIEW"
                 ),
                 "list_slug": AUTO_TRADING_POOL_SLUG,
                 "list_revision": int(current["current_revision"]),
-                "admitted_symbols": previous_members,
+                "admitted_symbols": previous_members if prior_is_current else [],
                 "added_symbols": [],
                 "removed_symbols": [],
-                "basis_scan_id": previous_admission.get("basis_scan_id"),
-                "basis_llm_invocation_id": previous_admission.get(
-                    "basis_llm_invocation_id"
+                "basis_scan_id": (
+                    previous_admission.get("basis_scan_id")
+                    if prior_is_current
+                    else None
+                ),
+                "basis_llm_invocation_id": (
+                    previous_admission.get("basis_llm_invocation_id")
+                    if prior_is_current
+                    else None
                 ),
             }
         updated = self.objects.replace_list_members(
@@ -465,6 +475,24 @@ class MarketUniverseScanner:
             "basis_scan_id": scan_id,
             "basis_llm_invocation_id": llm_invocation_id,
         }
+
+    @staticmethod
+    def _admission_matches_current_pool(
+        admission: dict[str, Any],
+        pool: dict[str, Any],
+    ) -> bool:
+        return bool(
+            admission.get("basis_llm_invocation_id")
+            and admission.get("status")
+            in {"UPDATED", "UNCHANGED", "HELD_PREVIOUS_LLM_REVIEW"}
+            and int(admission.get("list_revision", -1))
+            == int(pool["current_revision"])
+            and {
+                str(value).upper()
+                for value in admission.get("admitted_symbols", [])
+            }
+            == {str(value).upper() for value in pool["members"]}
+        )
 
     async def _fetch_sources(
         self,
@@ -755,7 +783,18 @@ class MarketUniverseScanner:
     def _llm_interval_elapsed(self, now: datetime) -> bool:
         if self.settings.market_scanner_auto_trading_pool_enabled:
             trading_pool = self.objects.get_list(AUTO_TRADING_POOL_SLUG)
-            if trading_pool is None or not trading_pool["members"]:
+            latest = self.store.latest()
+            latest_admission = dict(
+                latest.get("trading_pool_admission") or {}
+            ) if latest else {}
+            if (
+                trading_pool is None
+                or not trading_pool["members"]
+                or not self._admission_matches_current_pool(
+                    latest_admission,
+                    trading_pool,
+                )
+            ):
                 return True
         completed = next(
             (

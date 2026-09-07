@@ -349,6 +349,30 @@ def test_llm_reviewed_scan_refreshes_audited_trading_pool(
     )
     assert second["trading_pool_admission"]["admitted_symbols"] == pool["members"]
 
+    objects.replace_list_members(
+        slug_or_id="scanner-trading-pool",
+        members=["NVDA"],
+        reason="Simulate an out-of-band list revision",
+        created_by="test-administrator",
+    )
+    stale = asyncio.run(
+        handler._await_shadow_adoption(
+            {
+                "symbol": "SNDK",
+                "validation_report_id": "validation-id",
+                "eligible_for_human_review": True,
+                "universe_scan_id": first["scan_id"],
+            }
+        )
+    )
+    assert stale["outcome"] == "WAITING_TRADING_UNIVERSE_APPROVAL"
+
+    repaired = asyncio.run(scanner.run_once(as_of=NOW + timedelta(hours=2)))
+    assert repaired["llm_status"] == "COMPLETED"
+    assert repaired["trading_pool_admission"]["status"] == "UPDATED"
+    assert "SNDK" in repaired["trading_pool_admission"]["admitted_symbols"]
+    assert llm.calls == 2
+
 
 def test_market_scanner_rejects_llm_symbol_invention_and_falls_back(
     settings: Settings,

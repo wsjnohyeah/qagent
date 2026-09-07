@@ -10,7 +10,7 @@ present, but order authorization remains code-blocked until a separately validat
 execution lifecycle exists; paid research, off-site backup/alerting, and statistical/elapsed
 production evidence remain open
 
-Current documented baseline: C042 — `Allow audited LLM trading-pool admission`
+Current documented baseline: C043 — `Invalidate stale scanner pool authority`
 
 ## Purpose and authority
 
@@ -3220,6 +3220,32 @@ lifecycle. No Paper order was used as a build or deployment test.
   - The capability defaults off. After an immutable deploy and explicit production flag, a
     fresh successful LLM-reviewed scan may populate the Scanner Trading Pool while new exposure,
     Paper submission, and live money remain disabled.
+- Corrections/follow-ups: C043 strengthens interval-skip behavior against an out-of-band list
+  revision found during the pre-deploy audit.
+
+### C043 — `Invalidate stale scanner pool authority`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-07 PDT.
+- User intent: complete the autonomous scanner/LLM pool safely and leave auditable records.
+- Scope:
+  - Require prior admitted membership, current list membership, and exact list revision to
+    match before an interval-skipped or failed scan may retain earlier LLM authority.
+  - Force a fresh LLM review when the pool is empty or its revision/members diverge from the
+    latest recorded admission; stale coordinator scans remain unable to authorize the new
+    revision.
+  - Extended the scanner regression through valid admission, interval reuse, out-of-band list
+    mutation, fail-closed final gating, and automatic fresh-review repair.
+- Architecture/decision impact:
+  - List membership alone is never proof of LLM review. Authorization is the conjunction of
+    immutable scan evidence, basis invocation, exact revision, and exact current membership.
+- Validation:
+  - `make release-check` passed: Flake8, strict mypy across 59 source files, all 164 tests,
+    authenticated local doctor, secret scan, Docker rebuild/doctor, and PostgreSQL Alembic
+    zero-drift at `20260907_0031`.
+- Expected global state after commit:
+  - Source closes the stale-revision edge case before the autonomous pool is activated in
+    production; production remains unchanged on C039.
 - Corrections/follow-ups: none.
 
 ## Template for future commit entries
