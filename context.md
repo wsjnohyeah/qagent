@@ -10,7 +10,7 @@ present, but order authorization remains code-blocked until a separately validat
 execution lifecycle exists; paid research, off-site backup/alerting, and statistical/elapsed
 production evidence remain open
 
-Current documented baseline: C044 — `Use post-suspension research boundaries`
+Current documented baseline: C045 — `Record autonomous scanner production activation`
 
 ## Purpose and authority
 
@@ -3287,6 +3287,45 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Expected global state after commit:
   - Source is ready for CI and a corrective immutable deployment. Production remains on C043;
     NBIS jobs are safely retryable and cannot progress past failed data quality until correction.
+- Corrections/follow-ups: none.
+
+### C045 — `Record autonomous scanner production activation`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-07 PDT.
+- User intent: keep local/GitHub as the source of truth, deploy the verified autonomous
+  scanner/LLM trading-pool workflow, and preserve visible evidence.
+- Scope:
+  - Recorded the production rollout of C041–C044 and the explicit enablement of
+    `MARKET_SCANNER_AUTO_TRADING_POOL_ENABLED=true`.
+  - Updated the durable global state with the exact production image, real scanner/LLM/list
+    evidence, and the production NBIS recovery result.
+- Architecture/decision impact:
+  - Production remains an immutable runtime target. All source changes were developed and
+    release-checked locally, pushed to GitHub, verified in Actions, published by SHA, and only
+    then deployed.
+- Validation:
+  - GitHub Actions run `34105678451` passed verification and GHCR publication for
+    `5b1d6d74eed19378fc8ab48efc6b64d4ef392f7c`.
+  - Backup `/opt/agentic-quant/backups/20260907T092309Z` passed checksums, raw-object archive
+    inspection, and PostgreSQL catalog verification before the corrective rollout.
+  - All five production Compose services are healthy on the exact image. HTTPS readiness is
+    200, anonymous system status is 401, authenticated login is 200, and its cookie is Secure
+    and HttpOnly.
+  - Production scan `449ead85-c9b3-5af9-b6cc-300c87c134ce` completed the 258 → 40 → 20 funnel
+    and Meta `muse-spark-1.3` review. Invocation
+    `01a07b27-4760-7892-9a5a-f1fb0135eede` used 6,350 tokens for estimated cost `$0.004149`.
+    Scanner Trading Pool revision 2 contains the exact 20 admitted symbols and records all 20
+    additions; the separate manual Trading Universe remains unchanged.
+  - Production NBIS job `1d067529-6606-5094-8942-1b855a54d46a` recovered on attempt 3 with
+    boundary event `f9daf24e-60de-59f5-b3df-204a952e2501`, verified start `2024-10-21`, and a
+    passing 470-bar quality report with no missing intervals or zero-volume warnings.
+  - New exposure remains paused; paid strategy-research stages, Paper submission, and live
+    money remain disabled. No Shadow exposure or broker order was created.
+- Global state after commit:
+  - Autonomous LLM-reviewed symbol admission is live and auditable in production. Continuous
+    research continues asynchronously; symbol admission still cannot bypass exact strategy
+    validation or the administrator's separate strategy-adoption and Shadow-start confirmations.
 - Corrections/follow-ups: none.
 
 ## Template for future commit entries

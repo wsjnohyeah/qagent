@@ -11,10 +11,10 @@
   intentionally insufficient.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `6cb434b156b3ed941c8a6402d5cf3e9f8f388944` image, PostgreSQL, Redis, API, Shadow worker,
-  and independent research coordinator behind Caddy TLS. Dynamic market scanning and its
-  bounded Meta re-ranking are enabled; new exposure is paused, while paid strategy research,
-  Paper submission, and live money remain disabled.
+  `5b1d6d74eed19378fc8ab48efc6b64d4ef392f7c` image, PostgreSQL, Redis, API, Shadow worker,
+  and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
+  Meta re-ranking, and audited Scanner Trading Pool admission are enabled; new exposure is
+  paused, while paid strategy research, Paper submission, and live money remain disabled.
 - Local-lite uses Python 3.12, a project-local `uv`, SQLite, and filesystem object storage.
 - The Control API, single-admin object-centric web console, persistent System Steward,
   append-only event ledger, deterministic risk engine, and shadow runtime exist.
@@ -162,7 +162,7 @@
   stop/target geometry used identically by research and shadow. Candidate/snapshot mismatches
   and future signal/feature timestamps also reject.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; production currently runs the
-  verified immutable functional commit `6cb434b156b3ed941c8a6402d5cf3e9f8f388944`.
+  verified immutable functional commit `5b1d6d74eed19378fc8ab48efc6b64d4ef392f7c`.
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases. A verified `main` push publishes an immutable GHCR
   commit-SHA image with matching embedded/OCI source provenance; deployment rejects mismatches.
@@ -174,9 +174,13 @@
   and 20 deep-research stocks, included SNDK, and excluded sampled leveraged/single-stock
   ETFs. Its budgeted Meta re-rank cost an estimated `$0.008322` and moved SNDK from
   deterministic rank 8 to final rank 4 without introducing a symbol or execution authority.
-  Production independently reproduced the 258 → 40 → 20 funnel with estimated LLM cost
-  `$0.003905`; the resulting candidate-list revision contains 20 names while the governed
-  trading universe remains the separate four-symbol revision `[AAPL, IWM, QQQ, SPY]`.
+  Production independently reproduced the 258 → 40 → 20 funnel. The v0.2.0 scan completed a
+  Meta review for estimated cost `$0.004149` and recorded all 20 additions in Scanner Trading
+  Pool revision 2, while the administrator's manual Trading Universe remains the separate
+  four-symbol revision `[AAPL, IWM, QQQ, SPY]`.
+- The production NBIS retry established an evidenced post-suspension boundary at `2024-10-21`.
+  Its 470-bar resumed segment passed strict quality with zero missing intervals; the older raw
+  and normalized history remains available for audit but is excluded from current research.
 - A real bounded AAPL coordinator run trained 734 point-in-time examples, persisted two ML
   candidates and a one-bar forecast, supplied 14 time-safe feature/forecast/document items to
   `gpt-5.6-sol`, and received a citation-valid `ABSTAIN` at 0.90 confidence. The selected ML
