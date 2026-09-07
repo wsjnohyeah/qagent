@@ -138,6 +138,11 @@ and separate research-coordinator worker so CPU-heavy training cannot delay shad
 API does not own production schedulers. Deployment fails if API readiness or either worker
 heartbeat is unhealthy. `AUTO_MIGRATE` remains false in long-running services.
 
+The worker health command performs a cold Python/analytics import before reading its SQL
+heartbeat. Production Compose therefore checks worker and coordinator health every 60 seconds
+with a 20-second timeout. Do not reduce that timeout below measured cold-import latency; the
+deploy script still performs its own immediate, blocking heartbeat gates during each release.
+
 The coordinator validates the complete configured daily window on each cycle and repairs
 internal as well as trailing XNYS-session gaps. It then refreshes bounded Alpaca News before
 feature/ML/LLM work. Paid LLM research remains a separate switch.

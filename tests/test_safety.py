@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 from hypothesis import HealthCheck, given, settings as hypothesis_settings
 from hypothesis import strategies as st
@@ -32,6 +34,16 @@ from agentic_quant.risk import (
     baseline_long_exit,
     evaluate_candidate,
 )
+
+
+def test_production_worker_healthchecks_allow_cold_import_latency() -> None:
+    compose = yaml.safe_load(Path("compose.production.yml").read_text())
+
+    for service_name in ("worker", "coordinator"):
+        healthcheck = compose["services"][service_name]["healthcheck"]
+        assert healthcheck["interval"] == "60s"
+        assert healthcheck["timeout"] == "20s"
+        assert healthcheck["retries"] == 3
 
 
 def test_baseline_bracket_executes_stop_first_when_intrabar_order_is_unknown() -> None:

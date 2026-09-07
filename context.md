@@ -1,16 +1,16 @@
 # Master Project Context
 
-Last updated: 2026-09-06 PDT
+Last updated: 2026-09-07 PDT
 
 Context format: v1
 
-Current phase: implementation foundations through the Phase 7 broker boundary are locally
-implemented, including the four pre-cloud hardening milestones and two independent-review
-remediation passes. Alpaca Paper probing/reconciliation is present, but order authorization is
-code-blocked until a separately validated Paper execution lifecycle exists; cloud deployment
-and statistical/elapsed production evidence remain open
+Current phase: implementation foundations through the Phase 7 broker boundary are deployed to
+a fresh production data plane in guarded Shadow mode. Alpaca Paper probing/reconciliation is
+present, but order authorization remains code-blocked until a separately validated Paper
+execution lifecycle exists; paid research, off-site backup/alerting, and statistical/elapsed
+production evidence remain open
 
-Current documented baseline: C036 — `Bind current research and recovery contracts`
+Current documented baseline: C037 — `Harden and launch the production stack`
 
 ## Purpose and authority
 
@@ -147,8 +147,10 @@ A Git commit cannot contain its own content-derived hash without changing that h
 - Code modification is represented by scoped change sessions. The web process exposes no
   shell; a trusted external coding worker must produce a diff and passing test record before
   a separate local-commit approval. Push and deployment remain external actions.
-- GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; this iteration starts from
-  synchronized commit `c534654`. No cloud host is configured yet.
+- GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`. A fresh SFO3 VPS now runs the
+  production stack at `https://qagent.143.110.239.251.sslip.io` behind Caddy TLS. The initial
+  bootstrap used verified immutable commit `34a76b0`; this iteration corrects the measured
+  worker-health timing before advancing the deployed image.
 - The independent `06b6853` fix verification is mapped item-by-item in
   `docs/REVIEW_REMEDIATION_2026-09-05.md`. The deterministic F01–F11 counterexamples are
   followed by the corrections from the `56bb979` review in
@@ -207,6 +209,9 @@ A Git commit cannot contain its own content-derived hash without changing that h
   dependency-aware attempt tokens and expiry-fenced completion, portfolio ticks use a global
   SQL execution lease, and normalized ingestion reconciles stable business events into a
   transactional SQL outbox before network delivery.
+- Worker and coordinator container health probes run every 60 seconds with a 20-second timeout
+  because their cold Python/analytics import measured about eight seconds on the production
+  host. The guarded deploy command retains separate immediate heartbeat gates.
 - One-shot production bootstrap requires PostgreSQL/Redis, registers an immutable environment
   identity, initializes governed lists and the shared account idempotently, and forces new
   exposure paused. Development data remains local and is not treated as production evidence.
@@ -2519,9 +2524,10 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 Ordered near-term work:
 
-1. Select the VPS/cloud provider, domain/TLS, off-site backup/monitoring, and secret-delivery
-   inputs; verify the exact CI-published image; then execute the guarded bootstrap against a
-   fresh production data plane and perform an isolated restore drill.
+1. Replace the temporary `sslip.io` hostname with the operator's permanent domain, select an
+   off-site backup target and external notification destination, and automate retention plus
+   alert checks. The fresh production bootstrap, TLS path, local backup, and isolated restore
+   drill are complete.
 2. Run a read-only Alpaca Paper probe in the intended environment. Build and validate the
    separate Paper execution profile, nested-child lifecycle, and deterministic session-close
    exit before any enrollment or external order.
@@ -2539,18 +2545,18 @@ Ordered near-term work:
 ## Blocked or unresolved decisions
 
 - GitHub branch-protection policy.
-- VPS/cloud provider, region, instance size, and domain/TLS approach.
-- Secure secret-delivery mechanism for the VPS and CI.
+- Permanent production domain to replace the working temporary `sslip.io` hostname.
+- Off-site backup destination and external monitoring/notification channel.
 - Historical options, premium news/fundamentals, and compliant social-data vendors/budgets.
 - Final restricted-security list beyond META/work-related names.
 - Minimum shadow/paper sample sizes and promotion gates.
 - Notification channels beyond the dashboard.
 - Whether credit spreads enter the first paper release.
 
-None of these blocks local implementation or fixture testing. Public exposure and cloud
-deployment remain gated until their corresponding decisions are made. The first external
-Paper order is additionally blocked by the missing compatible execution certificate and
-position-exit lifecycle. No Paper order was used as a build test.
+None of these blocks the guarded Shadow production service now online. They do block claiming
+complete disaster-recovery and external-alert coverage. The first external Paper order is
+additionally blocked by the missing compatible execution certificate and position-exit
+lifecycle. No Paper order was used as a build or deployment test.
 
 ### C030 — `Build shared account and autonomous bootstrap`
 
@@ -2903,6 +2909,57 @@ position-exit lifecycle. No Paper order was used as a build test.
   - All F01–F06 findings in the `de4c3d0` review are fixed or confirmed fixed on current main.
     The repository remains ready for guarded paused bootstrap; unattended Paper remains
     fail-closed pending its distinct validated execution and exit lifecycle.
+
+### C037 — `Harden and launch the production stack`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-07 PDT.
+- User intent: deploy the reviewed system to the supplied VPS in production mode and make the
+  authenticated application reachable without weakening its execution safeguards.
+- Scope:
+  - Provisioned Docker, Compose, Caddy, and a non-root `qagent` deploy account on the fresh
+    Ubuntu SFO3 host; retained UFW's restricted SSH rule and exposed only TLS/redirect ports.
+  - Delivered hash-only administrator authentication and provider configuration over SSH,
+    with a server-specific database password and session secret. No secret entered Git or the
+    deployment logs.
+  - Bootstrapped the fresh PostgreSQL/Redis/object-store data plane at Alembic
+    `20260907_0031`, registered `prod-sfo3-primary`, created governed defaults, and started the
+    API, Shadow worker, and independent coordinator from an immutable CI-published image.
+  - Added the temporary TLS endpoint `qagent.143.110.239.251.sslip.io`; verified secure
+    cookies, authentication, CSRF rejection, logout/revocation, firewall isolation, and API
+    restart recovery.
+  - Corrected worker/coordinator Compose probes after measuring roughly eight-second cold
+    analytics imports: health checks now run every 60 seconds with a 20-second timeout, with a
+    regression test and matching runbook/state updates.
+  - Created the first production PostgreSQL/raw-object backup and passed checksum, catalog,
+    archive, and isolated disposable restore checks.
+- Architecture/decision impact:
+  - Production is now a distinct durable data plane; no development database or object data
+    was copied. The temporary DNS name can be replaced without changing application identity.
+  - Automation is operational but remains bounded by the same human and deterministic gates:
+    new exposure is paused, paid LLM research is off, Paper submission is off, and live money
+    is structurally unavailable.
+  - Container liveness timing now reflects measured image startup cost without weakening the
+    deploy command's explicit heartbeat gate.
+- Validation:
+  - The guarded bootstrap applied every migration, returned `ready_paused`, and passed API,
+    Shadow-worker, and coordinator heartbeat gates. The first four-symbol production cycle
+    completed collection, news, point-in-time features, ML training, and forecasts with no
+    failed/exhausted jobs; LLM and downstream stages stopped at their expected paid/human
+    gates.
+  - Public HTTPS readiness passed. Authenticated TLS login, Secure/SameSite cookies, missing-
+    CSRF rejection, session logout/revocation, and unauthenticated `401` behavior passed.
+  - A controlled API restart produced only the expected brief proxy `502`, then returned to
+    ready. Backup verification and the isolated restore drill passed at schema
+    `20260907_0031`.
+  - `make release-check` passed with Flake8, strict mypy across 58 source files, 153 tests,
+    authenticated local and Docker doctors, secret scan, rebuilt image, and PostgreSQL
+    Alembic zero-drift.
+- Expected global state after commit:
+  - The production Control Center is online behind TLS on the guarded Shadow-first data plane.
+    The exact corrected image is advanced only after this commit's GitHub CI/GHCR publication
+    succeeds. A permanent domain, automated off-site backup, and external alert destination
+    remain operator inputs; Paper remains code-blocked by its distinct validated lifecycle.
 
 ## Template for future commit entries
 

@@ -9,6 +9,11 @@
   decision lineage. Phase 5 statistical promotion and Phase 6 continuous-operation exit
   criteria have not passed because bounded development data and elapsed observation time are
   intentionally insufficient.
+- The production stack is online in `production` mode at
+  `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
+  image, PostgreSQL, Redis, API, Shadow worker, and independent research coordinator behind
+  Caddy TLS. New exposure is paused; paid LLM research, Paper submission, and live money are
+  disabled.
 - Local-lite uses Python 3.12, a project-local `uv`, SQLite, and filesystem object storage.
 - The Control API, single-admin object-centric web console, persistent System Steward,
   append-only event ledger, deterministic risk engine, and shadow runtime exist.
@@ -132,8 +137,8 @@
   strategy is separately approved for that event. The policy also owns the baseline
   stop/target geometry used identically by research and shadow. Candidate/snapshot mismatches
   and future signal/feature timestamps also reject.
-- GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; local and remote `main`
-  were synchronized at `c534654` before this implementation iteration.
+- GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; the first production bootstrap
+  used verified commit `34a76b0` before the worker-health timing correction in this iteration.
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases. A verified `main` push publishes an immutable GHCR
   commit-SHA image with matching embedded/OCI source provenance; deployment rejects mismatches.
@@ -195,15 +200,20 @@
   global pause, and then verifies API/worker health. Development runtime data is never copied
   as production evidence.
 - VPS helpers create and structurally verify checksummed PostgreSQL plus raw-object backups.
-  Off-site copy and an isolated restore drill remain required operational evidence.
+  The first production backup passed checksum/catalog verification and an isolated restore at
+  schema `20260907_0031`. An automated off-site copy remains required for durable disaster
+  recovery.
+- Production worker/coordinator container checks allow the measured analytics cold-import
+  latency (60-second interval, 20-second timeout) while deploy-time heartbeat gates remain
+  immediate and blocking.
 - The detailed source/module-to-North-Star disposition is recorded in
   `docs/PRE_DEPLOY_NORTH_STAR_REVIEW_2026-09-06.md` and ADR 0026.
 
 ## Next
 
-1. Select cloud/VPS, domain/TLS, off-site backup/monitoring, and secret-delivery inputs; verify
-   the exact CI-published GHCR image; then run the guarded bootstrap on a fresh production data
-   plane and perform an isolated restore drill.
+1. Replace the temporary `sslip.io` hostname with the operator's permanent domain, select an
+   off-site backup target and external alert destination, then automate both retention and
+   notification checks.
 2. Run the read-only Alpaca Paper account probe in the intended environment. Before any
    enrollment or external order, build the matching Paper execution validator, nested-order
    lifecycle, and deterministic session-close position exit required by ADR 0025.
@@ -220,8 +230,9 @@
 
 ## Blocked
 
-- Cloud deployment needs the VPS/provider, domain/TLS plan, backup/monitoring choices, and
-  secret delivery mechanism. The GitHub repository is configured.
+- Durable disaster recovery and alerting need operator-selected off-site storage and a
+  notification destination. The running stack currently has TLS, host firewalling, a local
+  verified backup, and an isolated restore drill.
 - Sending the first Paper order is code-blocked until a compatible Paper execution profile
   exists, and remains an explicit operator decision afterward. No fixture test or deployment
   health check authorizes an external order.
