@@ -3451,6 +3451,48 @@ lifecycle. No Paper order was used as a build or deployment test.
   C048 until CI publishes the exact image.
 - Corrections/follow-ups: record final production evidence in the next entry.
 
+### C050 — `Record completed production activation`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-07 PDT.
+- User intent: finish all remaining deployable server work; enable formal research, Shadow,
+  and Alpaca Paper; repeatedly review and repair the result.
+- Scope:
+  - Recorded the immutable C048/C049 deployments and final runtime, security, budget, broker,
+    and research evidence.
+  - Reconciled the durable project-state and remaining-work sections with the actual production
+    state rather than treating enabled infrastructure as evidence of a valid strategy.
+- Architecture/decision impact: none; this is the final deployment evidence record.
+- Validation:
+  - GitHub Actions runs `34113234324` and `34115132003` both passed `verify` and
+    `publish-image`; production runs exact image
+    `cb54b27a53ecd8bd020b834f4433bc63399a9f6a` on all application services.
+  - The last full local gate passed 175 tests, Flake8, strict mypy across 59 source files,
+    authenticated local/container doctors, secret scan, Docker rebuild, and PostgreSQL schema
+    drift check at `20260907_0032`.
+  - Backup `/opt/agentic-quant/backups/20260907T101606Z` remains checksummed and restore-tested.
+    All five production services are healthy; HTTPS readiness is 200 and anonymous system
+    status is 401.
+  - A restart-interrupted INTC research lease was automatically reclaimed on attempt two. Its
+    original 20-symbol group and the following 20-symbol group each reached 180/180 completed
+    stages with no remaining RUNNING or PENDING jobs.
+  - The formal research cycle made 20 completed OpenAI `gpt-5.6-sol` calls totaling 94,815
+    tokens. Nineteen analyses safely abstained and one was rejected for invalid structured
+    output, so there is no eligible generated strategy to adopt.
+  - The project budget reports `$1.218124` settled today against `$20`, `$0` reserved after
+    expiring one deploy-abandoned reservation, and no reset of historical spend.
+  - The real Alpaca Paper probe reports ACTIVE/USD, `$100,000` cash and equity, `$400,000`
+    buying power, no account/trading block, zero positions, and `live_money_possible=false`.
+    Paper and Shadow workers are IDLE with the global new-exposure pause off; there are zero
+    deployments, enrollments, broker legs, or orders because no strategy passed its gate.
+- Global state after commit:
+  - Production research, dynamic scanning, Shadow runtime, and Paper runtime are enabled and
+    autonomous on the current bounded 20-symbol research shortlist. Paper will submit only
+    after exact validation plus human adoption, Shadow start, and Paper enrollment. Live-money
+    execution remains impossible.
+- Corrections/follow-ups: a permanent domain, off-site backup destination, and external alert
+  channel still require operator choices; statistical evidence still requires elapsed time.
+
 ## Template for future commit entries
 
 Copy this section before making a commit:

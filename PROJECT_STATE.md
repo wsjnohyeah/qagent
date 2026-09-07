@@ -11,10 +11,11 @@
   intentionally insufficient.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `5b1d6d74eed19378fc8ab48efc6b64d4ef392f7c` image, PostgreSQL, Redis, API, Shadow worker,
+  `cb54b27a53ecd8bd020b834f4433bc63399a9f6a` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
-  Meta re-ranking, and audited Scanner Trading Pool admission are enabled; new exposure is
-  paused, while paid strategy research, Paper submission, and live money remain disabled.
+  Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
+  and Alpaca Paper infrastructure are enabled; new exposure is unpaused. Live money remains
+  structurally disabled.
 - Local-lite uses Python 3.12, a project-local `uv`, SQLite, and filesystem object storage.
 - The Control API, single-admin object-centric web console, persistent System Steward,
   append-only event ledger, deterministic risk engine, and shadow runtime exist.
@@ -173,11 +174,11 @@
   stop/target geometry used identically by research and shadow. Candidate/snapshot mismatches
   and future signal/feature timestamps also reject.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; production currently runs the
-  verified immutable functional commit `5b1d6d74eed19378fc8ab48efc6b64d4ef392f7c`.
+  verified immutable functional commit `cb54b27a53ecd8bd020b834f4433bc63399a9f6a`.
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases. A verified `main` push publishes an immutable GHCR
   commit-SHA image with matching embedded/OCI source provenance; deployment rejects mismatches.
-- The current end-to-end audit passes 173 tests, strict typing across 59 source files,
+- The current end-to-end audit passes 175 tests, strict typing across 59 source files,
   authenticated local and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, fresh schema
   upgrade/downgrade/re-upgrade checks through `20260907_0032`, zero PostgreSQL schema drift,
   and the repository secret scan.
@@ -189,6 +190,13 @@
   Meta review for estimated cost `$0.004149` and recorded all 20 additions in Scanner Trading
   Pool revision 2, while the administrator's manual Trading Universe remains the separate
   four-symbol revision `[AAPL, IWM, QQQ, SPY]`.
+- Production completed two consecutive 20-symbol, 180-stage coordinator cycles after Paper
+  activation. The first cycle made 20 `gpt-5.6-sol` research calls: 19 evidence-based
+  abstentions and one invalid-structure rejection. No candidate crossed the strategy gate, so
+  the system correctly created no validation, Shadow deployment, Paper enrollment, position,
+  or order. Total settled project LLM spend at verification was `$1.218124` against the `$20`
+  daily cap; one deploy-interrupted `$0.118510` reservation was expired and reserved spend
+  returned to zero without altering settled spend.
 - The production NBIS retry established an evidenced post-suspension boundary at `2024-10-21`.
   Its 470-bar resumed segment passed strict quality with zero missing intervals; the older raw
   and normalized history remains available for audit but is excluded from current research.
@@ -260,13 +268,11 @@
 1. Replace the temporary `sslip.io` hostname with the operator's permanent domain, select an
    off-site backup target and external alert destination, then automate both retention and
    notification checks.
-2. After deploying the unified execution profile, re-run the read-only Paper account probe,
-   generate a current exact validation, review/adopt it, start Shadow, and enroll that exact
-   deployment before allowing the first future Paper plan.
-3. Continue production scanner research and theme coverage, approve licensed corporate-action/
-   historical-universe and primary evidence refresh inputs, run production-scale backfill,
-   enable paid coordinator stages only after budget review, and collect Phase 5 statistical
-   plus continuous-shadow evidence and ML-only versus ML+LLM ablations.
+2. Let production research accumulate new point-in-time evidence. When a candidate passes the
+   exact gate, review/adopt it, start its Shadow deployment, and enroll that exact deployment
+   before the first future Paper plan. Do not manufacture a candidate merely to create activity.
+3. Continue production-scale history/evidence coverage and collect Phase 5 statistical plus
+   continuous-Shadow evidence and ML-only versus ML+LLM ablations.
 4. Continue interactive Phase 6.1 UI review with real operator navigation and refine labels;
    the Strategy lineage redesign is implemented locally and awaits operator feedback.
 5. Extend fill realism with multi-bar partial fills, order cancellation, quote-derived
@@ -281,8 +287,8 @@
   verified backup, and an isolated restore drill.
 - Sending the first Paper order remains evidence-blocked until a newly generated strategy
   passes the exact gate and is adopted, started in Shadow, and specifically enrolled. The
-  user has authorized Paper activation, but no fixture test or deployment health check may
-  manufacture a strategy or order.
+  user has authorized and the system has enabled Paper, but no fixture test or deployment
+  health check may manufacture a strategy or order.
 
 ## Decisions
 
