@@ -90,7 +90,9 @@ The evidence-bound analyst retrieves only document versions known at the request
 requires structured research-only output and exact supporting quotations, abstains on
 inadequate evidence, and records a Decision Inspector lineage graph. Atomic estimated-USD
 reservations stop over-budget calls before they reach a provider. Token counts remain
-diagnostic telemetry, not operator-configured limits.
+diagnostic telemetry, not operator-configured limits. An interrupted provider call releases
+its abandoned reservation after the configured provider timeout plus a five-minute safety
+margin, so a process restart cannot permanently consume budget capacity.
 
 Phase 4B exposes that gateway in the local Control Center. The operator can create immutable
 workload-routing revisions and chat through `Auto`, OpenAI, or Meta while preserving model,

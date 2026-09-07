@@ -3429,6 +3429,28 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: record the final immutable rollout and production research outcome in
   the next entry.
 
+### C049 — `Expire abandoned LLM budget reservations`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-07 PDT.
+- User intent: repeatedly self-review the production activation and finish any remaining safe
+  deployment work.
+- Scope:
+  - Added transactional cleanup for LLM budget reservations orphaned by process termination.
+  - Bound each provider's expiration threshold to its configured request timeout plus a
+    five-minute safety margin; normal completed and failed calls retain their existing exact
+    settlement behavior.
+  - Added row locking around settlement/release and a regression proving stale capacity is
+    removed while active reservations and settled spend remain intact.
+- Architecture/decision impact:
+  - Estimated-USD limits remain conservative during a legitimate in-flight request, but a
+    deploy or crash can no longer make reserved capacity appear permanently consumed.
+- Validation: focused LLM/intelligence tests, Flake8, and strict mypy are required before the
+  full release gate and immutable deployment.
+- Expected global state after commit: source contains the correction; production remains on
+  C048 until CI publishes the exact image.
+- Corrections/follow-ups: record final production evidence in the next entry.
+
 ## Template for future commit entries
 
 Copy this section before making a commit:

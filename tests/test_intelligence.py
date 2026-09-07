@@ -568,3 +568,68 @@ def test_workload_budget_revision_is_immutable_and_does_not_reset_usage(
             max_output_tokens=5,
             now=now,
         )
+
+
+def test_stale_budget_reservation_is_released_without_resetting_spend(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    policy = load_llm_budget_policy(ROOT / "configs/llm_budget.yaml")
+    budget = LLMBudgetManager(
+        ledger.engine,
+        policy,
+        reservation_timeouts={
+            provider: timedelta(minutes=10) for provider in LLMProviderName
+        },
+    )
+    now = datetime.now(UTC)
+    budget.reserve(
+        invocation_id="completed-provider-call",
+        provider=LLMProviderName.OPENAI,
+        workload=LLMWorkload.CRITICAL_RESEARCH,
+        input_text="done",
+        instructions="done",
+        max_output_tokens=100,
+        now=now - timedelta(minutes=11),
+    )
+    budget.settle(
+        invocation_id="completed-provider-call",
+        usage=LLMUsage(input_tokens=3, output_tokens=2, total_tokens=5),
+        now=now - timedelta(minutes=11),
+    )
+    budget.reserve(
+        invocation_id="interrupted-provider-call",
+        provider=LLMProviderName.OPENAI,
+        workload=LLMWorkload.CRITICAL_RESEARCH,
+        input_text="old",
+        instructions="old",
+        max_output_tokens=100,
+        now=now - timedelta(minutes=11),
+    )
+    budget.reserve(
+        invocation_id="active-provider-call",
+        provider=LLMProviderName.OPENAI,
+        workload=LLMWorkload.CRITICAL_RESEARCH,
+        input_text="new",
+        instructions="new",
+        max_output_tokens=100,
+        now=now,
+    )
+
+    summary = budget.summary()
+
+    assert summary["reservation_counts"] == {
+        "EXPIRED": 1,
+        "RESERVED": 1,
+        "SETTLED": 1,
+    }
+    project_daily = next(
+        item
+        for item in summary["windows"]
+        if item["scope"] == "project" and item["period_kind"] == "daily"
+    )
+    assert project_daily["reserved_tokens"] == 106
+    assert project_daily["consumed_tokens"] == 5
+    assert Decimal(project_daily["reserved_estimated_cost_usd"]) > 0
+    assert Decimal(project_daily["consumed_estimated_cost_usd"]) > 0

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, ROUND_CEILING
 from pathlib import Path
 from typing import Any, Self
@@ -94,11 +94,74 @@ class LLMBudgetManager:
         engine: Engine,
         policy: LLMBudgetPolicy,
         ledger: EventLedger | None = None,
+        reservation_timeouts: dict[LLMProviderName, timedelta] | None = None,
     ) -> None:
         self.engine = engine
         self.policy = policy
         self.ledger = ledger
+        self.reservation_timeouts = reservation_timeouts or {
+            provider: timedelta(hours=1) for provider in LLMProviderName
+        }
         self.base_policy_sha256 = _canonical_sha256(policy.model_dump(mode="json"))
+
+    def configure_reservation_timeouts(
+        self,
+        values: dict[LLMProviderName, timedelta],
+    ) -> None:
+        if set(values) != set(LLMProviderName):
+            raise ValueError("Reservation timeouts must define every LLM provider")
+        if any(value <= timedelta(0) for value in values.values()):
+            raise ValueError("Reservation timeouts must be positive")
+        self.reservation_timeouts = dict(values)
+
+    def release_expired(self, *, now: datetime | None = None) -> int:
+        timestamp = now or datetime.now(UTC)
+        if timestamp.tzinfo is None:
+            raise ValueError("Budget expiration time must be timezone-aware")
+        released = 0
+        with self.engine.begin() as connection:
+            rows = connection.execute(
+                select(llm_budget_reservations)
+                .where(llm_budget_reservations.c.status == "RESERVED")
+                .with_for_update()
+            ).all()
+            for row in rows:
+                created_at = row.created_at
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=UTC)
+                provider = LLMProviderName(str(row.provider))
+                if created_at + self.reservation_timeouts[provider] > timestamp:
+                    continue
+                expired = connection.execute(
+                    update(llm_budget_reservations)
+                    .where(
+                        (llm_budget_reservations.c.invocation_id == row.invocation_id)
+                        & (llm_budget_reservations.c.status == "RESERVED")
+                    )
+                    .values(status="EXPIRED", settled_at=timestamp)
+                )
+                if int(expired.rowcount or 0) != 1:
+                    continue
+                reserved_tokens = int(row.reserved_input_tokens) + int(
+                    row.reserved_output_tokens
+                )
+                for window_key in row.window_keys_json:
+                    connection.execute(
+                        update(llm_budget_windows)
+                        .where(llm_budget_windows.c.window_key == str(window_key))
+                        .values(
+                            reserved_tokens=(
+                                llm_budget_windows.c.reserved_tokens - reserved_tokens
+                            ),
+                            reserved_cost_microusd=(
+                                llm_budget_windows.c.reserved_cost_microusd
+                                - int(row.reserved_cost_microusd)
+                            ),
+                            updated_at=timestamp,
+                        )
+                    )
+                released += 1
+        return released
 
     def reserve(
         self,
@@ -114,6 +177,7 @@ class LLMBudgetManager:
         timestamp = now or datetime.now(UTC)
         if timestamp.tzinfo is None:
             raise ValueError("Budget reservation time must be timezone-aware")
+        self.release_expired(now=timestamp)
         effective_policy = self._effective_policy()
         input_bytes = len((instructions + input_text).encode("utf-8"))
         divisor = effective_policy.reservation.input_bytes_per_token
@@ -220,7 +284,7 @@ class LLMBudgetManager:
             row = connection.execute(
                 select(llm_budget_reservations).where(
                     llm_budget_reservations.c.invocation_id == invocation_id
-                )
+                ).with_for_update()
             ).one()
             if row.status != "RESERVED":
                 return
@@ -277,7 +341,7 @@ class LLMBudgetManager:
             row = connection.execute(
                 select(llm_budget_reservations).where(
                     llm_budget_reservations.c.invocation_id == invocation_id
-                )
+                ).with_for_update()
             ).one_or_none()
             if row is None or row.status != "RESERVED":
                 return
@@ -306,6 +370,7 @@ class LLMBudgetManager:
             )
 
     def summary(self) -> dict[str, Any]:
+        self.release_expired()
         revision = self.latest_revision()
         effective_policy = self._effective_policy(revision=revision)
         with self.engine.connect() as connection:

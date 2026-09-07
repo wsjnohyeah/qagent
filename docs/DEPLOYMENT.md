@@ -156,6 +156,10 @@ feature/ML/LLM work. Its normal scan cadence remains hourly, but an incomplete c
 backlog cycle is rechecked every minute so an expired worker lease is promptly reclaimed.
 Paid LLM research remains a separate switch.
 
+LLM budget reservations are crash-safe. The runtime derives a stale threshold from each
+provider's configured timeout and adds a five-minute safety margin. Budget reads and new
+reservations transactionally expire abandoned reservations while preserving settled spend.
+
 Never copy the development SQLite database or local object-store directory into production.
 The cloud coordinator backfills and derives its own data, feature, model, validation, and
 shadow evidence. Git transports code, configuration, migrations, and documentation only.

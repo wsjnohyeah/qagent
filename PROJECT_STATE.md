@@ -91,7 +91,9 @@
 - Each workload's daily estimated-USD limit is editable through an immutable, explicit-
   confirmation revision. There is no operator token ceiling. Changes preserve current-period
   spend and immediately recalculate percentage usage against the new cap; the YAML project
-  daily limit remains a hard cap.
+  daily limit remains a hard cap. Reservations abandoned by a process interruption expire
+  after the provider's configured timeout plus a five-minute safety margin without erasing
+  settled spend.
 - One System Steward reads a bounded current-state snapshot, including detailed Paper account,
   position, enrollment, order, and run state; returns validated object citations; persists
   conversations; and can propose allowlisted admin actions. It cannot execute them; a separate

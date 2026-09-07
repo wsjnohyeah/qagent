@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import timedelta
 from pathlib import Path
 
 import httpx
@@ -415,6 +416,12 @@ def test_gateway_settles_budget_for_billed_incomplete_response(
         providers={LLMProviderName.OPENAI: provider},
         store=store,
         budget_manager=budget,
+    )
+    assert budget.reservation_timeouts[LLMProviderName.OPENAI] == timedelta(
+        seconds=600
+    )
+    assert budget.reservation_timeouts[LLMProviderName.META] == timedelta(
+        seconds=900
     )
 
     with pytest.raises(LLMProviderError, match="response_status_incomplete"):

@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import json
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from time import monotonic
 from typing import Any, Protocol, Self
@@ -354,6 +354,13 @@ class LLMGateway:
         self.ledger = ledger
         self.budget_manager = budget_manager
         self.code_git_sha = code_git_sha
+        if self.budget_manager is not None:
+            self.budget_manager.configure_reservation_timeouts(
+                {
+                    name: timedelta(seconds=config.timeout_seconds + 300)
+                    for name, config in routing.providers.items()
+                }
+            )
 
     async def __aenter__(self) -> Self:
         return self
