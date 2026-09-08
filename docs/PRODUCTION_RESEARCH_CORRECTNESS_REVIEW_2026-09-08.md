@@ -128,8 +128,8 @@ statistical gates today.
   horizon-aware Candidate gate but not the strict Qualified gate.
 - A Shadow runtime defect rechecked Candidate certificates as if they were Qualified and
   immediately quarantined them. Runtime rechecks now preserve the stored admission tier.
-- Under the administrator's explicit instruction, twelve current 126-session and four current
-  252-session strategies were adopted into broker-free Candidate Shadow. All 16 are `ACTIVE`,
+- Under the administrator's explicit instruction, twelve current 126-session and five current
+  252-session strategies were adopted into broker-free Candidate Shadow. All 17 are `ACTIVE`,
   their execution contracts are `CURRENT`, and their cursor starts at the latest already-known
   bar, so historical bars cannot become forward performance. No Paper enrollment or broker
   order was created.

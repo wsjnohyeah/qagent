@@ -4293,8 +4293,8 @@ lifecycle. No Paper order was used as a build or deployment test.
   broker-free Shadow under the same deterministic risk and stale-contract checks as before;
   a strategy that is not Candidate-eligible remains blocked.
 - Production evidence: the exact correction was included in deployed C075. Twelve current
-  126-session Candidate strategies and four 252-session Candidate strategies were explicitly
-  adopted and started. After multiple worker ticks all 16 remained `ACTIVE` with a `CURRENT`
+  126-session Candidate strategies and five 252-session Candidate strategies were explicitly
+  adopted and started. After multiple worker ticks all 17 remained `ACTIVE` with a `CURRENT`
   contract, zero positions, and a cursor at the latest pre-deployment bar. New exposure was
   explicitly resumed; the first eligible signal can therefore use only a future unseen bar.
 - Corrections/follow-ups: six older 63-session reports were correctly refused because their
@@ -4326,7 +4326,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C076 — `Record production strategy activation review`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `2d824daf228338fe11001439aecdba9f44a07b3e`.
 - Date: 2026-09-08 PDT.
 - User intent: preserve the full selection, backfill, ML + LLM, admission, and Shadow review
   state for the next operator or agent.
@@ -4340,6 +4340,23 @@ lifecycle. No Paper order was used as a build or deployment test.
   continues the verified `dea9c34e30f6b31ed624ab78f736a3577384e2d9` functional image.
 - Corrections/follow-ups: allow scheduled 1-, 5-, 20-, 63-, 126-, and 252-session rotations to
   accumulate genuinely new evidence; do not call Candidate observation proven alpha.
+
+### C077 — `Reconcile completed annual candidate activation`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-08 PDT.
+- User intent: leave the durable handoff synchronized with the fully completed 252-session
+  production cycle.
+- Scope: update the activation inventory from 16 to 17 after ORCL's reclaimed generation job,
+  exact validation, Candidate review eligibility, explicit adoption, and Shadow start
+  completed.
+- Architecture/decision impact: none.
+- Validation: the 252-session group completed all 180 jobs; subsequent worker ticks reported
+  all 17 deployments `ACTIVE` with `CURRENT` contracts, zero positions, zero Paper enrollments,
+  zero Paper orders, and no new failed or exhausted workflow jobs after the final deployment.
+- Expected global state after commit: twelve 126-session and five 252-session Candidate Shadow
+  sleeves await their first unseen post-deployment daily bar under the shared risk account.
+- Corrections/follow-ups: none.
 
 ## Template for future commit entries
 

@@ -14,7 +14,7 @@
   `dea9c34e30f6b31ed624ab78f736a3577384e2d9` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
-  and Alpaca Paper infrastructure are enabled. Sixteen explicitly approved Candidate Shadow
+  and Alpaca Paper infrastructure are enabled. Seventeen explicitly approved Candidate Shadow
   sleeves are active and global new exposure is resumed for broker-free forward observation;
   there are no Paper enrollments or orders. Live money remains structurally disabled.
 - The deployed remediation adds `research_gate@0.4.0`, horizon-specific
