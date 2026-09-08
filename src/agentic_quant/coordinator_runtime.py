@@ -141,10 +141,10 @@ def resumed_daily_history_start(
 
     A missing interval alone remains a data-quality failure. It is considered a security
     inactivity boundary only when one continuous inactive segment spans the configured
-    minimum, contains both missing sessions and explicit zero-volume provider bars, follows
-    earlier traded history, and is followed by a traded bar. Accepting both missing→zero and
-    zero→missing ordering handles provider ticker-reuse histories without weakening ordinary
-    gap detection.
+    minimum, contains explicit zero-volume provider bars, follows earlier traded history, and
+    is followed by a traded bar. Missing sessions may appear before or after those placeholders;
+    a pure missing-data gap is never enough. This handles provider ticker-reuse histories
+    without weakening ordinary gap detection.
     """
     if minimum_suspension_sessions < 1:
         raise ValueError("Suspension boundary requires at least one session")
@@ -181,8 +181,6 @@ def resumed_daily_history_start(
         ):
             continue
         inactive_dates = sessions[group[0] : group[-1] + 1]
-        if not any(bars_by_date.get(day) is None for day in inactive_dates):
-            continue
         if not any(
             bars_by_date.get(day) is not None
             and bars_by_date[day].volume == 0

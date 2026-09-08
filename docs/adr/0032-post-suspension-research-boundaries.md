@@ -17,8 +17,9 @@ After the coordinator has completely queried every apparent gap, it may recogniz
 post-suspension research boundary only when all of these deterministic conditions hold:
 
 1. one continuous inactive segment spans at least 20 completed exchange sessions;
-2. that segment contains both missing sessions and explicit zero-volume provider bars, in
-   either order, and follows earlier positive-volume history;
+2. that segment contains explicit zero-volume provider bars, may also contain missing sessions
+   in either order, and follows earlier positive-volume history; a pure missing-data gap is
+   never sufficient;
 3. a following provider bar exists and has positive volume; and
 4. the complete interval after that resumed bar passes the unchanged strict quality rules.
 

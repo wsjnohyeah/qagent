@@ -919,7 +919,11 @@ def test_suspension_boundary_accepts_missing_then_zero_volume_order() -> None:
         bars=zero_only,
         start=complete[0].event_time,
         end=as_of,
-    ) is None
+    ) == datetime.combine(
+        resumed[0].event_time.date(),
+        datetime.min.time(),
+        tzinfo=UTC,
+    )
 
 
 def test_autonomous_coordinator_rejects_unsupported_timeframe(

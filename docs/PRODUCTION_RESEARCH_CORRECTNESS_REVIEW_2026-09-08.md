@@ -40,9 +40,10 @@ valid Candidate Shadow evaluation. ADR 0037 records the corrections.
   negative VWAP and all other price-envelope failures still fail closed.
 - SPCX also exposed the inverse of the previously observed suspension sequence: a long missing
   interval followed by zero-volume placeholders before trading resumed under the current
-  issuer identity. Boundary detection now accepts either missing/zero ordering only when the
-  combined inactive segment lasts at least 20 sessions, contains both evidence types, lies
-  after real traded history, and ends at a positive-volume bar. Pure vendor gaps still fail.
+  issuer identity. Boundary detection now accepts either missing/zero ordering, or a continuous
+  provider placeholder segment, only when the inactivity lasts at least 20 sessions, includes
+  explicit zero-volume evidence, lies after real traded history, and ends at a positive-volume
+  bar. Pure vendor gaps still fail.
 
 ## 3. ML + LLM strategy construction
 

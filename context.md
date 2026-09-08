@@ -4191,26 +4191,59 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C070 — `Accept Alpaca zero-VWAP sentinels`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `f66fbf740d12c023cf5dc968b1766ff55034e1fd`.
 - Date: 2026-09-08 PDT.
 - User intent: complete the six-year production backfill without allowing one malformed
   optional provider field to suppress an otherwise valid symbol history.
 - Scope: normalize Alpaca's `vw: 0` sentinel to absent VWAP for both zero- and positive-volume
   daily records while preserving the raw payload, OHLC, volume, and trade count. Extend the
-  adapter regression to the exact positive-volume shape observed for SPCX. Recognize the
-  same provider-evidenced suspension when missing sessions precede zero-volume placeholders,
-  provided the combined inactive segment also follows and precedes positive-volume history.
+  adapter regression to the exact positive-volume shape observed for SPCX.
 - Architecture/decision impact: optional VWAP absence is no longer conflated with invalid OHLC.
   Negative VWAP and every other typed market-data invariant still fail closed.
 - Validation: reproduced against the live Alpaca SPCX 2024-11-20 record (`v=184`, `n=11`,
-  `vw=0`); focused market/workflow tests passed, including both suspension orderings and
-  fail-closed missing-only/zero-only cases. `make check` passed Flake8, strict mypy across 59
-  source files, and all 197 tests; `make doctor` and the repository secret scan also
+  `vw=0`); focused market tests and all 196 tests, lint, strict types, doctor, and secret scan
   passed.
-- Expected global state after commit: the coordinator can ingest SPCX's historical segment and
-  then apply the existing provider-observed post-suspension identity boundary before research.
-- Corrections/follow-ups: deploy exact verified image, retry the bounded SPCX collection job,
-  and verify its quality/boundary result before downstream use.
+- Production evidence: GitHub Actions run `34284937699` passed, the exact image deployed, and
+  the previously unparsable SPCX history ingested with raw evidence intact.
+- Corrections/follow-ups: the completed ingest exposed a distinct ticker-reuse boundary case,
+  addressed by C071 and C072.
+
+### C071 — `Handle provider ticker-reuse history`
+
+- Git hash: `8b64e8bb3f524e84a1d48592cb87103c23ace230`.
+- Date: 2026-09-08 PDT.
+- User intent: prevent a current issuer from training on stale history belonging to an earlier
+  security that reused the same ticker.
+- Scope: recognize a long inactive segment containing both missing sessions and zero-volume
+  placeholders, in either order, when it lies between positive-volume histories. Pure missing
+  gaps remain invalid.
+- Architecture/decision impact: extends ADR 0032 without trusting issuer-name guesses; the
+  boundary remains provider-observed and preserves all excluded raw/normalized rows for audit.
+- Validation: focused suspension tests and the complete 197-test, lint, strict-type, doctor,
+  and secret-scan gate passed. GitHub Actions run `34286073909` passed and the exact image
+  deployed healthy.
+- Production evidence: the first SPCX replay parsed successfully but showed that Alpaca filled
+  the entire inactive segment with zero-volume placeholders, rather than a mixed missing/zero
+  sequence, so the current-segment boundary remained at the obsolete 2020 history start.
+- Corrections/follow-ups: C072 covers the observed all-placeholder variant.
+
+### C072 — `Recognize zero-volume ticker-reuse boundaries`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-08 PDT.
+- User intent: complete the SPCX production history repair while keeping ordinary provider gaps
+  fail-closed.
+- Scope: allow a continuous 20+-session inactive segment containing explicit zero-volume bars
+  to establish a post-suspension boundary when it follows and precedes positive-volume history;
+  missing sessions may be interleaved but are not sufficient on their own.
+- Architecture/decision impact: current-issuer research excludes stale pre-suspension history
+  without deleting it or treating an unexplained missing-only interval as valid.
+- Validation: focused tests cover zero→missing, missing→zero, all-zero, and missing-only cases;
+  `make check` passed Flake8, strict mypy across 59 source files, and all 197 tests; `make doctor`
+  and the repository secret scan passed.
+- Expected global state after commit: SPCX can establish the correct current traded segment and
+  all downstream features, ML, and validation will share that verified boundary.
+- Corrections/follow-ups: deploy the exact verified image and repeat SPCX collection.
 
 ## Template for future commit entries
 
