@@ -32,6 +32,12 @@ from agentic_quant.risk import SUPPORTED_HOLDING_PERIOD_SESSIONS
 
 STRATEGY_PROPOSAL_SCHEMA = "strategy_proposal@0.2.0"
 STRATEGY_CRITIQUE_SCHEMA = "strategy_critique@0.1.0"
+STRATEGY_GENERATION_PROMPT_VERSION = "hybrid_strategy_generation@0.3.0"
+STRATEGY_CRITIQUE_PROMPT_VERSION = "hybrid_strategy_critique@0.2.0"
+
+
+class StrategyModelOutputError(ValueError):
+    """The provider replied successfully but did not produce the bounded strategy DSL."""
 
 
 class ConstrainedStrategyProposal(FrozenModel):
@@ -168,12 +174,13 @@ class HybridStrategyGenerator:
         critique_invocation_id: str | None = None
         raw_proposal: dict[str, Any] | None = None
         proposal_json: dict[str, Any] | None = None
+        raw_critique: dict[str, Any] | None = None
         critique_json: dict[str, Any] | None = None
         try:
             generation = await self.gateway.complete(
                 LLMRequest(
                     workload=LLMWorkload.STRATEGY_GENERATION,
-                    prompt_version="hybrid_strategy_generation@0.2.0",
+                    prompt_version=STRATEGY_GENERATION_PROMPT_VERSION,
                     instructions=self._generation_instructions(),
                     input_text=json.dumps(source, sort_keys=True, default=str),
                     max_output_tokens=4_096,
@@ -181,21 +188,28 @@ class HybridStrategyGenerator:
                 provider_override=provider_override,
             )
             generation_invocation_id = generation.invocation_id
-            raw_proposal = self._json_object(generation.output_text or "")
+            try:
+                raw_proposal = self._json_object(generation.output_text or "")
+                proposal = ConstrainedStrategyProposal.model_validate(raw_proposal)
+            except ValueError as exc:
+                raise StrategyModelOutputError(
+                    f"Invalid strategy proposal output: {exc}"
+                ) from exc
             self.research.update_generation_attempt(
                 attempt_id,
                 status="PROPOSED",
                 generation_invocation_id=generation_invocation_id,
                 proposal=raw_proposal,
             )
-            proposal = ConstrainedStrategyProposal.model_validate(raw_proposal)
             if proposal.holding_period_sessions != forecast_horizon_sessions:
-                raise ValueError(
+                raise StrategyModelOutputError(
                     "Strategy holding period must match the bound ML forecast horizon"
                 )
             proposal_json = proposal.model_dump(mode="json")
             if set(proposal.evidence_ids) != evidence_ids:
-                raise ValueError("Strategy proposal must cite the exact hybrid evidence set")
+                raise StrategyModelOutputError(
+                    "Strategy proposal must cite the exact hybrid evidence set"
+                )
             critique_input = {
                 "proposal": proposal_json,
                 "allowed_evidence_ids": sorted(evidence_ids),
@@ -204,7 +218,7 @@ class HybridStrategyGenerator:
             critique_invocation = await self.gateway.complete(
                 LLMRequest(
                     workload=LLMWorkload.STRATEGY_CRITIQUE,
-                    prompt_version="hybrid_strategy_critique@0.2.0",
+                    prompt_version=STRATEGY_CRITIQUE_PROMPT_VERSION,
                     instructions=self._critique_instructions(),
                     input_text=json.dumps(critique_input, sort_keys=True, default=str),
                     max_output_tokens=4_096,
@@ -212,11 +226,18 @@ class HybridStrategyGenerator:
                 provider_override=provider_override,
             )
             critique_invocation_id = critique_invocation.invocation_id
-            raw_critique = self._json_object(critique_invocation.output_text or "")
-            critique = StrategyCritique.model_validate(raw_critique)
+            try:
+                raw_critique = self._json_object(critique_invocation.output_text or "")
+                critique = StrategyCritique.model_validate(raw_critique)
+            except ValueError as exc:
+                raise StrategyModelOutputError(
+                    f"Invalid strategy critique output: {exc}"
+                ) from exc
             critique_json = critique.model_dump(mode="json")
             if set(critique.evidence_ids) != evidence_ids:
-                raise ValueError("Strategy critique must cite the exact hybrid evidence set")
+                raise StrategyModelOutputError(
+                    "Strategy critique must cite the exact hybrid evidence set"
+                )
             result: dict[str, Any] = {
                 "generation_attempt_id": attempt_id,
                 "status": critique.verdict,
@@ -252,6 +273,37 @@ class HybridStrategyGenerator:
                 critique=critique_json,
             )
             return result
+        except StrategyModelOutputError as exc:
+            self.research.update_generation_attempt(
+                attempt_id,
+                status="FAILED",
+                generation_invocation_id=generation_invocation_id,
+                critique_invocation_id=critique_invocation_id,
+                proposal=(
+                    raw_proposal if raw_proposal is not None else proposal_json
+                ),
+                critique=(
+                    raw_critique if raw_critique is not None else critique_json
+                ),
+                error_code=type(exc).__name__,
+                error_message=str(exc),
+            )
+            return {
+                "generation_attempt_id": attempt_id,
+                "status": "INVALID_OUTPUT",
+                "proposal": (
+                    raw_proposal if raw_proposal is not None else proposal_json
+                ),
+                "critique": (
+                    raw_critique if raw_critique is not None else critique_json
+                ),
+                "generation_invocation_id": generation_invocation_id,
+                "critique_invocation_id": critique_invocation_id,
+                "strategy_spec": None,
+                "automatic_adoption": False,
+                "error_code": type(exc).__name__,
+                "error_message": str(exc),
+            }
         except Exception as exc:
             self.research.update_generation_attempt(
                 attempt_id,
@@ -387,8 +439,10 @@ class HybridStrategyGenerator:
             "timeframe=1Day, return_window 1..20, slow_window 2..21 and longer than "
             "return_window, threshold, holding_period_sessions, thesis, and evidence_ids. "
             "holding_period_sessions must exactly match the supplied forecast horizon and "
-            f"must be one of {SUPPORTED_HOLDING_PERIOD_SESSIONS}. Momentum threshold must "
-            "be nonnegative; mean-reversion threshold nonpositive. Cite all and only the "
+            f"must be one of {SUPPORTED_HOLDING_PERIOD_SESSIONS}. Threshold is a decimal "
+            "return, not a percentage: momentum must be in [0, 0.25] and mean-reversion "
+            "must be in [-0.25, 0]. For example, 0.03 means 3%; never emit 0.3, 0.5, or "
+            "1.0 for 3%. Cite all and only the "
             "three supplied evidence IDs. Do not emit code, orders, sizing, or promotion."
         )
 
@@ -408,5 +462,6 @@ class HybridStrategyGenerator:
 __all__ = [
     "ConstrainedStrategyProposal",
     "HybridStrategyGenerator",
+    "StrategyModelOutputError",
     "StrategyCritique",
 ]

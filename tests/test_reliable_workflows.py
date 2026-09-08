@@ -513,6 +513,29 @@ def test_coordinator_treats_llm_abstention_as_advice_not_a_generation_veto() -> 
     assert result["outcome"] == "COMPLETED"
     assert result["strategy_spec_id"] == "strategy-1"
 
+    class InvalidGenerator:
+        async def generate(self, **payload):  # type: ignore[no-untyped-def]
+            del payload
+            return {
+                "generation_attempt_id": "attempt-invalid",
+                "status": "INVALID_OUTPUT",
+                "strategy_spec": None,
+            }
+
+    handler.generator = InvalidGenerator()
+    invalid = asyncio.run(
+        handler._generate_strategy(
+            {
+                "feature_snapshot_id": "feature-1",
+                "analysis_id": "analysis-abstained",
+                "analysis_status": "ABSTAINED",
+                "forecast_id": "forecast-1",
+            }
+        )
+    )
+    assert invalid["outcome"] == "WAITING_VALID_STRATEGY_OUTPUT"
+    assert invalid["generation_status"] == "INVALID_OUTPUT"
+
 
 def test_coordinator_retry_repairs_the_original_historical_gap(
     settings,  # type: ignore[no-untyped-def]

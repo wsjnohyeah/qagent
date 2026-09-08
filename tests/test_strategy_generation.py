@@ -273,8 +273,13 @@ def test_hybrid_generator_compiles_only_a_bounded_research_spec(
     ] == "research.strategy_candidate.compiled.v1"
 
     class UnsupportedFieldGateway:
+        calls = 0
+
         async def complete(self, request, provider_override=None):  # type: ignore[no-untyped-def]
-            del request, provider_override
+            del provider_override
+            self.calls += 1
+            assert request.prompt_version == "hybrid_strategy_generation@0.3.0"
+            assert "momentum must be in [0, 0.25]" in request.instructions
             return SimpleNamespace(
                 invocation_id="unsupported-generation",
                 output_text=json.dumps(
@@ -285,22 +290,65 @@ def test_hybrid_generator_compiles_only_a_bounded_research_spec(
                 ),
             )
 
-    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        asyncio.run(
-            HybridStrategyGenerator(  # type: ignore[arg-type]
-                UnsupportedFieldGateway(),
-                research,
-                intelligence,
-                ml,
-            ).generate(
-                feature_snapshot_id=snapshot.feature_snapshot_id,
-                analysis_id=analysis.analysis_id,
-                forecast_id=forecast.forecast_id,
-            )
+    invalid = asyncio.run(
+        HybridStrategyGenerator(  # type: ignore[arg-type]
+            UnsupportedFieldGateway(),
+            research,
+            intelligence,
+            ml,
+        ).generate(
+            feature_snapshot_id=snapshot.feature_snapshot_id,
+            analysis_id=analysis.analysis_id,
+            forecast_id=forecast.forecast_id,
         )
+    )
+    assert invalid["status"] == "INVALID_OUTPUT"
+    assert invalid["strategy_spec"] is None
+    assert invalid["error_code"] == "StrategyModelOutputError"
+    assert invalid["critique_invocation_id"] is None
     failed = research.generation_attempts(limit=1)[0]
     assert failed["status"] == "FAILED"
     assert failed["proposal_json"]["stop_loss"] == "0.01"
+
+    class InvalidCritiqueGateway:
+        calls = 0
+
+        async def complete(self, request, provider_override=None):  # type: ignore[no-untyped-def]
+            del provider_override
+            self.calls += 1
+            output = (
+                result["proposal"]
+                if request.workload.value == "strategy_generation"
+                else {
+                    "schema_version": "strategy_critique@0.1.0",
+                    "verdict": "ACCEPT",
+                    "reasons": ["Looks bounded."],
+                    "evidence_ids": evidence_ids,
+                    "unsupported_score": 1,
+                }
+            )
+            return SimpleNamespace(
+                invocation_id=f"invalid-critique-{self.calls}",
+                output_text=json.dumps(output),
+            )
+
+    invalid_critique_gateway = InvalidCritiqueGateway()
+    invalid_critique = asyncio.run(
+        HybridStrategyGenerator(  # type: ignore[arg-type]
+            invalid_critique_gateway,
+            research,
+            intelligence,
+            ml,
+        ).generate(
+            feature_snapshot_id=snapshot.feature_snapshot_id,
+            analysis_id=analysis.analysis_id,
+            forecast_id=forecast.forecast_id,
+        )
+    )
+    assert invalid_critique["status"] == "INVALID_OUTPUT"
+    assert invalid_critique_gateway.calls == 2
+    failed_critique = research.generation_attempts(limit=1)[0]
+    assert failed_critique["critique_json"]["unsupported_score"] == 1
 
 
 def test_generated_strategy_dsl_rejects_unsupported_fields() -> None:

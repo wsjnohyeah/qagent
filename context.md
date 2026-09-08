@@ -4076,7 +4076,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C066 — `Classify sparse ML history as waiting`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `5ae091e52066ba0cee772e529f3c3b63ac5cd67f`.
 - Date: 2026-09-08 PDT.
 - User intent: continue reviewing the live coordinator after rollout and repair any remaining
   correctness problems.
@@ -4091,8 +4091,35 @@ lifecycle. No Paper order was used as a build or deployment test.
   `make doctor` and the repository secret scan also passed.
 - Expected global state after commit: the coordinator continues other symbols while CRWV waits
   for enough 63-session labeled history. Production new exposure remains paused.
-- Corrections/follow-ups: deploy, allow the failed job's bounded retry to complete as WAITING,
-  and verify no current coordinator infrastructure failures remain.
+- Production evidence: GitHub Actions run `34279404098` passed and published the immutable
+  image. Production deployed the exact SHA; API, worker, coordinator, PostgreSQL, and Redis were
+  healthy. The original CRWV 63-session job completed on attempt four as
+  `WAITING_ML_TRAINING_REQUIREMENTS` with the reproduced purged-OOS reason.
+- Corrections/follow-ups: the same post-deploy audit found two 63-session generation jobs that
+  exhausted retries because the prompt omitted the proposal schema's threshold magnitude.
+
+### C067 — `Stop retries for invalid strategy output`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-08 PDT.
+- User intent: complete the production research-funnel correctness review and repair remaining
+  causes that made healthy research look like repeated strategy failure.
+- Scope: state the exact decimal-return threshold range in strategy-generation prompt 0.3;
+  distinguish schema/citation/horizon-invalid provider output from an infrastructure exception;
+  persist the raw rejected attempt; and complete the workflow as
+  `WAITING_VALID_STRATEGY_OUTPUT` instead of spending all five automatic retries.
+- Architecture/decision impact: no invalid output is coerced into a strategy and no gate is
+  weakened. Provider/transport/code failures still raise and retry; only deterministic model
+  output contract failures become inspectable business waits.
+- Validation: production BIAF/BNC failures reproduced the missing threshold instruction;
+  focused generation/workflow tests passed, then `make check` passed Flake8, strict mypy
+  across 59 source files, and all 195 tests; `make doctor` and the repository secret scan also
+  passed.
+- Expected global state after commit: malformed LLM strategy output costs one attempt per fresh
+  evidence cycle rather than five repeated calls; valid proposals continue through the same
+  independent critique and deterministic validation.
+- Corrections/follow-ups: deploy after exact-sha CI, authorize one bounded retry of an affected
+  production job, and verify its terminal result without adopting or trading.
 
 ## Template for future commit entries
 

@@ -1108,12 +1108,17 @@ class ResearchCoordinatorHandler:
         spec = result.get("strategy_spec")
         return {
             "outcome": (
-                "COMPLETED" if isinstance(spec, dict) else "WAITING_ACCEPTED_PROPOSAL"
+                "COMPLETED"
+                if isinstance(spec, dict)
+                else "WAITING_VALID_STRATEGY_OUTPUT"
+                if result.get("status") == "INVALID_OUTPUT"
+                else "WAITING_ACCEPTED_PROPOSAL"
             ),
             "generation_attempt_id": result["generation_attempt_id"],
             "strategy_spec_id": (
                 str(spec["strategy_spec_id"]) if isinstance(spec, dict) else None
             ),
+            "generation_status": str(result.get("status", "UNKNOWN")),
         }
 
     async def _validate_strategy(self, context: dict[str, Any]) -> dict[str, Any]:

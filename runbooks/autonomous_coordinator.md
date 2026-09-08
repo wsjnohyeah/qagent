@@ -102,6 +102,11 @@ training but chronological embargo/label-availability purging left too little in
 data. This is expected for some newly listed names and long horizons; it must not consume the
 infrastructure retry budget.
 
+`WAITING_VALID_STRATEGY_OUTPUT` means the configured provider answered, but its proposal or
+critique did not satisfy the exact bounded strategy DSL. The rejected raw output and validation
+reason remain inspectable in the generation attempt. The stage completes without spending four
+more infrastructure retries; the next fresh evidence cycle may try again.
+
 `WAITING_MARKET_HISTORY` means the provider returned no daily history for the requested
 symbol. A provider-observed boundary is not an IPO-date fact; inspect its cited ingestion runs
 before using it for broader historical-universe claims. Increasing the coordinator lookback

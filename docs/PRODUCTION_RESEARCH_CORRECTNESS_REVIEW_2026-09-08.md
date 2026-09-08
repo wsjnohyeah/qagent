@@ -45,6 +45,13 @@ valid Candidate Shadow evaluation. ADR 0037 records the corrections.
   loss point: many provider outputs violated underspecified JSON field types. Prompt version
   `evidence_bound_analyst@0.3.0` now states exact types and cardinalities while preserving exact
   citation checks.
+- The first live 63-session cycle exposed a second output-contract defect: the generation
+  prompt stated threshold direction but omitted the schema's `[-0.25, 0.25]` magnitude bound.
+  BIAF and BNC repeatedly returned values such as `0.3`, `0.5`, or `1.0`, causing five paid
+  retries for the same invalid answer. Prompt version `hybrid_strategy_generation@0.3.0` now
+  states the exact decimal-return range. Invalid model output remains rejected, but is recorded
+  as `WAITING_VALID_STRATEGY_OUTPUT` rather than misclassified as an infrastructure failure and
+  automatically retried five times.
 - Search-trial correction now separates holding horizons. Candidate Shadow activity minima are
   horizon-aware under `research_gate@0.4.0`; strict qualification remains unchanged.
 - Existing accepted specs are now revalidated when a current paid generation stage is blocked,
