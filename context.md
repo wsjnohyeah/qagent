@@ -4175,7 +4175,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C069 — `Record production research remediation`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `a718bf8bcd6b43459f814bd3d8160b0321e0e41d`.
 - Date: 2026-09-08 PDT.
 - User intent: preserve the final end-to-end correctness review and production evidence for
   future agents and operators.
@@ -4188,6 +4188,26 @@ lifecycle. No Paper order was used as a build or deployment test.
   production functional image remains `ddaba5152f59e4ae278ef1e221d02494dbfbf502`.
 - Corrections/follow-ups: exact Candidate adoption/start and exposure resume require the
   administrator's next instruction.
+
+### C070 — `Accept Alpaca zero-VWAP sentinels`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-08 PDT.
+- User intent: complete the six-year production backfill without allowing one malformed
+  optional provider field to suppress an otherwise valid symbol history.
+- Scope: normalize Alpaca's `vw: 0` sentinel to absent VWAP for both zero- and positive-volume
+  daily records while preserving the raw payload, OHLC, volume, and trade count. Extend the
+  adapter regression to the exact positive-volume shape observed for SPCX.
+- Architecture/decision impact: optional VWAP absence is no longer conflated with invalid OHLC.
+  Negative VWAP and every other typed market-data invariant still fail closed.
+- Validation: reproduced against the live Alpaca SPCX 2024-11-20 record (`v=184`, `n=11`,
+  `vw=0`); focused market/workflow tests passed, then `make check` passed Flake8, strict mypy
+  across 59 source files, and all 196 tests; `make doctor` and the repository secret scan also
+  passed.
+- Expected global state after commit: the coordinator can ingest SPCX's historical segment and
+  then apply the existing provider-observed post-suspension identity boundary before research.
+- Corrections/follow-ups: deploy exact verified image, retry the bounded SPCX collection job,
+  and verify its quality/boundary result before downstream use.
 
 ## Template for future commit entries
 

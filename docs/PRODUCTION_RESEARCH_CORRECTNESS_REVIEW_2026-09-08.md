@@ -34,6 +34,10 @@ valid Candidate Shadow evaluation. ADR 0037 records the corrections.
   falsely labeled as five-year datasets.
 - Thousands of current quality reports passed. An older NBIS failure was superseded by the
   verified post-suspension-boundary correction; no general daily-backfill defect was found.
+- The six-year rollout exposed one Alpaca SPCX history row with real volume but `vw: 0`.
+  Alpaca uses zero as an unavailable-VWAP sentinel in historical data. The adapter now retains
+  its raw payload and valid OHLC/volume while normalizing only the optional VWAP to null;
+  negative VWAP and all other price-envelope failures still fail closed.
 
 ## 3. ML + LLM strategy construction
 

@@ -96,7 +96,7 @@ def test_alpaca_adapter_normalizes_raw_one_minute_bars() -> None:
     assert page.bars[0].available_from == datetime(2026, 9, 3, 14, 31, tzinfo=UTC)
 
 
-def test_alpaca_adapter_treats_zero_volume_placeholder_vwap_as_missing() -> None:
+def test_alpaca_adapter_treats_zero_vwap_sentinel_as_missing() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
@@ -110,6 +110,16 @@ def test_alpaca_adapter_treats_zero_volume_placeholder_vwap_as_missing() -> None
                         "c": 18.94,
                         "v": 0,
                         "n": 0,
+                        "vw": 0,
+                    },
+                    {
+                        "t": "2024-08-20T04:00:00Z",
+                        "o": 23.75,
+                        "h": 23.75,
+                        "l": 23.75,
+                        "c": 23.75,
+                        "v": 184,
+                        "n": 11,
                         "vw": 0,
                     }
                 ],
@@ -132,7 +142,7 @@ def test_alpaca_adapter_treats_zero_volume_placeholder_vwap_as_missing() -> None
             StockBarsRequest(
                 symbol="NBIS",
                 start=datetime(2024, 8, 19, tzinfo=UTC),
-                end=datetime(2024, 8, 20, tzinfo=UTC),
+                end=datetime(2024, 8, 21, tzinfo=UTC),
                 timeframe="1Day",
             )
         )
@@ -140,10 +150,13 @@ def test_alpaca_adapter_treats_zero_volume_placeholder_vwap_as_missing() -> None
         return result
 
     page = asyncio.run(scenario())
-    assert len(page.bars) == 1
+    assert len(page.bars) == 2
     assert page.bars[0].volume == 0
     assert page.bars[0].trade_count == 0
     assert page.bars[0].vwap is None
+    assert page.bars[1].volume == 184
+    assert page.bars[1].trade_count == 11
+    assert page.bars[1].vwap is None
 
 
 def test_stock_bar_request_requires_a_valid_timezone_aware_window() -> None:

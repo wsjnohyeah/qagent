@@ -41,9 +41,10 @@
 - The Alpaca Paper account endpoint passed a real read-only probe: account active, USD,
   trading/account blocks false, and zero positions. No order endpoint was called.
 - A real AAPL backfill stored 391 unique minute bars; replay inserted zero duplicates. A bounded OPRA request stored 10 unique option snapshots; replay inserted zero duplicates.
-- Alpaca zero-volume suspension placeholders preserve their raw payload, OHLC, volume, and
-  trade count while normalizing provider `vw: 0` to an unavailable VWAP. Zero volume remains
-  visible as a quality warning; non-positive VWAP on a traded bar still fails closed.
+- Alpaca historical rows preserve their raw payload, OHLC, volume, and trade count while
+  normalizing provider `vw: 0` sentinels to an unavailable VWAP, including the provider's rare
+  positive-volume/zero-VWAP rows. Zero volume remains visible as a quality warning; negative
+  VWAP still fails closed.
 - Raw Alpaca responses are content-addressed in MinIO, normalized rows are stored in PostgreSQL, and new-record events are published to Redis Streams.
 - The live collector has bounded reconnects and XNYS-calendar-aware intraday gap detection with automatic REST repair.
 - A real open-session SPY run persisted SIP trades, quotes, and minute bars. A controlled

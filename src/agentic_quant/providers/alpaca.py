@@ -251,12 +251,13 @@ class AlpacaMarketDataProvider:
         volume = int(item["v"])
         raw_vwap = item.get("vw")
         vwap = Decimal(str(raw_vwap)) if raw_vwap is not None else None
-        # Alpaca emits zero-volume daily placeholders with ``vw: 0`` during
-        # extended trading suspensions. Zero is not a price; preserve the bar
-        # and its explicit zero volume while representing the unavailable VWAP
-        # as null. A non-positive VWAP on a traded bar still fails StockBar
-        # validation instead of being silently repaired.
-        if volume == 0 and vwap == 0:
+        # Alpaca uses ``vw: 0`` as an unavailable-value sentinel in historical
+        # daily data. Most examples are zero-volume suspension placeholders, but
+        # isolated positive-volume rows also occur. Zero is never a meaningful
+        # VWAP: preserve the raw payload and every OHLC/volume field while
+        # representing only the optional normalized VWAP as null. Negative VWAP
+        # still fails StockBar validation.
+        if vwap == 0:
             vwap = None
         return StockBar(
             bar_id=stable_uuid("bar", "alpaca", feed, symbol.upper(), timeframe, event_time),
