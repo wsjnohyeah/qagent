@@ -140,8 +140,11 @@ def resumed_daily_history_start(
     """Find a provider-evidenced current segment after an extended suspension.
 
     A missing interval alone remains a data-quality failure. It is considered a security
-    inactivity boundary only when it spans the configured minimum, is immediately preceded
-    by the same number of explicit zero-volume provider bars, and is followed by a traded bar.
+    inactivity boundary only when one continuous inactive segment spans the configured
+    minimum, contains both missing sessions and explicit zero-volume provider bars, follows
+    earlier traded history, and is followed by a traded bar. Accepting both missing→zero and
+    zero→missing ordering handles provider ticker-reuse histories without weakening ordinary
+    gap detection.
     """
     if minimum_suspension_sessions < 1:
         raise ValueError("Suspension boundary requires at least one session")
@@ -157,12 +160,14 @@ def resumed_daily_history_start(
         if calendar.session_close(session).to_pydatetime() < end.astimezone(UTC)
     )
     bars_by_date = {item.event_time.astimezone(UTC).date(): item for item in bars}
-    missing_indexes = [
-        index for index, session_date in enumerate(sessions)
+    inactive_indexes = [
+        index
+        for index, session_date in enumerate(sessions)
         if session_date not in bars_by_date
+        or bars_by_date[session_date].volume == 0
     ]
     groups: list[list[int]] = []
-    for index in missing_indexes:
+    for index in inactive_indexes:
         if not groups or index != groups[-1][-1] + 1:
             groups.append([index])
         else:
@@ -171,17 +176,23 @@ def resumed_daily_history_start(
     for group in groups:
         if (
             len(group) < minimum_suspension_sessions
-            or group[0] < minimum_suspension_sessions
+            or group[0] == 0
             or group[-1] + 1 >= len(sessions)
         ):
             continue
-        prior_dates = sessions[
-            group[0] - minimum_suspension_sessions : group[0]
-        ]
-        if any(
-            bars_by_date.get(session_date) is None
-            or bars_by_date[session_date].volume != 0
-            for session_date in prior_dates
+        inactive_dates = sessions[group[0] : group[-1] + 1]
+        if not any(bars_by_date.get(day) is None for day in inactive_dates):
+            continue
+        if not any(
+            bars_by_date.get(day) is not None
+            and bars_by_date[day].volume == 0
+            for day in inactive_dates
+        ):
+            continue
+        if not any(
+            bars_by_date.get(day) is not None
+            and bars_by_date[day].volume > 0
+            for day in sessions[: group[0]]
         ):
             continue
         resumed_date = sessions[group[-1] + 1]

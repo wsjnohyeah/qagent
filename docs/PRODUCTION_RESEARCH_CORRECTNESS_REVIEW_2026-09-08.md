@@ -38,6 +38,11 @@ valid Candidate Shadow evaluation. ADR 0037 records the corrections.
   Alpaca uses zero as an unavailable-VWAP sentinel in historical data. The adapter now retains
   its raw payload and valid OHLC/volume while normalizing only the optional VWAP to null;
   negative VWAP and all other price-envelope failures still fail closed.
+- SPCX also exposed the inverse of the previously observed suspension sequence: a long missing
+  interval followed by zero-volume placeholders before trading resumed under the current
+  issuer identity. Boundary detection now accepts either missing/zero ordering only when the
+  combined inactive segment lasts at least 20 sessions, contains both evidence types, lies
+  after real traded history, and ends at a positive-volume bar. Pure vendor gaps still fail.
 
 ## 3. ML + LLM strategy construction
 

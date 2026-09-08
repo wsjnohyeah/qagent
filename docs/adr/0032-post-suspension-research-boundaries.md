@@ -16,8 +16,9 @@ period and earlier security identity into current feature, ML, and validation ev
 After the coordinator has completely queried every apparent gap, it may recognize a
 post-suspension research boundary only when all of these deterministic conditions hold:
 
-1. the missing interval spans at least 20 completed exchange sessions;
-2. at least 20 immediately preceding sessions have explicit provider bars with zero volume;
+1. one continuous inactive segment spans at least 20 completed exchange sessions;
+2. that segment contains both missing sessions and explicit zero-volume provider bars, in
+   either order, and follows earlier positive-volume history;
 3. a following provider bar exists and has positive volume; and
 4. the complete interval after that resumed bar passes the unchanged strict quality rules.
 

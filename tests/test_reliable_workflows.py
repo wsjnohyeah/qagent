@@ -872,6 +872,56 @@ def test_coordinator_uses_current_segment_after_extended_suspension(
     assert all(item.event_time >= expected_start for item in verified)
 
 
+def test_suspension_boundary_accepts_missing_then_zero_volume_order() -> None:
+    complete = _daily_bars_for_gap_test(100)
+    pre_suspension = complete[:10]
+    placeholders = tuple(
+        item.model_copy(update={"volume": 0, "trade_count": 0, "vwap": None})
+        for item in complete[35:60]
+    )
+    resumed = complete[60:]
+    source = tuple(
+        item.model_copy(update={"symbol": "SPCX"})
+        for item in (*pre_suspension, *placeholders, *resumed)
+    )
+    as_of = complete[-1].available_from + timedelta(seconds=1)
+
+    assert resumed_daily_history_start(
+        bars=source,
+        start=complete[0].event_time,
+        end=as_of,
+    ) == datetime.combine(
+        resumed[0].event_time.date(),
+        datetime.min.time(),
+        tzinfo=UTC,
+    )
+    missing_only = tuple(
+        item.model_copy(update={"symbol": "SPCX"})
+        for item in (*pre_suspension, *resumed)
+    )
+    assert resumed_daily_history_start(
+        bars=missing_only,
+        start=complete[0].event_time,
+        end=as_of,
+    ) is None
+    zero_only = tuple(
+        item.model_copy(
+            update={
+                "symbol": "SPCX",
+                "volume": 0 if 10 <= index < 60 else item.volume,
+                "trade_count": 0 if 10 <= index < 60 else item.trade_count,
+                "vwap": None if 10 <= index < 60 else item.vwap,
+            }
+        )
+        for index, item in enumerate(complete)
+    )
+    assert resumed_daily_history_start(
+        bars=zero_only,
+        start=complete[0].event_time,
+        end=as_of,
+    ) is None
+
+
 def test_autonomous_coordinator_rejects_unsupported_timeframe(
     settings,  # type: ignore[no-untyped-def]
 ) -> None:

@@ -4197,12 +4197,15 @@ lifecycle. No Paper order was used as a build or deployment test.
   optional provider field to suppress an otherwise valid symbol history.
 - Scope: normalize Alpaca's `vw: 0` sentinel to absent VWAP for both zero- and positive-volume
   daily records while preserving the raw payload, OHLC, volume, and trade count. Extend the
-  adapter regression to the exact positive-volume shape observed for SPCX.
+  adapter regression to the exact positive-volume shape observed for SPCX. Recognize the
+  same provider-evidenced suspension when missing sessions precede zero-volume placeholders,
+  provided the combined inactive segment also follows and precedes positive-volume history.
 - Architecture/decision impact: optional VWAP absence is no longer conflated with invalid OHLC.
   Negative VWAP and every other typed market-data invariant still fail closed.
 - Validation: reproduced against the live Alpaca SPCX 2024-11-20 record (`v=184`, `n=11`,
-  `vw=0`); focused market/workflow tests passed, then `make check` passed Flake8, strict mypy
-  across 59 source files, and all 196 tests; `make doctor` and the repository secret scan also
+  `vw=0`); focused market/workflow tests passed, including both suspension orderings and
+  fail-closed missing-only/zero-only cases. `make check` passed Flake8, strict mypy across 59
+  source files, and all 197 tests; `make doctor` and the repository secret scan also
   passed.
 - Expected global state after commit: the coordinator can ingest SPCX's historical segment and
   then apply the existing provider-observed post-suspension identity boundary before research.
