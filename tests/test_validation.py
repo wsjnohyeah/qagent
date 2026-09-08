@@ -23,6 +23,7 @@ from agentic_quant.market_store import MarketDataStore
 from agentic_quant.migrations import upgrade_database
 from agentic_quant.research_store import ResearchStore, _canonical_hash
 from agentic_quant.research import (
+    BACKTEST_ENGINE_VERSION,
     PointInTimeFeatureBuilder,
     default_strategy_spec,
     research_code_sha256,
@@ -813,6 +814,13 @@ def test_coordinator_revalidates_an_existing_accepted_spec_without_new_llm(
         status="ACCEPT",
         strategy_spec_id=spec.strategy_spec_id,
     )
+    assert store.generated_strategy_specs(
+        symbol="AAPL",
+        timeframe="1Day",
+        holding_period_sessions=1,
+        feature_set_version=spec.feature_set_version,
+        backtest_engine_version=BACKTEST_ENGINE_VERSION,
+    ) == (spec,)
     permissive = DEFAULT_PROMOTION_GATE_POLICY.model_copy(
         update={
             "version": "research_gate@9.9.9",

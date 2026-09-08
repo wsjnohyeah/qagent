@@ -54,7 +54,11 @@ from agentic_quant.providers.base import (
     StockBarsRequest,
 )
 from agentic_quant.providers.documents import AlpacaNewsProvider, SecEdgarProvider
-from agentic_quant.research import FEATURE_SET_VERSION, PointInTimeFeatureBuilder
+from agentic_quant.research import (
+    BACKTEST_ENGINE_VERSION,
+    FEATURE_SET_VERSION,
+    PointInTimeFeatureBuilder,
+)
 from agentic_quant.research_store import ResearchStore
 from agentic_quant.risk import RestrictionRegistry, strategy_holding_period_sessions
 from agentic_quant.shadow import ShadowRuntime
@@ -1112,6 +1116,7 @@ class ResearchCoordinatorHandler:
                 timeframe=str(context["timeframe"]),
                 holding_period_sessions=int(context.get("horizon_bars", 1)),
                 feature_set_version=FEATURE_SET_VERSION,
+                backtest_engine_version=BACKTEST_ENGINE_VERSION,
             )
             if not reusable:
                 return {"outcome": "WAITING_STRATEGY_SPEC"}
@@ -1127,6 +1132,15 @@ class ResearchCoordinatorHandler:
         spec = self.research.strategy_spec(str(spec_id))
         if spec is None:
             return {"outcome": "WAITING_STRATEGY_SPEC"}
+        if spec.data_requirements.get("backtest_engine") != BACKTEST_ENGINE_VERSION:
+            return {
+                "outcome": "WAITING_CURRENT_STRATEGY_SPEC",
+                "strategy_spec_id": spec.strategy_spec_id,
+                "declared_backtest_engine": spec.data_requirements.get(
+                    "backtest_engine"
+                ),
+                "required_backtest_engine": BACKTEST_ENGINE_VERSION,
+            }
         holding_sessions = int(context.get("horizon_bars", 1))
         if strategy_holding_period_sessions(spec.data_requirements) != holding_sessions:
             raise ValueError(

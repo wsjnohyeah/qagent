@@ -4044,7 +4044,9 @@ lifecycle. No Paper order was used as a build or deployment test.
 - User intent: complete the production correctness review with a real database revalidation,
   not only SQLite tests.
 - Scope: replaced a PostgreSQL-incompatible `DISTINCT` over a JSON column with a distinct
-  strategy-ID subquery followed by the exact strategy metadata lookup.
+  strategy-ID subquery followed by the exact strategy metadata lookup. The same audit also
+  made fallback revalidation reject specs declaring an obsolete backtest engine instead of
+  silently replaying them under newer code.
 - Architecture/decision impact: none; this preserves ADR 0037's horizon-specific trial count.
 - Validation: the defect was reproduced against production PostgreSQL during an HPE 63-session
   revalidation. The corrected query executed successfully against local Compose PostgreSQL;
@@ -4053,6 +4055,24 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Expected global state after commit: horizon-specific trial counting executes on both SQLite
   and PostgreSQL; production remains exposure-paused while the corrected image is prepared.
 - Corrections/follow-ups: repeat the exact HPE revalidation after the corrected rollout.
+
+### C065 — `Reject stale-engine fallback strategies`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-08 PDT.
+- User intent: continue the end-to-end production audit after the horizon-query correction.
+- Scope: require a coordinator-selected fallback strategy to declare the current backtest
+  engine as well as the current feature version and holding horizon. Direct coordinator
+  validation now returns an explicit waiting state for an obsolete engine contract.
+- Architecture/decision impact: accepted historical hypotheses may be revalidated only when
+  their declared executable semantics match the current engine; a favorable old result cannot
+  be silently reinterpreted under new code.
+- Validation: focused regression tests passed, followed by Flake8, strict mypy, all 195 tests,
+  authenticated local doctor, and the repository secret scan.
+- Expected global state after commit: fallback revalidation remains useful without becoming a
+  compatibility bypass. Production remains at `ad665a0` until the exact image is published and
+  deployed; new exposure remains paused.
+- Corrections/follow-ups: deploy and repeat production evidence checks.
 
 ## Template for future commit entries
 

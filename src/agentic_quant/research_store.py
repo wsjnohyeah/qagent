@@ -695,6 +695,7 @@ class ResearchStore:
         timeframe: str,
         holding_period_sessions: int,
         feature_set_version: str,
+        backtest_engine_version: str,
     ) -> tuple[StrategySpec, ...]:
         """Return accepted hybrid specs eligible for deterministic revalidation.
 
@@ -734,6 +735,8 @@ class ResearchStore:
             if int(spec.data_requirements.get("holding_period_sessions", 1)) != (
                 holding_period_sessions
             ):
+                continue
+            if spec.data_requirements.get("backtest_engine") != backtest_engine_version:
                 continue
             seen.add(spec.strategy_spec_id)
             selected.append(spec)
