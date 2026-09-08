@@ -154,6 +154,9 @@
   company facts refresh once per symbol per day. Trades, quotes, and option chains are
   truthfully labeled forward-only, while corporate actions and historical universe
   membership still require reviewed reference data rather than fabricated backfill.
+  News progression trusts only explicit successful, untruncated coverage certificates;
+  an older article returned because it was recently corrected remains searchable but cannot
+  skip an unverified interval. The current-edge refresh is always bounded to one day.
 - When enabled, the dynamic scanner runs before that DAG and binds each coordinator job to
   its immutable scan ID. Deterministic price, dollar-volume, restriction, and benchmark
   gates precede a four-hour, USD-budgeted LLM re-rank of at most 40 supplied names. When the

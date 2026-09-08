@@ -3581,6 +3581,34 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: record the production retry, coverage progress, strategy-generation
   attempts, and final scheduler state in the next entry.
 
+### C053 — `Trust explicit document coverage boundaries`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-07 PDT.
+- User intent: complete a trustworthy multi-year backfill before relying on the resulting
+  research and make its per-ticker coverage legible.
+- Scope:
+  - Made successful, untruncated `document.history.coverage.v1` certificates the only source
+    allowed to advance historical News backfill.
+  - Prevented an old article returned because of a recent correction from leapfrogging an
+    unqueried interval.
+  - Bounded the current-edge refresh to the latest day instead of expanding it from the most
+    recently published article when a ticker has sparse news.
+  - Extended the partition regression with a pre-existing old/corrected article and verified
+    that the next historical window remains contiguous while the one-day refresh is separate.
+- Architecture/decision impact: stored event time and verified provider-query coverage remain
+  separate facts. Data rows can broaden what is searchable; only coverage certificates can
+  claim completeness.
+- Validation: the full release gate passes 180 tests, Flake8, strict mypy across 59 source
+  files, local and Compose doctors, the secret scan, container rebuild, and PostgreSQL schema-
+  drift detection. CI, immutable rollout, and resumed production-cycle evidence remain
+  required.
+- Expected global state after commit: source cannot silently skip News intervals because of
+  out-of-window corrected content; production remains paused at the coordinator boundary until
+  the new immutable image is deployed.
+- Corrections/follow-ups: record production completion and exact strategy-funnel results after
+  the resumed cycle.
+
 ## Template for future commit entries
 
 Copy this section before making a commit:

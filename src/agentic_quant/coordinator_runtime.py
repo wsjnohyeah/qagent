@@ -531,10 +531,6 @@ class ResearchCoordinatorHandler:
             symbol=symbol,
             provider="alpaca_news",
         )
-        observed_earliest = self.documents.earliest_document_published_at(
-            symbol=symbol,
-            provider="alpaca_news",
-        )
         lookback_days = self.settings.coordinator_document_lookback_days
         if self.settings.app_env == AppEnvironment.DEVELOPMENT:
             lookback_days = min(
@@ -543,11 +539,10 @@ class ResearchCoordinatorHandler:
             )
         desired_start = as_of - timedelta(days=lookback_days)
         recorded_start = self._document_coverage_start(symbol=symbol)
-        known_start = min(
-            value
-            for value in (observed_earliest, recorded_start)
-            if value is not None
-        ) if observed_earliest is not None or recorded_start is not None else None
+        # Only an explicit, untruncated coverage certificate may advance the next
+        # request. Existing rows can include older articles corrected inside a recent
+        # query window; their publication dates do not prove intervening coverage.
+        known_start = recorded_start
         partition = timedelta(days=self.settings.coordinator_document_partition_days)
         requests: list[tuple[str, datetime, datetime]] = []
         if known_start is None:
@@ -564,7 +559,7 @@ class ResearchCoordinatorHandler:
         # idempotent by provider document ID and content hash. Backfill and refresh
         # may run together so building history never leaves current evidence stale.
         if latest is not None:
-            refresh_start = max(desired_start, latest - timedelta(days=1))
+            refresh_start = max(desired_start, as_of - timedelta(days=1))
             if refresh_start < as_of and not any(
                 start <= refresh_start and end >= as_of for _, start, end in requests
             ):

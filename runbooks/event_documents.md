@@ -37,6 +37,12 @@ PostgreSQL's statement parameter ceiling cannot turn a valid multi-thousand-fact
 response into a retry loop. Manual commands below remain useful for bounded diagnosis and
 replay.
 
+Historical News progress is based only on append-only `document.history.coverage.v1` records
+from completed, untruncated queries. A provider may return an old article that was corrected
+inside a recent request window; its publication date remains visible evidence but is never
+treated as proof that the intervening history was exhaustively fetched. Current-edge refreshes
+remain a fixed one-day request even when a symbol has no newly published article.
+
 Start and verify the full stack:
 
 ```sh

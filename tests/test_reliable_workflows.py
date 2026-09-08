@@ -36,6 +36,8 @@ from agentic_quant.domain import (
     EventEnvelope,
     PointInTimeFeatureSnapshot,
     SignalAction,
+    SourceDocument,
+    SourceTier,
     StockBar,
 )
 from agentic_quant.ledger import EventLedger
@@ -416,6 +418,34 @@ def test_document_backfill_advances_backward_in_bounded_partitions(
     handler.documents = DocumentStore(ledger.engine)
     handler.archive = FileRawArchive(tmp_path / "document-backfill-raw")
     handler.publisher = Publisher()
+    archived = handler.archive.store_json(
+        provider="alpaca_news",
+        data_type="news",
+        payload={"news": [{"id": "corrected-old-article"}]},
+        request_metadata={"fixture": True},
+        provider_received_at=as_of,
+    )
+    raw_object_id = handler.market.register_raw_object(archived)
+    handler.documents.upsert_document(
+        SourceDocument(
+            document_id="00000000-0000-7000-8000-000000000099",
+            provider_document_id="corrected-old-article",
+            provider="alpaca_news",
+            canonical_url="https://news.example/corrected-old-article",
+            source_kind="news",
+            source_tier=SourceTier.SECONDARY,
+            publisher="Fixture Wire",
+            title="An older article corrected during this window",
+            summary=None,
+            body_text=None,
+            symbols=("AAPL",),
+            published_at=as_of - timedelta(days=365),
+            updated_at=as_of,
+            ingested_at=as_of,
+            raw_object_id="PENDING_ARCHIVE",
+        ),
+        raw_object_id,
+    )
     context = {
         "symbol": "AAPL",
         "timeframe": "1Day",
@@ -430,9 +460,12 @@ def test_document_backfill_advances_backward_in_bounded_partitions(
 
     assert first["outcome"] == "COMPLETED_BACKFILL_PROGRESS"
     assert second["outcome"] == "COMPLETED_BACKFILL_PROGRESS"
-    assert len(requests) == 2
+    assert len(requests) == 3
     assert requests[0].start == as_of - timedelta(days=90)
     assert requests[1].start == as_of - timedelta(days=180)
+    assert requests[1].end == as_of - timedelta(days=90) + timedelta(seconds=1)
+    assert requests[2].start == as_of - timedelta(days=1)
+    assert requests[2].end == as_of
     coverage = [
         event
         for event in ledger.recent(limit=20)
@@ -444,7 +477,7 @@ def test_document_backfill_advances_backward_in_bounded_partitions(
     news = next(
         item for item in apple["datasets"] if item["key"] == "documents:news"
     )
-    assert news["record_count"] == 0
+    assert news["record_count"] == 1
     assert news["verified_window_start"] == as_of - timedelta(days=180)
 
 
