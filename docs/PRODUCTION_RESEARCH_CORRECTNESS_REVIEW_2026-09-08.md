@@ -114,3 +114,30 @@ statistical gates today.
   to the current Scanner Trading Pool: EOSE, IREN, LITE, NVDA, SMR, and TSLA. None is strictly
   Qualified, adopted, deployed, or enrolled in Paper. Exact administrator confirmation and the
   global exposure control remain intentionally separate.
+
+## Final production follow-up
+
+- The six-year run exposed a ticker-reuse edge case for SPCX. The current issuer begins on
+  2026-06-12 after a provider-observed inactive segment; the corrected pipeline retains the
+  older raw evidence but excludes it from current features, ML labels, LLM evidence, and exact
+  validation. A production 252-session replay now stops at `WAITING_MORE_ML_SAMPLES` rather
+  than training on the predecessor security.
+- The “all strategies failed” symptom was partly operational. Current research produced six
+  63-session and twelve 126-session Candidate-Shadow-reviewable exact reports; the active
+  252-session cycle added four more before this audit closed. These reports passed the
+  horizon-aware Candidate gate but not the strict Qualified gate.
+- A Shadow runtime defect rechecked Candidate certificates as if they were Qualified and
+  immediately quarantined them. Runtime rechecks now preserve the stored admission tier.
+- Under the administrator's explicit instruction, twelve current 126-session and four current
+  252-session strategies were adopted into broker-free Candidate Shadow. All 16 are `ACTIVE`,
+  their execution contracts are `CURRENT`, and their cursor starts at the latest already-known
+  bar, so historical bars cannot become forward performance. No Paper enrollment or broker
+  order was created.
+- ML is technically operating but not yet strong: for the current scanner pool, mean final
+  holdout AUC was approximately 0.492 (1 session), 0.482 (5), 0.507 (20), 0.470 (63), and
+  0.502 (126); only one current 20-session model was review-eligible. The strict model and
+  strategy gates therefore remain intact. Candidate Shadow is the appropriate place to gather
+  forward evidence without pretending these models have demonstrated alpha.
+- The active daily LLM limits are project/OpenAI/critical-research `$40`. At the final audit,
+  settled project spend was approximately `$24.70` with a small in-flight reservation. The
+  budget is reconstructed from the reservation ledger across policy changes and did not reset.

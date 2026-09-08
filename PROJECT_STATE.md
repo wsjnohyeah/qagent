@@ -11,11 +11,12 @@
   strictly Qualified and no adopted strategy has accumulated forward observation time.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `ddaba5152f59e4ae278ef1e221d02494dbfbf502` image, PostgreSQL, Redis, API, Shadow worker,
+  `dea9c34e30f6b31ed624ab78f736a3577384e2d9` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
-  and Alpaca Paper infrastructure are enabled; new exposure is paused. Live money remains
-  structurally disabled.
+  and Alpaca Paper infrastructure are enabled. Sixteen explicitly approved Candidate Shadow
+  sleeves are active and global new exposure is resumed for broker-free forward observation;
+  there are no Paper enrollments or orders. Live money remains structurally disabled.
 - The deployed remediation adds `research_gate@0.4.0`, horizon-specific
   Candidate Shadow activity minima, horizon-specific research-trial accounting, budget-
   independent revalidation of accepted specs, scanner-pool authorization at Shadow start,
@@ -27,7 +28,7 @@
   append-only event ledger, deterministic risk engine, and shadow runtime exist.
 - `live` is not a valid trading mode; `LIVE_TRADING_ENABLED=true` fails configuration validation.
   Paper submission is separately disabled by default and hard-pinned to Alpaca's Paper host.
-- Local lint, strict type checking, all 196 tests, API readiness, the authenticated HTTP
+- Local lint, strict type checking, all 199 tests, API readiness, the authenticated HTTP
   vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
 - The full Compose stack is healthy: PostgreSQL 17, Redis 8, MinIO, and the API all passed direct checks; the PostgreSQL-backed shadow slice recorded six lineage events.
@@ -123,6 +124,12 @@
   share that horizon. Multi-session Shadow persists open-position accounting across restarts,
   checks stop/target on every completed bar, handles recorded splits/dividends, and exits at
   the maximum holding session. Global pause blocks new exposure but continues existing exits.
+- Provider-observed listing/resumption boundaries propagate through market reads, feature
+  materialization, ML datasets, LLM evidence, and exact validation. Old raw bars and feature
+  snapshots remain auditable but cannot train the current issuer after a ticker-reuse boundary.
+- Candidate and Qualified Shadow certificates retain their exact admission tier during every
+  runtime recheck. Candidate sleeves are no longer incorrectly quarantined as though they had
+  claimed strict qualification.
 - All shadow deployments are attribution sleeves of one shared virtual master account. Open
   plans atomically reserve its cash and concurrent risk; fills/cancellations settle once.
   Account stop distance, target R multiple, per-trade dollars, equity fraction, concurrent

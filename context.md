@@ -4250,7 +4250,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C073 — `Revalidate cached history boundaries`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `a53774726ce41fd1b4c0ba6707b4554f72c9a020`.
 - Date: 2026-09-08 PDT.
 - User intent: finish the production SPCX identity-boundary repair found during the six-year
   backfill review.
@@ -4266,12 +4266,16 @@ lifecycle. No Paper order was used as a build or deployment test.
   source files, and all 198 tests; `make doctor` and the repository secret scan passed.
 - Expected global state after commit: SPCX research starts at its current positive-volume
   segment rather than combining the former security's history with the current issuer.
-- Corrections/follow-ups: deploy exact verified image, repeat SPCX collection, and verify the
-  new boundary event and quality report before downstream research.
+- Production evidence: GitHub Actions run `34287841279` passed and the immutable image
+  deployed healthy. A direct production replay issued boundary event
+  `1b2838f5-ea88-5835-bf02-81189fbe6ff3`, set SPCX's current verified start to
+  `2026-06-12T00:00:00Z`, and passed feature materialization on 60 current-segment bars.
+- Corrections/follow-ups: the replay exposed pre-boundary feature snapshots still entering ML;
+  C075 propagates the same boundary into training.
 
 ### C074 — `Preserve Candidate Shadow admission tier at runtime`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `6759dddadd5fe5f734127847187fd2c0cece5618`.
 - Date: 2026-09-08 PDT.
 - User intent: make strategies that passed the deliberately lower, broker-free Candidate
   Shadow gate participate in forward observation without weakening Paper or Qualified gates.
@@ -4283,18 +4287,22 @@ lifecycle. No Paper order was used as a build or deployment test.
   listing understood Candidate certificates, while the actual tick silently rechecked every
   deployment as Qualified and quarantined it. The change does not alter validation thresholds,
   create a Paper enrollment, or grant broker authority.
-- Validation: the focused Candidate Shadow runtime regression passes; full repository checks,
-  doctor, secret scan, CI, and production deployment evidence remain to be recorded.
+- Validation: the focused Candidate Shadow runtime regression and complete 199-test suite,
+  Flake8, strict mypy, doctor, and secret scan passed. GitHub Actions run `34289341520` passed.
 - Expected global state after commit: a current, explicitly adopted Candidate strategy can run
   broker-free Shadow under the same deterministic risk and stale-contract checks as before;
   a strategy that is not Candidate-eligible remains blocked.
-- Corrections/follow-ups: deploy the exact verified image, resume the 12 current 126-session
-  deployments quarantined by the defect, then confirm the next unseen bar—not historical
-  replay—is the first bar eligible for a new signal.
+- Production evidence: the exact correction was included in deployed C075. Twelve current
+  126-session Candidate strategies and four 252-session Candidate strategies were explicitly
+  adopted and started. After multiple worker ticks all 16 remained `ACTIVE` with a `CURRENT`
+  contract, zero positions, and a cursor at the latest pre-deployment bar. New exposure was
+  explicitly resumed; the first eligible signal can therefore use only a future unseen bar.
+- Corrections/follow-ups: six older 63-session reports were correctly refused because their
+  scanner-pool revision is stale; they must pass the next scheduled 63-session validation.
 
 ### C075 — `Propagate verified history boundaries into ML`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `dea9c34e30f6b31ed624ab78f736a3577384e2d9`.
 - Date: 2026-09-08 PDT.
 - User intent: ensure every horizon's ML and hybrid-strategy stage uses the same verified
   issuer history as backfill, features, and validation.
@@ -4305,13 +4313,33 @@ lifecycle. No Paper order was used as a build or deployment test.
   through the complete market → feature → ML → LLM → validation lineage. Historical raw rows
   and old feature snapshots remain append-only evidence but are not training observations for
   the current security.
-- Validation: focused ML boundary and Candidate Shadow runtime tests plus strict mypy pass;
-  full repository checks, CI, and production replay remain to be recorded.
+- Validation: focused ML boundary and Candidate Shadow runtime tests passed, then `make check`
+  passed Flake8, strict mypy across 59 source files, and all 199 tests; `make doctor` and the
+  repository secret scan passed. GitHub Actions run `34289597318` passed.
 - Expected global state after commit: short post-boundary histories such as current-issuer SPCX
   stop cleanly at `WAITING_MORE_ML_SAMPLES` instead of training on a predecessor security;
   mature symbols retain their existing behavior.
-- Corrections/follow-ups: verify the new SPCX 252-session workflow result in production and
-  preserve the earlier contaminated attempt as audit history rather than deleting it.
+- Production evidence: the exact image deployed healthy. A bounded production replay retained
+  SPCX's `2026-06-12` boundary, materialized 60 current-segment bars, and returned
+  `WAITING_MORE_ML_SAMPLES` for the 252-session model. The earlier contaminated attempt remains
+  immutable audit history and cannot supply a new candidate under the corrected path.
+
+### C076 — `Record production strategy activation review`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-08 PDT.
+- User intent: preserve the full selection, backfill, ML + LLM, admission, and Shadow review
+  state for the next operator or agent.
+- Scope: refresh `PROJECT_STATE.md`, the production correctness review, and this master log
+  with exact release, budget, candidate, risk, and runtime evidence.
+- Architecture/decision impact: none; this is the durable handoff for C073–C075 and the
+  explicitly authorized Candidate Shadow activations.
+- Validation: documentation diff and final production health/state checks; functional source
+  already passed the 199-test gate and exact-sha GitHub CI recorded above.
+- Expected global state after commit: GitHub main carries the audit record while production
+  continues the verified `dea9c34e30f6b31ed624ab78f736a3577384e2d9` functional image.
+- Corrections/follow-ups: allow scheduled 1-, 5-, 20-, 63-, 126-, and 252-session rotations to
+  accumulate genuinely new evidence; do not call Candidate observation proven alpha.
 
 ## Template for future commit entries
 
