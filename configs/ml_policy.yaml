@@ -13,6 +13,8 @@ label:
 validation:
   minimum_samples: 200
   minimum_oos_samples: 60
+  minimum_calibration_samples: 20
+  minimum_selection_samples: 20
   minimum_folds: 3
   embargo_bars: 1
   test_fraction: "0.15"

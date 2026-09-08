@@ -70,7 +70,7 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert system_status["market_scanner_enabled"] is False
         assert system_status["market_scanner_llm_enabled"] is False
         assert system_status["market_scanner_auto_trading_pool_enabled"] is False
-        assert system_status["coordinator_market_lookback_days"] == 1826
+        assert system_status["coordinator_market_lookback_days"] == 2192
         assert system_status["coordinator_document_lookback_days"] == 1826
         assert system_status["coordinator_document_partition_days"] == 90
         assert system_status["sec_configured"] is False

@@ -42,6 +42,8 @@ from agentic_quant.research_store import ResearchStore
 class MLValidationPolicy(FrozenModel):
     minimum_samples: int = Field(ge=30)
     minimum_oos_samples: int = Field(ge=10)
+    minimum_calibration_samples: int = Field(default=20, ge=2)
+    minimum_selection_samples: int = Field(default=20, ge=2)
     minimum_folds: int = Field(ge=2)
     embargo_bars: int = Field(ge=1)
     test_fraction: Decimal = Field(gt=0, lt=0.5)
@@ -114,7 +116,7 @@ def ml_dataset_sha256(examples: tuple[MLTrainingExample, ...]) -> str:
     return _canonical_hash([item.model_dump(mode="json") for item in examples])
 
 
-ML_TRAINING_CONTRACT_VERSION = "walk_forward_ml_trainer@0.2.0"
+ML_TRAINING_CONTRACT_VERSION = "walk_forward_ml_trainer@0.3.0"
 
 
 def ml_training_contract(
@@ -1183,16 +1185,35 @@ class WalkForwardMLTrainer:
         requested_test_size = max(
             5,
             int(sample_count * float(self.policy.validation.test_fraction)),
+            embargo_bars
+            + max(
+                self.policy.validation.minimum_calibration_samples,
+                self.policy.validation.minimum_selection_samples,
+            ),
         )
         maximum_test_size = (
             sample_count - 24 - embargo_bars
         ) // fold_count
-        test_size = min(requested_test_size, maximum_test_size)
-        if test_size < 5:
-            raise MLTrainingRequirementsError(
-                "ML training requires enough samples for 24 training rows and "
-                f"{fold_count} embargoed test folds"
+        minimum_test_size = (
+            embargo_bars
+            + max(
+                self.policy.validation.minimum_calibration_samples,
+                self.policy.validation.minimum_selection_samples,
             )
+        )
+        if maximum_test_size < minimum_test_size:
+            required_samples = (
+                24 + embargo_bars + fold_count * minimum_test_size
+            )
+            raise MLTrainingRequirementsError(
+                "ML training requires at least "
+                f"{required_samples} labeled samples for {fold_count} folds, "
+                f"a {embargo_bars}-bar effective embargo, and "
+                f"{self.policy.validation.minimum_calibration_samples} calibration / "
+                f"{self.policy.validation.minimum_selection_samples} selection rows "
+                "after each partition purge"
+            )
+        test_size = min(requested_test_size, maximum_test_size)
         initial_train = (
             sample_count - fold_count * test_size - embargo_bars
         )

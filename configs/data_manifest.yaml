@@ -1,4 +1,4 @@
-version: data_manifest@0.11.0
+version: data_manifest@0.12.0
 providers:
   synthetic:
     enabled: true
@@ -39,6 +39,8 @@ research:
     resumable: true
     idempotent: true
     bounded_attempts: true
+    daily_bar_lookback_days: 2192
+    annual_ml_independent_oos_partitions: true
   validation:
     method: rolling_walk_forward_plus_combinatorial_purged_diagnostics
     minimum_embargo_bars: 1
@@ -66,7 +68,7 @@ intelligence:
 machine_learning:
   policy: ml_policy@0.1.0
   candidates: [logistic_regression, boosted_stumps]
-  validation: chronological_walk_forward_with_embargo_and_actual_bar_labels
+  validation: chronological_walk_forward_with_horizon_aware_embargo_and_actual_bar_labels
   calibration: purged_oos_calibration_selection_and_final_holdout
   drift_metric: population_stability_index
   registry_states: [CANDIDATE, CHALLENGER, CHAMPION, RETIRED, REJECTED]

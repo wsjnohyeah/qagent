@@ -22,8 +22,11 @@ valid Candidate Shadow evaluation. ADR 0037 records the corrections.
 
 ## 2. Data backfill
 
-- Daily bars cover five years or the provider-observed listing/resumption boundary for all 20
-  current pool symbols. Representative mature issuers contain about 1,255 daily bars.
+- Daily bars covered five years or the provider-observed listing/resumption boundary for all
+  20 current pool symbols. The audit found that this was insufficient for leakage-safe
+  252-session ML evaluation. The production target is now approximately six calendar years;
+  mature issuers will backfill incrementally while later listings retain their truthful shorter
+  boundaries.
 - Newly listed names correctly have shorter histories; they do not fabricate pre-listing gaps.
 - Alpaca News and SEC evidence are source-dependent and continue through durable partitions.
   Foreign issuers and newly listed companies may legitimately have no SEC company-fact rows.
@@ -56,6 +59,12 @@ valid Candidate Shadow evaluation. ADR 0037 records the corrections.
   horizon-aware under `research_gate@0.4.0`; strict qualification remains unchanged.
 - Existing accepted specs are now revalidated when a current paid generation stage is blocked,
   so paid research is not discarded merely because a later cycle reaches its USD ceiling.
+- The former 15%-per-fold allocator made 252-session training impossible inside the prior
+  five-year window after full-horizon purging. Training contract 0.3 sizes each test fold to
+  retain at least 20 independent rows in calibration and model selection after purging; the
+  final evaluation retains its separate 60-row promotion minimum. The daily-bar target is
+  extended to six years. This fixes reachability without reducing the embargo or weakening ML
+  promotion thresholds.
 
 ## 4. Shadow readiness
 

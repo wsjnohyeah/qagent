@@ -55,7 +55,7 @@ PAPER_POLL_SECONDS=30
 ALPACA_PAPER_BASE_URL=https://paper-api.alpaca.markets
 AUTONOMOUS_COORDINATOR_ENABLED=true
 COORDINATOR_POLL_SECONDS=3600
-COORDINATOR_INITIAL_LOOKBACK_DAYS=1826
+COORDINATOR_INITIAL_LOOKBACK_DAYS=2192
 COORDINATOR_DOCUMENT_LOOKBACK_DAYS=1826
 COORDINATOR_DOCUMENT_PARTITION_DAYS=90
 COORDINATOR_DOCUMENT_MAX_PAGES=100
@@ -151,7 +151,9 @@ heartbeat. Production Compose therefore checks worker and coordinator health eve
 with a 20-second timeout. Do not reduce that timeout below measured cold-import latency; the
 deploy script still performs its own immediate, blocking heartbeat gates during each release.
 
-The coordinator validates the complete configured five-year daily window on each cycle and
+The coordinator validates the complete configured six-year daily-bar window on each cycle so
+the 252-session ML horizon can retain independent calibration, model-selection, and final-test
+partitions after label-availability purging. It
 repairs internal as well as trailing XNYS-session gaps. It advances Alpaca News backward in
 bounded 90-day partitions toward the five-year target, refreshes the newest day, and—when
 `SEC_USER_AGENT` is configured—refreshes five-year SEC filing/fact evidence once per symbol

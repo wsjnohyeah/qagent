@@ -173,9 +173,13 @@
   stage honors its persisted subsystem pause control.
   Every stage now reapplies the immutable job's `horizon_bars`; the earlier runtime omission
   caused labeled multi-horizon groups to fall back to one-session ML/validation and is covered
-  by a regression test. Historical records remain immutable and new cycles rebuild correct
-  horizon-bound evidence.
-- Production daily bars and Alpaca News/SEC evidence target 1,826 days. News advances backward
+  by regression tests. Production daily-bar lookback is now approximately six calendar years;
+  the ML fold allocator reserves a full horizon plus at least 20 independent observations for
+  calibration and model selection, while the final holdout retains its separate 60-row
+  promotion minimum. This makes 252-session training achievable for mature issuers without
+  overlapping-label leakage; short-history issuers wait explicitly.
+- Production daily bars target 2,192 days, while Alpaca News/SEC evidence target 1,826 days.
+  News advances backward
   in bounded partitions (90-day default; current production override 180 days) while its
   current edge is refreshed; SEC filing metadata and
   company facts refresh once per symbol per day. Trades, quotes, and option chains are

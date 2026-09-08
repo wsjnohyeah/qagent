@@ -4121,6 +4121,42 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: deploy after exact-sha CI, authorize one bounded retry of an affected
   production job, and verify its terminal result without adopting or trading.
 
+### D050 — Annual ML needs more history, not weaker leakage controls
+
+- Date: 2026-09-08 PDT.
+- Production had 44 exhausted ML jobs, dominated by 252-session attempts. Five calendar years
+  yield too few labeled rows for a 252-session embargo plus three independent OOS partitions
+  under the existing 15%-per-fold allocation.
+- Decision: preserve the full holding-horizon embargo and three-way calibration/selection/final
+  separation. Size each test fold to retain the configured minimum OOS rows after purging, and
+  expand production daily bars to approximately six calendar years. Do not synthesize history
+  or lower the ML promotion gate.
+- Formal record: ADR 0038.
+
+### C068 — `Enable leakage-safe annual ML research`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-08 PDT.
+- User intent: verify that one-day through long-horizon strategy research genuinely runs and
+  repair systematic false rejection or unreachable stages.
+- Scope: make ML fold sizing horizon-aware, require the configured independent OOS minimum in
+  the purged calibration/model-selection partitions while retaining the final holdout's
+  separate promotion minimum, bump the training contract to 0.3, and increase only the
+  daily-bar production lookback from 1,826 to 2,192 calendar days. Added the annual boundary
+  regression and ADR 0038; document/news history remains five years.
+- Architecture/decision impact: annual ML becomes reachable for mature issuers without label
+  overlap. Short-history symbols remain explicit waits; no quality or promotion threshold is
+  lowered.
+- Validation: production failure inventory showed 44 exhausted ML tasks dominated by the
+  formerly unreachable 252-session contract. The annual boundary regression and focused ML
+  suite passed; `make check` passed Flake8, strict mypy across 59 source files, and all 196
+  tests; `make doctor` and the repository secret scan also passed.
+- Expected global state after commit: the next production cycle repairs the extra leading year
+  of daily bars, retrains under `walk_forward_ml_trainer@0.3.0`, and permits mature-symbol
+  annual hypotheses to proceed to LLM generation and deterministic validation.
+- Corrections/follow-ups: deploy exact verified image, update the production lookback, then
+  verify a mature-symbol 252-session training run and retain all adoption/exposure gates.
+
 ## Template for future commit entries
 
 Copy this section before making a commit:

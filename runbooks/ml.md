@@ -33,12 +33,19 @@ OOS predictions, evaluates calibration on the later half, and measures PSI betwe
 newer feature distributions.
 
 Training reuse requires both the exact point-in-time dataset hash and
-`walk_forward_ml_trainer@0.2.0` contract hash. The latter covers the complete ML policy,
+`walk_forward_ml_trainer@0.3.0` contract hash. The latter covers the complete ML policy,
 feature set, label threshold/horizon, algorithms, purging/calibration method, and selection
 rule. A policy change therefore retrains instead of silently returning an older model. The
 Research LLM receives the selected model's label definition, final untouched-holdout metrics,
 calibration, drift, gate result, and both dataset/training-contract identities with each
 forecast.
+
+Each walk-forward test fold is large enough to retain the configured minimum calibration and
+model-selection samples after a full holding-horizon purge; the untouched final holdout still
+uses the separate promotion minimum. A 252-session label therefore needs at least 1,092 labeled
+rows under the default three-fold/20-calibration/20-selection policy. Production requests
+approximately six calendar years of daily bars so mature issuers can meet that contract; later
+listings wait explicitly rather than fabricating a model from overlapping outcomes.
 
 ## Promotion
 

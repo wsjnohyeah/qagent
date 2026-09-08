@@ -38,6 +38,7 @@ from agentic_quant.ml import (
     MLDatasetBuilder,
     MLPredictor,
     MLStore,
+    MLTrainingExample,
     MLTrainingRequirementsError,
     WalkForwardMLTrainer,
     load_ml_policy,
@@ -500,6 +501,46 @@ def test_ml_oos_partitions_purge_label_overlap(
     assert examples[selection_end - 1].label_available_from <= examples[
         evaluation_start
     ].as_of
+
+
+def test_annual_ml_requires_independent_calibration_selection_and_holdout() -> None:
+    policy = load_ml_policy(ROOT / "configs/ml_policy.yaml")
+    trainer = WalkForwardMLTrainer.__new__(WalkForwardMLTrainer)
+    trainer.policy = policy
+
+    folds = trainer._folds(1_092, embargo_bars=252)
+
+    assert len(folds) == 3
+    assert {test_end - test_start for _, test_start, test_end in folds} == {272}
+    start = datetime(2020, 1, 1, tzinfo=UTC)
+    examples = tuple(
+        MLTrainingExample(
+            feature_snapshot_id=f"feature-{index}",
+            as_of=start + timedelta(days=index),
+            label_available_from=start + timedelta(days=index + 252),
+            values=(float(index),),
+            forward_return=0.01,
+            label=1,
+        )
+        for index in range(1_092)
+    )
+    oos = tuple(
+        item
+        for _, test_start, test_end in folds
+        for item in examples[test_start:test_end]
+    )
+    calibration_end, selection_start, selection_end, evaluation_start = (
+        trainer._purged_oos_partitions(oos)
+    )
+    assert calibration_end >= 20
+    assert selection_start == 272
+    assert selection_end - selection_start >= 20
+    assert len(oos) - evaluation_start == 272
+    with pytest.raises(
+        MLTrainingRequirementsError,
+        match="requires at least 1092 labeled samples",
+    ):
+        trainer._folds(1_091, embargo_bars=252)
 
 
 def test_registry_requires_ml_gate_and_human_approval(

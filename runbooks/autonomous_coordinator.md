@@ -33,8 +33,10 @@ LLM context, generated holding period, replay, validation window, and Shadow con
 all agree.
 
 1. `collect_market_data`: incrementally ingest Alpaca `1Day` bars. A fresh production store
-   starts with `COORDINATOR_INITIAL_LOOKBACK_DAYS` (default 1,826); development is still
-   capped by its bounded-data setting. For a newly listed symbol, a fully exhausted leading-
+   starts with `COORDINATOR_INITIAL_LOOKBACK_DAYS` (default 2,192, approximately six calendar
+   years); development is still capped by its bounded-data setting. This extra year is required
+   for a 252-session label to retain independent calibration, selection, and final-test samples
+   after purging. For a newly listed symbol, a fully exhausted leading-
    window probe may persist `market.history.boundary.observed.v1` and validate from the first
    observed bar forward. A post-suspension boundary additionally requires at least 20 missing
    sessions, 20 immediately preceding explicit zero-volume bars, a positive-volume resumption,
@@ -67,7 +69,7 @@ all agree.
 ```dotenv
 AUTONOMOUS_COORDINATOR_ENABLED=true
 COORDINATOR_POLL_SECONDS=3600
-COORDINATOR_INITIAL_LOOKBACK_DAYS=1826
+COORDINATOR_INITIAL_LOOKBACK_DAYS=2192
 COORDINATOR_DOCUMENT_LOOKBACK_DAYS=1826
 COORDINATOR_DOCUMENT_PARTITION_DAYS=90
 COORDINATOR_PAID_RESEARCH_ENABLED=false
