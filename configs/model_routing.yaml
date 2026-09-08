@@ -6,7 +6,7 @@ providers:
     base_url: https://api.openai.com/v1
     cost_tier: premium
     reasoning_effort: high
-    max_output_tokens: 4096
+    max_output_tokens: 8192
     timeout_seconds: 300
     max_retries: 2
     send_store_false: true

@@ -685,7 +685,7 @@ class EvidenceBoundResearchAnalyst:
                 ),
                 # Reasoning tokens count against this Responses API ceiling. Keep
                 # enough headroom for high-effort reasoning plus the JSON answer.
-                max_output_tokens=4_096,
+                max_output_tokens=8_192,
                 timeout_seconds=180,
             )
         )

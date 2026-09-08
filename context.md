@@ -3609,6 +3609,30 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: record production completion and exact strategy-funnel results after
   the resumed cycle.
 
+### C054 — `Give research reasoning bounded output headroom`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-07 PDT.
+- User intent: run the real ML + LLM research funnel instead of leaving it nominally enabled
+  but unable to finish representative production inputs.
+- Scope:
+  - Raised only the OpenAI provider ceiling and Research LLM request ceiling from 4,096 to
+    8,192 output tokens; generator and critic requests remain capped at 4,096.
+  - Retained the same provider, model, high reasoning effort, timeout, USD reservation, and
+    daily/project budget breakers.
+- Architecture/decision impact: no authority change. Production evidence showed three
+  `response_status_incomplete_200` calls that each consumed exactly the old 4,096-token ceiling
+  on 13k-token evidence bundles; bounded headroom lets the structured analyst answer complete
+  while the existing USD limits remain the hard stop.
+- Validation: focused LLM/intelligence tests and the full release gate pass 180 tests,
+  Flake8, strict mypy across 59 source files, local and Compose doctors, the secret scan,
+  container rebuild, and PostgreSQL schema-drift detection. CI, immutable rollout, and
+  successful recovery of the failed IREN analysis remain required.
+- Expected global state after commit: source can complete representative high-reasoning
+  research calls without removing cost controls; production continues on C053 until rollout.
+- Corrections/follow-ups: measure actual completion/cost and retain 8,192 only if production
+  evidence supports it.
+
 ## Template for future commit entries
 
 Copy this section before making a commit:

@@ -382,7 +382,7 @@ def test_gateway_routes_and_persists_immutable_audit(
         "model": "gpt-5.6-sol",
         "instructions": "Use only supplied evidence.",
         "input": "Evidence packet IDs: packet-1, packet-2",
-        "max_output_tokens": 4096,
+        "max_output_tokens": 8192,
         "reasoning": {"effort": "high"},
         "store": False,
         "temperature": None,
