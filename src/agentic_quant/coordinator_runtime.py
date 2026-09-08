@@ -55,7 +55,7 @@ from agentic_quant.providers.base import (
 from agentic_quant.providers.documents import AlpacaNewsProvider, SecEdgarProvider
 from agentic_quant.research import FEATURE_SET_VERSION, PointInTimeFeatureBuilder
 from agentic_quant.research_store import ResearchStore
-from agentic_quant.risk import RestrictionRegistry
+from agentic_quant.risk import RestrictionRegistry, strategy_holding_period_sessions
 from agentic_quant.shadow import ShadowRuntime
 from agentic_quant.strategy_generation import HybridStrategyGenerator
 from agentic_quant.validation import (
@@ -905,12 +905,13 @@ class ResearchCoordinatorHandler:
         snapshot = self.research.feature_snapshot(str(snapshot_id))
         if snapshot is None:
             return {"outcome": "WAITING_FEATURES"}
+        horizon_bars = int(context.get("horizon_bars", 1))
         try:
             examples = MLDatasetBuilder(self.research).build(
                 symbol=snapshot.symbol,
                 timeframe=snapshot.timeframe,
                 as_of_end=snapshot.as_of,
-                horizon_bars=1,
+                horizon_bars=horizon_bars,
                 policy=self.ml_policy,
                 feature_set_version=FEATURE_SET_VERSION,
             )
@@ -929,7 +930,7 @@ class ResearchCoordinatorHandler:
         dataset_sha256 = ml_dataset_sha256(examples)
         training_contract_sha256 = ml_training_contract_sha256(
             policy=self.ml_policy,
-            horizon_bars=1,
+            horizon_bars=horizon_bars,
             feature_set_version=FEATURE_SET_VERSION,
         )
         existing = next(
@@ -938,7 +939,7 @@ class ResearchCoordinatorHandler:
                 for item in self.ml.recent_training_runs(limit=500)
                 if item["symbol"] == snapshot.symbol
                 and item["timeframe"] == snapshot.timeframe
-                and int(item["horizon_bars"]) == 1
+                and int(item["horizon_bars"]) == horizon_bars
                 and item["feature_set_version"] == FEATURE_SET_VERSION
                 and item["dataset_sha256"] == dataset_sha256
                 and item.get("training_contract_sha256")
@@ -961,7 +962,7 @@ class ResearchCoordinatorHandler:
             examples,
             symbol=snapshot.symbol,
             timeframe=snapshot.timeframe,
-            horizon_bars=1,
+            horizon_bars=horizon_bars,
             feature_set_version=FEATURE_SET_VERSION,
         )
         return {
@@ -1103,13 +1104,27 @@ class ResearchCoordinatorHandler:
         spec = self.research.strategy_spec(str(spec_id))
         if spec is None:
             return {"outcome": "WAITING_STRATEGY_SPEC"}
+        holding_sessions = int(context.get("horizon_bars", 1))
+        if strategy_holding_period_sessions(spec.data_requirements) != holding_sessions:
+            raise ValueError(
+                "Strategy holding period does not match its coordinator research horizon"
+            )
+        train_bars, test_bars = {
+            1: (40, 10),
+            5: (80, 20),
+            20: (160, 60),
+            63: (252, 126),
+            126: (378, 252),
+            252: (504, 504),
+        }[holding_sessions]
         as_of = datetime.fromisoformat(str(context["as_of"]))
         bars = self._verified_research_bars(context=context, as_of=as_of)
-        if len(bars) < 72:
+        required_bars = 21 + train_bars + test_bars
+        if len(bars) < required_bars:
             return {
                 "outcome": "WAITING_VALIDATION_HISTORY",
                 "bar_count": len(bars),
-                "required_bars": 72,
+                "required_bars": required_bars,
             }
         validation_start = bars[20].available_from
         costs = BacktestCostModel()
@@ -1125,14 +1140,15 @@ class ResearchCoordinatorHandler:
             risk_policy=self.shadow.effective_risk_policy(),
             restriction_registry_version=self.restrictions.version,
             initial_equity=initial_equity,
+            strategy_spec=spec,
         )
         expected_input = validation_input_fingerprint(
             bars=bars,
             as_of_start=validation_start,
             selection_metric="sharpe_ratio",
-            train_bars=40,
-            test_bars=10,
-            step_bars=10,
+            train_bars=train_bars,
+            test_bars=test_bars,
+            step_bars=test_bars,
             embargo_bars=1,
         )
         promotion_policy = load_promotion_gate_policy(
@@ -1194,9 +1210,9 @@ class ResearchCoordinatorHandler:
                 as_of_start=validation_start,
                 as_of_end=as_of,
                 code_git_sha=self.settings.source_git_sha or "UNAVAILABLE",
-                train_bars=40,
-                test_bars=10,
-                step_bars=10,
+                train_bars=train_bars,
+                test_bars=test_bars,
+                step_bars=test_bars,
                 embargo_bars=1,
                 initial_equity=initial_equity,
                 cost_model=costs,

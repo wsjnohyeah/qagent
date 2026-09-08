@@ -39,6 +39,7 @@ from agentic_quant.risk import (
     RestrictionRegistry,
     RiskPolicy,
     deployable_execution_profile_parameters,
+    strategy_execution_profile,
 )
 
 
@@ -58,18 +59,30 @@ def validation_execution_contract(
     risk_policy: RiskPolicy,
     restriction_registry_version: str,
     initial_equity: Decimal,
+    strategy_spec: StrategySpec | None = None,
 ) -> dict[str, Any]:
+    if strategy_spec is None:
+        profile_version = BASELINE_EXECUTION_PROFILE_VERSION
+        profile_parameters = deployable_execution_profile_parameters()
+        effective_policy = risk_policy
+    else:
+        profile_version, profile_parameters, effective_policy = (
+            strategy_execution_profile(
+                data_requirements=strategy_spec.data_requirements,
+                account_policy=risk_policy,
+            )
+        )
     return {
         "subject": validation_subject,
         "strategy_spec_ids": validated_strategy_spec_ids,
         "feature_set_version": FEATURE_SET_VERSION,
         "backtest_engine_version": BACKTEST_ENGINE_VERSION,
         "cost_model": cost_model.model_dump(mode="json"),
-        "risk_policy": risk_policy.model_dump(mode="json"),
+        "risk_policy": effective_policy.model_dump(mode="json"),
         "restriction_registry_version": restriction_registry_version,
         "initial_equity": str(initial_equity),
-        "execution_profile": BASELINE_EXECUTION_PROFILE_VERSION,
-        "execution_profile_parameters": deployable_execution_profile_parameters(),
+        "execution_profile": profile_version,
+        "execution_profile_parameters": profile_parameters,
     }
 
 
@@ -662,6 +675,7 @@ class WalkForwardValidator:
             ),
             validation_input=validation_input,
             code_git_sha=code_git_sha,
+            strategy_spec=strategy_spec,
         )
         self.store.record_validation_report(report)
         self._record_completion(report)
@@ -770,6 +784,7 @@ class WalkForwardValidator:
         trial_count: int,
         validation_input: dict[str, Any],
         code_git_sha: str,
+        strategy_spec: StrategySpec | None,
     ) -> WalkForwardValidationReport:
         test_returns = [fold.selected_test_metrics.total_return for fold in folds]
         test_sharpes = [fold.selected_test_metrics.sharpe_ratio for fold in folds]
@@ -827,6 +842,7 @@ class WalkForwardValidator:
             risk_policy=self.risk_policy,
             restriction_registry_version=self.restrictions.version,
             initial_equity=initial_equity,
+            strategy_spec=strategy_spec,
         )
         execution_contract_sha256 = _canonical_hash(execution_contract)
         robustness_metrics = {

@@ -1,6 +1,6 @@
 # Master Project Context
 
-Last updated: 2026-09-07 PDT
+Last updated: 2026-09-08 PDT
 
 Context format: v1
 
@@ -11,7 +11,7 @@ until an exact strategy passes deterministic validation and receives the separat
 Shadow-start, and Paper-enrollment confirmations. Off-site backup/alerting and statistical/
 elapsed production evidence remain open
 
-Current documented baseline: C058 — `Record verified boundary rollout`
+Current documented baseline: C059 — `Add multi-horizon strategy lifecycles`
 
 ## Purpose and authority
 
@@ -92,6 +92,11 @@ A Git commit cannot contain its own content-derived hash without changing that h
   allowlisted momentum/mean-reversion parameters into an immutable research-only spec and
   has no code, sizing, adoption, risk, or order authority. Every accepted, rejected, or failed
   generation attempt is separately audited; unsupported DSL fields fail instead of disappearing.
+- The constrained generator and coordinator now support 1, 5, 20, 63, 126, and 252-session
+  horizons. ML labels, forecasts, LLM analyses, proposals, immutable specs, replays, and exact
+  validation contracts must agree on the horizon. One-session strategies retain the original
+  MOC profile; multi-session strategies use a separate timed-exit profile and a deterministic
+  12.5% price stop without increasing shared account-dollar risk limits.
 - Phase 6 authenticates one administrator with a revocable server-side cookie session and
   CSRF protection. All non-health system interaction is locked when authentication is enabled;
   production requires an Argon2 password hash.
@@ -127,14 +132,17 @@ A Git commit cannot contain its own content-derived hash without changing that h
   liquidity. Observation, decision completion, pending persistence, and durable activation use
   actual runtime timestamps; a plan becomes `OPEN` only after a post-commit check before its
   market open, and reward/risk plus quantity are recalculated from that open. Missed or late
-  bars are recorded/cancelled and never fabricated as forward fills. Forward Shadow currently
-  rejects non-`1Day` strategies at adoption.
+  bars are recorded/cancelled and never fabricated as forward fills. Forward Shadow accepts
+  daily-bar strategies with finite approved holding horizons; it still rejects non-`1Day`
+  strategies at adoption.
   Active deployments recheck their exact contract before every tick and move to
   `REVALIDATION_REQUIRED` after an engine/config mismatch. Every strategy/symbol deployment is
   now an attribution sleeve under one
   `SHARED_MASTER` virtual account; open plans atomically reserve shared cash and concurrent
-  risk and settle P&L once. It processes each stored bar idempotently. The literal multi-session buy-
-  and-hold benchmark is research-only. Shadow itself makes no broker call.
+  risk and settle P&L once. Multi-session position state, marks, stop/target checks, timed exits,
+  and applied split/dividend lineage survive worker restarts. Global pause blocks new entries
+  while allowing an existing position to exit. The literal unbounded buy-and-hold benchmark
+  remains research-only. Shadow itself makes no broker call.
 - Phase 7 persists Paper enrollments, deterministic client-order intents, broker lifecycle
   events, account/position snapshots, and runtime runs through Alembic revision
   `20260907_0031`. The only broker host is exactly `paper-api.alpaca.markets`.
@@ -146,6 +154,10 @@ A Git commit cannot contain its own content-derived hash without changing that h
   new exposure blocked until the broker account is flat. Paper infrastructure is enabled in
   production, but no strategy has passed its exact gate or been adopted/enrolled, so it has
   no eligible order to submit.
+- Multi-session research, validation, and Forward Shadow use the separate
+  `next_session_day_limit_bracket_timed_exit@0.1.0` contract. Alpaca Paper remains explicitly
+  one-session-only until a next-session entry-expiry plus durable GTC protection and timed-exit
+  recovery contract is implemented and validated.
 - Code modification is represented by scoped change sessions. The web process exposes no
   shell; a trusted external coding worker must produce a diff and passing test record before
   a separate local-commit approval. Push and deployment remain external actions.
@@ -171,7 +183,9 @@ A Git commit cannot contain its own content-derived hash without changing that h
   reject deterministically and are retained in the decision event. Candidate/snapshot ID
   mismatches and signal/feature timestamps later than evaluation time also reject.
 - The global new-exposure pause is enforced at the shadow runtime entry point, preventing a
-  manually confirmed tick from bypassing the scheduler kill switch.
+  manually confirmed tick from creating a new plan. If a multi-session position is already
+  open, the runtime continues only deterministic mark and exit processing so the pause cannot
+  strand existing risk.
 - The shared account begins with a versioned `$130` maximum trade risk and `$780` maximum
   concurrent risk. These are conservative bootstrap defaults, not permanent policy. An
   `account.risk.update` action requires explicit confirmation, appends a revision, and changes
@@ -726,6 +740,15 @@ future execution bar's completed volume cannot size an entry. Scheduler and manu
 share one lock and one idempotent bar cursor. Production gives the scheduler to a dedicated
 heartbeat-reporting worker; the API is not a second scheduler owner. The runtime contains no
 broker SDK or order-submission route.
+
+Strategy horizon is now a first-class immutable contract rather than an implied one-bar
+default. The coordinator rotates through 1/5/20/63/126/252-session ML labels; the Research LLM
+and constrained generator must use the same horizon. Replay and validation select either the
+same-session MOC profile or the multi-session timed-exit profile. Forward Shadow persists an
+open multi-session position, including entry basis, filled quantity, cost basis, maximum exit,
+and applied corporate actions, across worker restarts. The global pause remains a new-exposure
+gate and cannot suppress risk-reducing exits. Alpaca Paper deliberately accepts only the
+one-session profile until its distinct GTC protection contract is implemented.
 
 Workflow jobs use explicit dependencies, atomic lease ownership, lease heartbeats, and stale
 recovery. Ledger events and their SQL outbox records commit together; Redis delivery uses a
@@ -3770,6 +3793,61 @@ lifecycle. No Paper order was used as a build or deployment test.
     simulated broker order, and global new exposure remains paused.
 - Corrections/follow-ups: record later coverage and strategy outcomes as they accumulate; do
   not loosen evidence gates solely to force visible orders.
+
+### D048 — Strategy horizon is one end-to-end contract
+
+- Date: 2026-09-08 PDT.
+- The user requires both same-day strategies and positions held across days, months, or about
+  one year. Widening a price stop without changing the ML label and execution lifecycle does
+  not satisfy that requirement.
+- Decision: support 1, 5, 20, 63, 126, and 252-session maximum holding periods. The selected
+  ML horizon must match the Research LLM context, constrained proposal, immutable strategy
+  spec, replay behavior, and exact validation certificate.
+- Decision: keep the account's existing deterministic dollar-risk authority unchanged. A
+  multi-session strategy begins with a 12.5% price stop and the same 2R target, so position
+  sizing reduces shares rather than silently expanding permissible account loss.
+- Decision: persist multi-session Forward Shadow positions and continue their risk-reducing
+  exits while global new exposure is paused. Keep Alpaca Paper fail-closed for multi-session
+  profiles until next-session-only entry expiry, durable GTC exits, and timed-exit recovery
+  are separately implemented and validated.
+- Formal record: ADR 0035.
+
+### C059 — `Add multi-horizon strategy lifecycles`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-08 PDT.
+- User intent: support both single-day and multi-day/long-term position strategies instead of
+  restricting deployable research to a same-session exit.
+- Scope:
+  - Added approved 1/5/20/63/126/252-session research horizons and rotated autonomous hourly
+    cycles across them.
+  - Bound ML labels, LLM proposals, strategy specs, horizon-specific validation windows, and
+    execution contracts to the same immutable holding period.
+  - Added deterministic multi-session replay with stop/target checks, maximum-holding exits,
+    corporate-action accounting, and a backtest-engine version bump that invalidates stale
+    certificates.
+  - Added restart-safe multi-session Shadow position state, sequential missed-bar exit
+    processing, deterministic marks/exits, split/dividend adjustments, and risk-reducing exit
+    processing while new exposure is globally paused.
+  - Preserved the existing account-dollar risk caps while applying a 12.5% multi-session price
+    stop; LLMs still cannot control risk or sizing.
+  - Kept multi-session Alpaca Paper enrollment explicitly fail-closed and updated the Control
+    Center, README, runbooks, project state, and ADR 0035 to show the boundary.
+- Architecture/decision impact: the original one-session execution profile remains available;
+  a second finite multi-session profile is now valid for research, exact validation, and
+  broker-free Shadow. Paper does not inherit it implicitly.
+- Validation: the full local release gate passes Flake8, strict mypy across 59 source files,
+  188 tests, local and authenticated Compose doctors, secret scan, image rebuild, and
+  PostgreSQL schema-drift detection. A fresh SQLite database upgraded to `20260908_0034`,
+  downgraded to `20260907_0033`, and re-upgraded to head. JavaScriptCore parsed the browser
+  bundle before stopping at the expected missing DOM in the non-browser harness. GitHub CI
+  and production deployment remain to be recorded.
+- Expected global state after commit: local source can generate, falsify, inspect, and run
+  finite day/swing/position strategies in Forward Shadow. Production remains on C057's
+  functional image until the exact commit passes delivery gates; existing certificates become
+  stale because the backtest engine version changes.
+- Corrections/follow-ups: implement and independently validate the separate multi-session
+  Alpaca Paper broker lifecycle before enabling those profiles externally.
 
 ## Template for future commit entries
 

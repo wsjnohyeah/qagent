@@ -133,6 +133,14 @@ can create new exposure. It contains no broker client or order-submission path. 
 local data validates the workflow; production can run the same partitionable contracts over
 longer history.
 
+Strategy generation supports explicit 1, 5, 20, 63, 126, and 252-session horizons. The ML
+label, forecast, Research LLM analysis, generated spec, backtest, validation certificate, and
+Forward Shadow exit all bind to that same horizon. Multi-session Shadow positions persist
+across worker restarts and close on their stop, target, or maximum holding session. Their
+initial 12.5% price stop widens price tolerance but does not raise the account-dollar loss
+caps; deterministic sizing reduces quantity. Alpaca Paper remains one-session-only until a
+separate next-session-entry/GTC-exit lifecycle is implemented and validated.
+
 All shadow strategy/symbol deployments are sleeves of one shared virtual master account.
 Open plans atomically reserve account cash and concurrent risk, and completion releases the
 reservation and settles P&L once. The default `$130` per-trade and `$780` concurrent risk are

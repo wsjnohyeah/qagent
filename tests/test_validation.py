@@ -123,6 +123,7 @@ def _seed_eligible_report(
         risk_policy=risk_policy,
         restriction_registry_version=restrictions.version,
         initial_equity=Decimal("100000"),
+        strategy_spec=spec,
     )
     with ledger.engine.begin() as connection:
         connection.execute(
@@ -640,6 +641,119 @@ def test_shadow_computation_crossing_open_cannot_create_a_late_fill(
     assert not any(
         event["event_type"] == "VIRTUAL_FILL" for event in shadow.events()
     )
+
+
+def test_multi_session_shadow_position_survives_ticks_and_global_pause(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    market = MarketDataStore(ledger.engine)
+    store = ResearchStore(ledger.engine)
+    bars = _regime_bars(count=34)
+    market.insert_bars(bars[:25], raw_object_id="TEST_RAW")
+    base = default_strategy_spec(
+        "momentum",
+        timeframe="1Day",
+        code_sha256=research_code_sha256(),
+    )
+    spec = store.record_strategy_spec(
+        base.model_copy(
+            update={
+                "strategy_spec_id": uuid7(),
+                "name": "five_session_shadow_momentum",
+                "version": "0.1.0+five-session-shadow",
+                "data_requirements": {
+                    **base.data_requirements,
+                    "holding_period": "5_sessions",
+                    "holding_period_sessions": 5,
+                    "position_style": "swing",
+                    "paper_deployable": False,
+                },
+            }
+        )
+    )
+    policy = RiskPolicy.from_yaml(settings.risk_policy_path)
+    restrictions = RestrictionRegistry.from_yaml(
+        settings.restricted_securities_path
+    )
+    report_id = _seed_eligible_report(
+        ledger,
+        spec=spec,
+        timeframe="1Day",
+        risk_policy=policy,
+        restrictions=restrictions,
+    )
+    objects = SystemObjectStore(ledger.engine, ledger)
+    objects.ensure_defaults()
+    clock = [bars[25].available_from + timedelta(minutes=1)]
+    shadow = ShadowRuntime(
+        ledger.engine,
+        store,
+        objects,
+        risk_policy=policy,
+        restrictions=restrictions,
+        now_provider=lambda: clock[0],
+    )
+    shadow.initialize_virtual_account()
+    shadow.adopt_strategy(
+        strategy_spec_id=spec.strategy_spec_id,
+        validation_report_id=report_id,
+        reason="Exercise the multi-session forward contract",
+        approved_by="test-admin",
+    )
+    deployment = shadow.start_deployment(
+        strategy_spec_id=spec.strategy_spec_id,
+        symbol="AAPL",
+        initial_cash=Decimal("100000"),
+        requested_by="test-admin",
+    )
+
+    market.insert_bars((bars[25],), raw_object_id="TEST_RAW")
+    asyncio.run(shadow.tick(trigger="decision", new_exposure_paused=False))
+    market.insert_bars((bars[26],), raw_object_id="TEST_RAW")
+    clock[0] = bars[26].available_from + timedelta(minutes=1)
+    asyncio.run(shadow.tick(trigger="entry", new_exposure_paused=False))
+
+    with ledger.engine.connect() as connection:
+        opened = connection.execute(select(shadow_trade_plans)).one()
+    assert opened.status == "POSITION_OPEN"
+    assert Decimal(str(opened.filled_quantity)) > 0
+    assert Decimal(str(opened.invalidation)) < Decimal(str(opened.entry_raw_price))
+    active = shadow.deployment(str(deployment["shadow_deployment_id"]))
+    assert Decimal(str(active["position_quantity"])) > 0
+
+    market.insert_bars((bars[27],), raw_object_id="TEST_RAW")
+    clock[0] = bars[27].available_from + timedelta(minutes=1)
+    paused_tick = asyncio.run(
+        shadow.tick(trigger="paused-exit-management", new_exposure_paused=True)
+    )
+    assert paused_tick["bars_processed"] == 1
+    assert shadow.deployment(str(deployment["shadow_deployment_id"]))[
+        "position_quantity"
+    ] > 0
+
+    for index in (28, 29, 30):
+        market.insert_bars((bars[index],), raw_object_id="TEST_RAW")
+        clock[0] = bars[index].available_from + timedelta(minutes=1)
+        asyncio.run(
+            shadow.tick(trigger=f"holding-{index}", new_exposure_paused=False)
+        )
+
+    with ledger.engine.connect() as connection:
+        closed = connection.execute(select(shadow_trade_plans)).one()
+    assert closed.status == "CLOSED"
+    final = shadow.deployment(str(deployment["shadow_deployment_id"]))
+    assert Decimal(str(final["position_quantity"])) == 0
+    assert Decimal(str(shadow.virtual_account()["reserved_risk_usd"])) == 0
+    exit_fill = next(
+        event
+        for event in shadow.events(
+            deployment_id=str(deployment["shadow_deployment_id"])
+        )
+        if event["event_type"] == "VIRTUAL_FILL_2"
+    )
+    assert exit_fill["payload_json"]["exit_reason"] == "maximum_holding_period"
 
 
 def test_pbo_and_deflated_sharpe_diagnostics_are_bounded_and_deterministic() -> None:

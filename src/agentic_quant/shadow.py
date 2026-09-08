@@ -14,7 +14,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from agentic_quant.backtest_engine import EventDrivenPortfolio
 from agentic_quant.config import TradingMode
 from agentic_quant.control_plane import SystemObjectStore
-from agentic_quant.data_quality import MarketDataQualityService
+from agentic_quant.data_quality import DataQualityError, MarketDataQualityService
 from agentic_quant.database import (
     shadow_deployments,
     shadow_events,
@@ -31,6 +31,7 @@ from agentic_quant.database import (
 from agentic_quant.domain import (
     AccountState,
     BacktestCostModel,
+    CorporateActionType,
     Direction,
     FeatureSnapshot,
     RiskEvaluationContext,
@@ -43,22 +44,22 @@ from agentic_quant.domain import (
 from agentic_quant.ids import uuid7
 from agentic_quant.market_calendar import MarketSessionClock
 from agentic_quant.research import (
-    BACKTEST_ENGINE_VERSION,
-    FEATURE_SET_VERSION,
     PointInTimeFeatureBuilder,
     strategy_signal_action,
 )
 from agentic_quant.research_store import ResearchStore, _canonical_hash
+from agentic_quant.reference_data import ReferenceDataStore
 from agentic_quant.risk import (
-    BASELINE_EXECUTION_PROFILE_VERSION,
     RestrictionRegistry,
     RiskPolicy,
+    baseline_long_exit,
     baseline_long_geometry,
     deployable_long_exit,
     deployable_long_limit_fill,
-    deployable_execution_profile_parameters,
     evaluate_candidate,
     normalize_deployable_long_prices,
+    strategy_execution_profile,
+    strategy_holding_period_sessions,
 )
 from agentic_quant.virtual_account import (
     MAIN_VIRTUAL_ACCOUNT_ID,
@@ -69,6 +70,7 @@ from agentic_quant.validation import (
     PromotionGatePolicy,
     load_promotion_gate_policy,
     promotion_policy_sha256,
+    validation_execution_contract,
 )
 
 
@@ -104,6 +106,7 @@ class ShadowRuntime:
         self.risk_policy = risk_policy
         self.restrictions = restrictions
         self.features = PointInTimeFeatureBuilder(research_store)
+        self.reference_data = ReferenceDataStore(engine)
         self.session_clock = MarketSessionClock(calendar_name)
         self.data_quality = MarketDataQualityService(
             engine,
@@ -204,20 +207,22 @@ class ShadowRuntime:
                 "This strategy is a research benchmark and has no matching shadow "
                 "execution contract"
             )
-        expected_contract = {
-            "subject": "static_strategy",
-            "strategy_spec_ids": {str(spec.strategy_type): strategy_spec_id},
-            "feature_set_version": FEATURE_SET_VERSION,
-            "backtest_engine_version": BACKTEST_ENGINE_VERSION,
-            "cost_model": self.costs.model_dump(mode="json"),
-            "risk_policy": self.effective_risk_policy().model_dump(mode="json"),
-            "restriction_registry_version": self.restrictions.version,
-            "initial_equity": str(
-                dict(report.execution_contract_json or {}).get("initial_equity")
+        strategy_spec = self.research_store.strategy_spec(strategy_spec_id)
+        if strategy_spec is None:
+            raise ValueError("Strategy specification not found")
+        expected_contract = validation_execution_contract(
+            validation_subject="static_strategy",
+            validated_strategy_spec_ids={
+                str(strategy_spec.strategy_type): strategy_spec_id
+            },
+            cost_model=self.costs,
+            risk_policy=self.effective_risk_policy(),
+            restriction_registry_version=self.restrictions.version,
+            initial_equity=Decimal(
+                str(dict(report.execution_contract_json or {}).get("initial_equity"))
             ),
-            "execution_profile": BASELINE_EXECUTION_PROFILE_VERSION,
-            "execution_profile_parameters": deployable_execution_profile_parameters(),
-        }
+            strategy_spec=strategy_spec,
+        )
         if dict(report.execution_contract_json or {}) != expected_contract:
             raise ValueError(
                 "Validation execution contract does not match the current shadow runtime"
@@ -346,6 +351,36 @@ class ShadowRuntime:
             ).one_or_none()
             if row is None:
                 raise ValueError("Strategy has not been adopted")
+            deployment_ids = tuple(
+                str(value)
+                for value in connection.execute(
+                    select(shadow_deployments.c.shadow_deployment_id).where(
+                        shadow_deployments.c.strategy_spec_id == strategy_spec_id
+                    )
+                ).scalars()
+            )
+            if deployment_ids:
+                open_positions = connection.execute(
+                    select(func.count())
+                    .select_from(shadow_trade_plans)
+                    .join(
+                        shadow_signal_candidates,
+                        shadow_signal_candidates.c.candidate_id
+                        == shadow_trade_plans.c.candidate_id,
+                    )
+                    .where(
+                        shadow_signal_candidates.c.shadow_deployment_id.in_(
+                            deployment_ids
+                        )
+                        & (shadow_trade_plans.c.status == "POSITION_OPEN")
+                    )
+                ).scalar_one()
+                if int(open_positions) > 0:
+                    raise ValueError(
+                        "Cannot pause or retire a strategy while a Shadow position "
+                        "is open; pause new exposure globally and let deterministic "
+                        "exits continue"
+                    )
             connection.execute(
                 update(strategy_adoptions)
                 .where(strategy_adoptions.c.adoption_id == row.adoption_id)
@@ -360,14 +395,6 @@ class ShadowRuntime:
                 update(shadow_deployments)
                 .where(shadow_deployments.c.strategy_spec_id == strategy_spec_id)
                 .values(status=status, updated_at=now)
-            )
-            deployment_ids = tuple(
-                str(value)
-                for value in connection.execute(
-                    select(shadow_deployments.c.shadow_deployment_id).where(
-                        shadow_deployments.c.strategy_spec_id == strategy_spec_id
-                    )
-                ).scalars()
             )
             self._cancel_open_plans(
                 connection,
@@ -571,6 +598,28 @@ class ShadowRuntime:
                 raise ValueError("Shadow deployment not found")
             if row.status == "RETIRED":
                 raise ValueError("Retired shadow deployments cannot be changed")
+            if status != "ACTIVE":
+                position_open = connection.execute(
+                    select(func.count())
+                    .select_from(shadow_trade_plans)
+                    .join(
+                        shadow_signal_candidates,
+                        shadow_signal_candidates.c.candidate_id
+                        == shadow_trade_plans.c.candidate_id,
+                    )
+                    .where(
+                        (
+                            shadow_signal_candidates.c.shadow_deployment_id
+                            == deployment_id
+                        )
+                        & (shadow_trade_plans.c.status == "POSITION_OPEN")
+                    )
+                ).scalar_one()
+                if int(position_open) > 0:
+                    raise ValueError(
+                        "Cannot pause or retire a Shadow deployment while its position "
+                        "is open; use the global new-exposure pause so exits keep running"
+                    )
             if status == "ACTIVE":
                 adoption_row = connection.execute(
                     select(
@@ -665,6 +714,7 @@ class ShadowRuntime:
                 strategy_specs.c.strategy_type,
                 strategy_specs.c.timeframe,
                 strategy_specs.c.parameters_json,
+                strategy_specs.c.data_requirements_json,
                 strategy_adoptions.c.validation_report_id,
                 validation_reports.c.execution_contract_sha256,
                 validation_reports.c.execution_contract_json,
@@ -691,6 +741,7 @@ class ShadowRuntime:
         master = self.virtual_account()
         for value in values:
             value["account_mode"] = "SHARED_MASTER"
+            value["sleeve_cash_balance"] = value["cash_balance"]
             value["cash_balance"] = master["cash_balance"]
             value["sleeve_realized_pnl"] = value["realized_pnl"]
             value["account_cash_balance"] = master["cash_balance"]
@@ -855,7 +906,7 @@ class ShadowRuntime:
                     item["approved_count"] += 1
                 else:
                     item["rejected_count"] += 1
-            elif row.event_type == "VIRTUAL_FILL":
+            elif row.event_type == "VIRTUAL_FILL_2":
                 item["round_trip_count"] += 1
             item["realized_pnl"] += Decimal(str(row.realized_pnl_delta))
         reports = []
@@ -945,7 +996,7 @@ class ShadowRuntime:
         trigger: str = "manual",
         new_exposure_paused: bool,
     ) -> dict[str, Any]:
-        if new_exposure_paused:
+        if new_exposure_paused and not self._has_open_positions():
             raise ValueError("Global new-exposure pause blocks shadow processing")
         async with self._tick_lock:
             owner = f"{trigger}:{uuid7()}"
@@ -957,6 +1008,7 @@ class ShadowRuntime:
                     self._tick_locked,
                     trigger=trigger,
                     lease_token=token,
+                    new_exposure_paused=new_exposure_paused,
                 ),
                 name="shadow-tick-work",
             )
@@ -984,7 +1036,13 @@ class ShadowRuntime:
                     pass
                 self._release_runtime_lease(token)
 
-    def _tick_locked(self, *, trigger: str, lease_token: str) -> dict[str, Any]:
+    def _tick_locked(
+        self,
+        *,
+        trigger: str,
+        lease_token: str,
+        new_exposure_paused: bool,
+    ) -> dict[str, Any]:
         started_at = datetime.now(UTC)
         run_id = uuid7()
         deployments = [
@@ -1000,6 +1058,7 @@ class ShadowRuntime:
                     deployment,
                     run_id,
                     lease_token,
+                    new_exposure_paused=new_exposure_paused,
                 )
                 bars_processed += processed
                 events_created += created
@@ -1076,23 +1135,74 @@ class ShadowRuntime:
                 ),
             }
 
+    def _has_open_positions(self) -> bool:
+        with self.engine.connect() as connection:
+            count = connection.execute(
+                select(func.count())
+                .select_from(shadow_trade_plans)
+                .where(shadow_trade_plans.c.status == "POSITION_OPEN")
+            ).scalar_one()
+        return int(count) > 0
+
+    def _position_is_open(self, deployment_id: str) -> bool:
+        with self.engine.connect() as connection:
+            count = connection.execute(
+                select(func.count())
+                .select_from(shadow_trade_plans)
+                .join(
+                    shadow_signal_candidates,
+                    shadow_signal_candidates.c.candidate_id
+                    == shadow_trade_plans.c.candidate_id,
+                )
+                .where(
+                    (shadow_signal_candidates.c.shadow_deployment_id == deployment_id)
+                    & (shadow_trade_plans.c.status == "POSITION_OPEN")
+                )
+            ).scalar_one()
+        return int(count) > 0
+
+    def _advance_deployment_cursor(
+        self,
+        *,
+        deployment_id: str,
+        bar: Any,
+        lease_token: str,
+    ) -> None:
+        with self.engine.begin() as connection:
+            self._assert_runtime_lease(connection, lease_token)
+            connection.execute(
+                update(shadow_deployments)
+                .where(shadow_deployments.c.shadow_deployment_id == deployment_id)
+                .values(
+                    last_price=bar.close,
+                    last_processed_bar_time=bar.event_time,
+                    updated_at=self._now(),
+                )
+            )
+
     def _process_deployment(
         self,
         deployment: dict[str, Any],
         run_id: str,
         lease_token: str,
+        *,
+        new_exposure_paused: bool,
     ) -> tuple[int, int]:
-        try:
-            self.adoption_preview(
-                strategy_spec_id=str(deployment["strategy_spec_id"]),
-                validation_report_id=str(deployment["validation_report_id"]),
-            )
-        except ValueError as exc:
-            self._require_revalidation(
-                deployment,
-                reason=str(exc),
-            )
-            return 0, 0
+        position_open = self._position_is_open(
+            str(deployment["shadow_deployment_id"])
+        )
+        if not position_open:
+            try:
+                self.adoption_preview(
+                    strategy_spec_id=str(deployment["strategy_spec_id"]),
+                    validation_report_id=str(deployment["validation_report_id"]),
+                )
+            except ValueError as exc:
+                self._require_revalidation(
+                    deployment,
+                    reason=str(exc),
+                )
+                return 0, 0
         observed_at = self._now()
         created = self._cancel_interrupted_plan_activations(
             deployment=deployment,
@@ -1107,12 +1217,19 @@ class ShadowRuntime:
         )
         if len(bars) < 22:
             return 0, created
-        quality_report = self.data_quality.require_bars(
-            bars,
-            symbol=str(deployment["symbol"]),
-            timeframe=str(deployment["timeframe"]),
-            code_git_sha="shadow-runtime",
-        )
+        try:
+            quality_report = self.data_quality.require_bars(
+                bars,
+                symbol=str(deployment["symbol"]),
+                timeframe=str(deployment["timeframe"]),
+                code_git_sha="shadow-runtime",
+            )
+            market_data_healthy = quality_report.status.value == "PASSED"
+        except DataQualityError:
+            if not position_open:
+                raise
+            quality_report = None
+            market_data_healthy = False
         last_processed = _utc(deployment["last_processed_bar_time"])
         new_bars = [
             bar
@@ -1120,6 +1237,25 @@ class ShadowRuntime:
             if last_processed is None or bar.event_time > last_processed
         ]
         if not new_bars:
+            return 0, created
+        if position_open:
+            processed = 0
+            for position_bar in new_bars:
+                created += self._execute_open_plan(
+                    deployment=deployment,
+                    execution_bar=position_bar,
+                    run_id=run_id,
+                    lease_token=lease_token,
+                    market_data_healthy=market_data_healthy,
+                    missed_bar_count=0,
+                )
+                processed += 1
+                if not self._position_is_open(
+                    str(deployment["shadow_deployment_id"])
+                ):
+                    break
+            return processed, created
+        if new_exposure_paused:
             return 0, created
         # Forward shadow deliberately consumes only the newest completed bar. It
         # never reconstructs hypothetical orders for bars that arrived while the
@@ -1130,9 +1266,16 @@ class ShadowRuntime:
             execution_bar=decision_bar,
             run_id=run_id,
             lease_token=lease_token,
-            market_data_healthy=quality_report.status.value == "PASSED",
+            market_data_healthy=market_data_healthy,
             missed_bar_count=len(new_bars) - 1,
         )
+        if self._position_is_open(str(deployment["shadow_deployment_id"])):
+            self._advance_deployment_cursor(
+                deployment_id=str(deployment["shadow_deployment_id"]),
+                bar=decision_bar,
+                lease_token=lease_token,
+            )
+            return len(new_bars), created
         refreshed = self.deployment(str(deployment["shadow_deployment_id"]))
         snapshot = self.features.build(
             symbol=str(refreshed["symbol"]),
@@ -1153,7 +1296,12 @@ class ShadowRuntime:
                 else decision_bar.available_from
             )
             expiry = (
-                self.session_clock.next_daily_session_close(decision_bar.event_time)
+                self.session_clock.daily_session_close_after(
+                    decision_bar.event_time,
+                    sessions_ahead=strategy_holding_period_sessions(
+                        dict(refreshed.get("data_requirements_json") or {})
+                    ),
+                )
                 if decision_bar.timeframe == "1Day"
                 else snapshot.as_of + timedelta(minutes=5)
             )
@@ -1175,7 +1323,7 @@ class ShadowRuntime:
                 exit_time=expiry,
                 planned_entry=decision_bar.close,
                 known_liquidity_volume=decision_bar.volume,
-                market_data_healthy=quality_report.status.value == "PASSED",
+                market_data_healthy=market_data_healthy,
             )
         if len(new_bars) > 1:
             lineage_values.append(
@@ -1239,6 +1387,8 @@ class ShadowRuntime:
                             **evaluation_context.model_dump(mode="json"),
                             "data_quality_report_id": (
                                 quality_report.data_quality_report_id
+                                if quality_report is not None
+                                else None
                             ),
                             "liquidity_source_bar_id": decision_bar.bar_id,
                             "liquidity_source_volume": decision_bar.volume,
@@ -1510,7 +1660,7 @@ class ShadowRuntime:
                 .where(
                     (shadow_signal_candidates.c.shadow_deployment_id
                      == deployment["shadow_deployment_id"])
-                    & (shadow_trade_plans.c.status == "OPEN")
+                    & shadow_trade_plans.c.status.in_(("OPEN", "POSITION_OPEN"))
                 )
                 .order_by(shadow_trade_plans.c.created_at.asc())
             ).all()
@@ -1519,6 +1669,15 @@ class ShadowRuntime:
         if len(rows) != 1:
             raise RuntimeError("A strategy sleeve has multiple open plans")
         pending = dict(rows[0]._mapping)
+        if str(pending["status"]) == "POSITION_OPEN":
+            return self._execute_position_bar(
+                deployment=deployment,
+                pending=pending,
+                execution_bar=execution_bar,
+                run_id=run_id,
+                lease_token=lease_token,
+                market_data_healthy=market_data_healthy,
+            )
         entry_time = (
             self.session_clock.daily_bar_session_open(execution_bar.event_time)
             if execution_bar.timeframe == "1Day"
@@ -1540,7 +1699,10 @@ class ShadowRuntime:
             rejection_reasons.append("MISSED_EARLIEST_FILL_BAR")
         if entry_time > expires_at:
             rejection_reasons.append("PLAN_EXPIRED")
-        policy = self.effective_risk_policy()
+        profile_version, _, policy = strategy_execution_profile(
+            data_requirements=dict(deployment.get("data_requirements_json") or {}),
+            account_policy=self.effective_risk_policy(),
+        )
         if account.equity <= policy.account_floor_usd:
             rejection_reasons.append("ACCOUNT_FLOOR_REACHED_AT_EXECUTION")
         if account.daily_pnl <= -policy.daily_loss_stop_usd:
@@ -1676,10 +1838,11 @@ class ShadowRuntime:
                     if execution_review is not None
                     else []
                 ),
-                "execution_profile": BASELINE_EXECUTION_PROFILE_VERSION,
+                "execution_profile": profile_version,
                 "virtual_only": True,
             },
         )
+        position_state: dict[str, Any] | None = None
         if rejection_reasons:
             events = [
                 review_event,
@@ -1705,33 +1868,47 @@ class ShadowRuntime:
                 **deployment,
                 "cash_balance": account.equity,
             }
-            simulated_events, cash, realized = self._simulate_one_bar(
-                deployment=simulation_deployment,
-                run_id=run_id,
-                decision_bar_id=execution_bar.bar_id,
-                snapshot_id=str(pending["feature_snapshot_id"]),
-                signal_time=signal_as_of,
-                entry_time=entry_time,
-                exit_time=execution_bar.available_from,
-                action=SignalAction.LONG,
-                open_price=execution_bar.open,
-                high_price=execution_bar.high,
-                low_price=execution_bar.low,
-                close_price=execution_bar.close,
-                volume=int(context.get("liquidity_source_volume") or 0),
-                exit_volume=execution_bar.volume,
-                quantity_limit=execution_quantity,
-                invalidation=Decimal(str(pending["invalidation"])),
-                target=Decimal(str(list(pending["targets_json"])[0])),
-                entry_limit_price=Decimal(str(pending["limit_price"])),
-                lineage={
+            holding_sessions = strategy_holding_period_sessions(
+                dict(deployment.get("data_requirements_json") or {})
+            )
+            simulation_arguments = {
+                "deployment": simulation_deployment,
+                "run_id": run_id,
+                "decision_bar_id": execution_bar.bar_id,
+                "snapshot_id": str(pending["feature_snapshot_id"]),
+                "signal_time": signal_as_of,
+                "entry_time": entry_time,
+                "exit_time": execution_bar.available_from,
+                "action": SignalAction.LONG,
+                "open_price": execution_bar.open,
+                "high_price": execution_bar.high,
+                "low_price": execution_bar.low,
+                "close_price": execution_bar.close,
+                "volume": int(context.get("liquidity_source_volume") or 0),
+                "exit_volume": execution_bar.volume,
+                "quantity_limit": execution_quantity,
+                "invalidation": Decimal(str(pending["invalidation"])),
+                "target": Decimal(str(list(pending["targets_json"])[0])),
+                "entry_limit_price": Decimal(str(pending["limit_price"])),
+                "lineage": {
                     "candidate_id": pending["candidate_id"],
                     "risk_decision_id": pending["risk_decision_id"],
                     "trade_plan_id": pending["trade_plan_id"],
                 },
-            )
+            }
+            if holding_sessions == 1:
+                simulated_events, cash, realized = self._simulate_one_bar(
+                    **simulation_arguments,
+                )
+            else:
+                (
+                    simulated_events,
+                    cash,
+                    realized,
+                    position_state,
+                ) = self._simulate_multi_session_entry(**simulation_arguments)
             events = [review_event, *simulated_events]
-            status = "CLOSED"
+            status = "POSITION_OPEN" if position_state is not None else "CLOSED"
         if events:
             next_sequence = self._next_event_sequence(
                 str(deployment["shadow_deployment_id"])
@@ -1748,17 +1925,58 @@ class ShadowRuntime:
                 )
                 .values(
                     status=status,
-                    closed_at=self._now(),
+                    opened_at=(
+                        position_state["opened_at"]
+                        if position_state is not None
+                        else None
+                    ),
+                    entry_raw_price=(
+                        position_state["entry_raw_price"]
+                        if position_state is not None
+                        else None
+                    ),
+                    entry_fill_price=(
+                        position_state["entry_fill_price"]
+                        if position_state is not None
+                        else None
+                    ),
+                    entry_commission=(
+                        position_state["entry_commission"]
+                        if position_state is not None
+                        else None
+                    ),
+                    filled_quantity=(
+                        position_state["filled_quantity"]
+                        if position_state is not None
+                        else None
+                    ),
+                    starting_cash=(
+                        position_state["starting_cash"]
+                        if position_state is not None
+                        else None
+                    ),
+                    corporate_action_cash=(
+                        position_state["corporate_action_cash"]
+                        if position_state is not None
+                        else None
+                    ),
+                    applied_corporate_action_ids_json=(
+                        position_state["applied_corporate_action_ids"]
+                        if position_state is not None
+                        else None
+                    ),
+                    closed_at=None if position_state is not None else self._now(),
                 )
             )
             realized_delta = cash - account.equity if status == "CLOSED" else _ZERO
-            self.accounts.release_or_settle(
-                account_id=str(deployment["virtual_account_id"]),
-                reserved_cash=Decimal(str(pending["reserved_cash"])),
-                reserved_risk_usd=Decimal(str(pending["reserved_risk_usd"])),
-                realized_pnl_delta=realized_delta,
-                connection=connection,
-            )
+            if status != "POSITION_OPEN":
+                self.accounts.release_or_settle(
+                    account_id=str(deployment["virtual_account_id"]),
+                    reserved_cash=Decimal(str(pending["reserved_cash"])),
+                    reserved_risk_usd=Decimal(str(pending["reserved_risk_usd"])),
+                    realized_pnl_delta=realized_delta,
+                    connection=connection,
+                )
             if events:
                 connection.execute(insert(shadow_events), events)
             connection.execute(
@@ -1769,17 +1987,520 @@ class ShadowRuntime:
                 )
                 .values(
                     cash_balance=cash,
-                    position_quantity=_ZERO,
-                    average_entry_price=None,
+                    position_quantity=(
+                        position_state["filled_quantity"]
+                        if position_state is not None
+                        else _ZERO
+                    ),
+                    average_entry_price=(
+                        position_state["entry_fill_price"]
+                        if position_state is not None
+                        else None
+                    ),
                     last_price=execution_bar.close,
                     realized_pnl=realized,
-                    unrealized_pnl=_ZERO,
+                    unrealized_pnl=(
+                        position_state["unrealized_pnl"]
+                        if position_state is not None
+                        else _ZERO
+                    ),
                     updated_at=datetime.now(UTC),
                 )
             )
         deployment["cash_balance"] = cash
+        deployment["sleeve_cash_balance"] = cash
         deployment["realized_pnl"] = realized
         return len(events)
+
+    def _simulate_multi_session_entry(
+        self,
+        *,
+        deployment: dict[str, Any],
+        run_id: str,
+        decision_bar_id: str,
+        snapshot_id: str,
+        signal_time: datetime,
+        entry_time: datetime,
+        exit_time: datetime,
+        action: SignalAction,
+        open_price: Decimal,
+        close_price: Decimal,
+        high_price: Decimal,
+        low_price: Decimal,
+        volume: int,
+        exit_volume: int | None = None,
+        quantity_limit: int | None = None,
+        invalidation: Decimal | None = None,
+        target: Decimal | None = None,
+        entry_limit_price: Decimal | None = None,
+        lineage: dict[str, str | None] | None = None,
+    ) -> tuple[
+        list[dict[str, Any]],
+        Decimal,
+        Decimal,
+        dict[str, Any] | None,
+    ]:
+        if action != SignalAction.LONG:
+            raise ValueError("Multi-session Shadow supports long positions only")
+        if invalidation is None or target is None:
+            raise ValueError("Approved shadow entry requires bracket geometry")
+        starting_cash = Decimal(str(deployment["cash_balance"]))
+        portfolio = EventDrivenPortfolio(
+            experiment_run_id=run_id,
+            symbol=str(deployment["symbol"]),
+            initial_cash=starting_cash,
+            cost_model=self.costs,
+        )
+        snapshot = self.research_store.feature_snapshot(snapshot_id)
+        assert snapshot is not None
+        portfolio.record_signal(snapshot=snapshot, action=action)
+        limit_fill = deployable_long_limit_fill(
+            open_price=open_price,
+            low_price=low_price,
+            limit_price=entry_limit_price or open_price,
+        )
+        entered = limit_fill is not None and portfolio.enter_long(
+            signal_as_of=signal_time,
+            entry_time=entry_time,
+            raw_price=limit_fill[0],
+            available_volume=exit_volume if exit_volume is not None else volume,
+            feature_snapshot_id=snapshot_id,
+            quantity_limit=quantity_limit,
+        )
+        position_state: dict[str, Any] | None = None
+        if entered:
+            assert limit_fill is not None
+            exit_price, exit_reason = deployable_long_exit(
+                entry_kind=limit_fill[1],
+                open_price=open_price,
+                high_price=high_price,
+                low_price=low_price,
+                close_price=close_price,
+                invalidation=invalidation,
+                target=target,
+            )
+            bracket_triggered = exit_reason not in {
+                "session_close",
+                "market_on_close",
+            }
+            if bracket_triggered:
+                portfolio.exit_long(
+                    exit_time=exit_time,
+                    raw_price=exit_price,
+                    available_volume=(
+                        exit_volume if exit_volume is not None else volume
+                    ),
+                    exit_reason=exit_reason,
+                )
+            else:
+                equity = portfolio.mark(event_time=exit_time, raw_price=close_price)
+                fill = next(
+                    event
+                    for event in portfolio.events
+                    if event.event_type.value == "fill"
+                    and event.details.get("side") == "buy"
+                )
+                quantity = portfolio.quantity
+                position_state = {
+                    "opened_at": entry_time,
+                    "entry_raw_price": limit_fill[0],
+                    "entry_fill_price": fill.price,
+                    "entry_commission": Decimal(str(fill.details["commission"])),
+                    "filled_quantity": quantity,
+                    "starting_cash": starting_cash,
+                    "corporate_action_cash": _ZERO,
+                    "applied_corporate_action_ids": [],
+                    "unrealized_pnl": equity - starting_cash,
+                }
+        else:
+            portfolio.mark(event_time=exit_time, raw_price=close_price)
+        values = self._portfolio_event_values(
+            deployment=deployment,
+            run_id=run_id,
+            decision_bar_id=decision_bar_id,
+            events=portfolio.events,
+            realized_pnl_delta=(
+                portfolio.cash - starting_cash if position_state is None else _ZERO
+            ),
+            lineage=lineage,
+        )
+        pnl_delta = portfolio.cash - starting_cash if position_state is None else _ZERO
+        realized = Decimal(str(deployment["realized_pnl"])) + pnl_delta
+        return values, portfolio.cash, realized, position_state
+
+    def _execute_position_bar(
+        self,
+        *,
+        deployment: dict[str, Any],
+        pending: dict[str, Any],
+        execution_bar: Any,
+        run_id: str,
+        lease_token: str,
+        market_data_healthy: bool,
+    ) -> int:
+        required = (
+            "opened_at",
+            "entry_raw_price",
+            "entry_fill_price",
+            "entry_commission",
+            "filled_quantity",
+            "starting_cash",
+        )
+        if any(pending.get(field) is None for field in required):
+            raise RuntimeError("Persisted Shadow position state is incomplete")
+        opened_at = _utc(pending["opened_at"])
+        expires_at = _utc(pending["expires_at"])
+        assert opened_at is not None and expires_at is not None
+        bar_close = _utc(execution_bar.available_from)
+        assert bar_close is not None
+        if execution_bar.event_time < opened_at:
+            return 0
+
+        quantity = Decimal(str(pending["filled_quantity"]))
+        entry_raw = Decimal(str(pending["entry_raw_price"]))
+        entry_fill = Decimal(str(pending["entry_fill_price"]))
+        entry_commission = Decimal(str(pending["entry_commission"]))
+        starting_cash = Decimal(str(pending["starting_cash"]))
+        corporate_cash = Decimal(str(pending.get("corporate_action_cash") or 0))
+        invalidation = Decimal(str(pending["invalidation"]))
+        targets = [Decimal(str(value)) for value in pending["targets_json"]]
+        if not targets:
+            raise RuntimeError("Persisted Shadow position is missing its target")
+        target = targets[0]
+        applied_ids = {
+            str(value)
+            for value in (pending.get("applied_corporate_action_ids_json") or [])
+        }
+        action_events: list[dict[str, Any]] = []
+        actions = self.reference_data.corporate_actions_as_of(
+            symbol=str(deployment["symbol"]),
+            as_of=bar_close,
+            effective_from=opened_at,
+        )
+        for action in actions:
+            if action.corporate_action_id in applied_ids:
+                continue
+            if action.action_type == CorporateActionType.SYMBOL_CHANGE:
+                raise RuntimeError(
+                    "An open Shadow position requires manual review after a symbol change"
+                )
+            if action.action_type == CorporateActionType.SPLIT:
+                assert action.split_ratio is not None
+                quantity *= action.split_ratio
+                entry_raw /= action.split_ratio
+                entry_fill /= action.split_ratio
+                invalidation /= action.split_ratio
+                target /= action.split_ratio
+            else:
+                assert action.cash_amount is not None
+                dividend = quantity * action.cash_amount
+                corporate_cash += dividend
+            applied_ids.add(action.corporate_action_id)
+            action_events.append(
+                {
+                    "shadow_event_id": uuid7(),
+                    "shadow_deployment_id": deployment["shadow_deployment_id"],
+                    "shadow_run_id": run_id,
+                    "sequence": 0,
+                    "event_type": f"CORPORATE_ACTION_{len(action_events) + 1}",
+                    "event_time": action.effective_at,
+                    "symbol": deployment["symbol"],
+                    "bar_id": execution_bar.bar_id,
+                    "cash_balance": self._position_cash_after_entry(
+                        starting_cash=starting_cash,
+                        entry_fill_price=entry_fill,
+                        entry_commission=entry_commission,
+                        quantity=quantity,
+                        corporate_action_cash=corporate_cash,
+                    ),
+                    "position_quantity": quantity,
+                    "price": None,
+                    "realized_pnl_delta": _ZERO,
+                    "payload_json": {
+                        "corporate_action_id": action.corporate_action_id,
+                        "action_type": action.action_type.value,
+                        "split_ratio": (
+                            str(action.split_ratio)
+                            if action.split_ratio is not None
+                            else None
+                        ),
+                        "cash_amount": (
+                            str(action.cash_amount)
+                            if action.cash_amount is not None
+                            else None
+                        ),
+                        "trade_plan_id": pending["trade_plan_id"],
+                        "virtual_only": True,
+                    },
+                    "created_at": self._now(),
+                }
+            )
+
+        cash_after_entry = self._position_cash_after_entry(
+            starting_cash=starting_cash,
+            entry_fill_price=entry_fill,
+            entry_commission=entry_commission,
+            quantity=quantity,
+            corporate_action_cash=corporate_cash,
+        )
+        exit_price, exit_reason = baseline_long_exit(
+            open_price=execution_bar.open,
+            high_price=execution_bar.high,
+            low_price=execution_bar.low,
+            close_price=execution_bar.close,
+            invalidation=invalidation,
+            target=target,
+        )
+        bracket_triggered = exit_reason != "session_close"
+        timed_exit = bar_close >= expires_at
+        emergency_exit = not market_data_healthy
+        close_position = bracket_triggered or timed_exit or emergency_exit
+        events = action_events
+        final_cash = cash_after_entry
+        realized_delta = _ZERO
+        unrealized = cash_after_entry + quantity * execution_bar.close - starting_cash
+        status = "POSITION_OPEN"
+        if close_position:
+            raw_exit = (
+                execution_bar.open
+                if emergency_exit
+                else exit_price
+                if bracket_triggered
+                else execution_bar.close
+            )
+            volume_capacity = (
+                Decimal(execution_bar.volume) * self.costs.max_volume_participation
+            )
+            if quantity > volume_capacity:
+                raise ValueError(
+                    "Insufficient bar liquidity to close the Shadow position"
+                )
+            execution_bps = (
+                self.costs.slippage_bps_per_side
+                + self.costs.half_spread_bps_per_side
+                + self.costs.market_impact_bps_per_side
+            )
+            fill_price = raw_exit * (_ONE - execution_bps / Decimal("10000"))
+            exit_commission = EventDrivenPortfolio.commission(quantity, self.costs)
+            final_cash = cash_after_entry + fill_price * quantity - exit_commission
+            realized_delta = final_cash - starting_cash
+            unrealized = _ZERO
+            status = "CLOSED"
+            events.extend(
+                (
+                    self._position_event(
+                        deployment=deployment,
+                        run_id=run_id,
+                        bar=execution_bar,
+                        event_type="VIRTUAL_ORDER_2",
+                        event_time=bar_close,
+                        cash_balance=cash_after_entry,
+                        position_quantity=quantity,
+                        price=None,
+                        payload={
+                            "side": "sell",
+                            "quantity": str(quantity),
+                            "trade_plan_id": pending["trade_plan_id"],
+                        },
+                    ),
+                    self._position_event(
+                        deployment=deployment,
+                        run_id=run_id,
+                        bar=execution_bar,
+                        event_type="VIRTUAL_FILL_2",
+                        event_time=bar_close,
+                        cash_balance=final_cash,
+                        position_quantity=_ZERO,
+                        price=fill_price,
+                        realized_pnl_delta=realized_delta,
+                        payload={
+                            "side": "sell",
+                            "quantity": str(quantity),
+                            "raw_price": str(raw_exit),
+                            "commission": str(exit_commission),
+                            "exit_reason": (
+                                "market_data_gap_emergency_exit"
+                                if emergency_exit
+                                else exit_reason
+                                if bracket_triggered
+                                else "maximum_holding_period"
+                            ),
+                            "trade_plan_id": pending["trade_plan_id"],
+                        },
+                    ),
+                )
+            )
+        else:
+            events.append(
+                self._position_event(
+                    deployment=deployment,
+                    run_id=run_id,
+                    bar=execution_bar,
+                    event_type="mark",
+                    event_time=bar_close,
+                    cash_balance=cash_after_entry,
+                    position_quantity=quantity,
+                    price=execution_bar.close,
+                    payload={
+                        "equity": str(cash_after_entry + quantity * execution_bar.close),
+                        "trade_plan_id": pending["trade_plan_id"],
+                    },
+                )
+            )
+        next_sequence = self._next_event_sequence(
+            str(deployment["shadow_deployment_id"])
+        )
+        for offset, event in enumerate(events):
+            event["sequence"] = next_sequence + offset
+        cumulative_realized = Decimal(str(deployment["realized_pnl"]))
+        if close_position:
+            cumulative_realized += realized_delta
+        with self.engine.begin() as connection:
+            self._assert_runtime_lease(connection, lease_token)
+            changed = connection.execute(
+                update(shadow_trade_plans)
+                .where(
+                    (shadow_trade_plans.c.trade_plan_id == pending["trade_plan_id"])
+                    & (shadow_trade_plans.c.status == "POSITION_OPEN")
+                )
+                .values(
+                    status=status,
+                    entry_raw_price=entry_raw,
+                    entry_fill_price=entry_fill,
+                    filled_quantity=quantity,
+                    corporate_action_cash=corporate_cash,
+                    applied_corporate_action_ids_json=sorted(applied_ids),
+                    invalidation=invalidation,
+                    targets_json=[str(target)],
+                    closed_at=bar_close if close_position else None,
+                )
+            )
+            if int(changed.rowcount or 0) != 1:
+                raise RuntimeError("Shadow position lost its persisted open state")
+            if close_position:
+                self.accounts.release_or_settle(
+                    account_id=str(deployment["virtual_account_id"]),
+                    reserved_cash=Decimal(str(pending["reserved_cash"])),
+                    reserved_risk_usd=Decimal(str(pending["reserved_risk_usd"])),
+                    realized_pnl_delta=realized_delta,
+                    connection=connection,
+                )
+            connection.execute(insert(shadow_events), events)
+            connection.execute(
+                update(shadow_deployments)
+                .where(
+                    shadow_deployments.c.shadow_deployment_id
+                    == deployment["shadow_deployment_id"]
+                )
+                .values(
+                    cash_balance=final_cash,
+                    position_quantity=_ZERO if close_position else quantity,
+                    average_entry_price=None if close_position else entry_fill,
+                    last_price=execution_bar.close,
+                    realized_pnl=cumulative_realized,
+                    unrealized_pnl=unrealized,
+                    last_processed_bar_time=execution_bar.event_time,
+                    updated_at=self._now(),
+                )
+            )
+        deployment["sleeve_cash_balance"] = final_cash
+        deployment["realized_pnl"] = cumulative_realized
+        return len(events)
+
+    @staticmethod
+    def _position_cash_after_entry(
+        *,
+        starting_cash: Decimal,
+        entry_fill_price: Decimal,
+        entry_commission: Decimal,
+        quantity: Decimal,
+        corporate_action_cash: Decimal,
+    ) -> Decimal:
+        return (
+            starting_cash
+            - entry_fill_price * quantity
+            - entry_commission
+            + corporate_action_cash
+        )
+
+    def _position_event(
+        self,
+        *,
+        deployment: dict[str, Any],
+        run_id: str,
+        bar: Any,
+        event_type: str,
+        event_time: datetime,
+        cash_balance: Decimal,
+        position_quantity: Decimal,
+        price: Decimal | None,
+        payload: dict[str, Any],
+        realized_pnl_delta: Decimal = _ZERO,
+    ) -> dict[str, Any]:
+        return {
+            "shadow_event_id": uuid7(),
+            "shadow_deployment_id": deployment["shadow_deployment_id"],
+            "shadow_run_id": run_id,
+            "sequence": 0,
+            "event_type": event_type,
+            "event_time": event_time,
+            "symbol": deployment["symbol"],
+            "bar_id": bar.bar_id,
+            "cash_balance": cash_balance,
+            "position_quantity": position_quantity,
+            "price": price,
+            "realized_pnl_delta": realized_pnl_delta,
+            "payload_json": {**payload, "virtual_only": True},
+            "created_at": self._now(),
+        }
+
+    def _portfolio_event_values(
+        self,
+        *,
+        deployment: dict[str, Any],
+        run_id: str,
+        decision_bar_id: str,
+        events: tuple[Any, ...],
+        realized_pnl_delta: Decimal,
+        lineage: dict[str, str | None] | None,
+    ) -> list[dict[str, Any]]:
+        event_counts: dict[str, int] = {}
+        type_names = {
+            "order_submitted": "VIRTUAL_ORDER",
+            "fill": "VIRTUAL_FILL",
+        }
+        values: list[dict[str, Any]] = []
+        for offset, event in enumerate(events):
+            base_type = type_names.get(event.event_type.value, event.event_type.value)
+            count = event_counts.get(base_type, 0) + 1
+            event_counts[base_type] = count
+            event_type = base_type if count == 1 else f"{base_type}_{count}"
+            values.append(
+                {
+                    "shadow_event_id": uuid7(),
+                    "shadow_deployment_id": deployment["shadow_deployment_id"],
+                    "shadow_run_id": run_id,
+                    "sequence": offset + 1,
+                    "event_type": event_type,
+                    "event_time": event.event_time,
+                    "symbol": deployment["symbol"],
+                    "bar_id": decision_bar_id,
+                    "cash_balance": event.cash_balance,
+                    "position_quantity": event.position_quantity,
+                    "price": event.price,
+                    "realized_pnl_delta": (
+                        realized_pnl_delta if offset == len(events) - 1 else _ZERO
+                    ),
+                    "payload_json": {
+                        **event.details,
+                        "feature_snapshot_id": event.feature_snapshot_id,
+                        **(lineage or {}),
+                        "virtual_only": True,
+                    },
+                    "created_at": self._now(),
+                }
+            )
+        return values
 
     @staticmethod
     def _operational_event(
@@ -1906,7 +2627,10 @@ class ShadowRuntime:
         RiskEvaluationContext,
         list[dict[str, Any]],
     ]:
-        policy = self.effective_risk_policy()
+        _, _, policy = strategy_execution_profile(
+            data_requirements=dict(deployment.get("data_requirements_json") or {}),
+            account_policy=self.effective_risk_policy(),
+        )
         raw_invalidation, raw_target = baseline_long_geometry(
             planned_entry,
             policy,

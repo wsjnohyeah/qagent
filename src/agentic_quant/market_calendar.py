@@ -42,9 +42,19 @@ class MarketSessionClock:
         return session_open
 
     def next_daily_session_close(self, event_time: datetime) -> datetime:
+        return self.daily_session_close_after(event_time, sessions_ahead=1)
+
+    def daily_session_close_after(
+        self,
+        event_time: datetime,
+        *,
+        sessions_ahead: int,
+    ) -> datetime:
+        if sessions_ahead < 1:
+            raise ValueError("sessions_ahead must be positive")
         session = self._session_for_daily_bar(event_time)
-        next_session = self.calendar.next_session(session)
-        session_close = self.calendar.session_close(next_session).to_pydatetime()
+        target_session = self.calendar.session_offset(session, sessions_ahead)
+        session_close = self.calendar.session_close(target_session).to_pydatetime()
         if not isinstance(session_close, datetime):
             raise TypeError("Exchange calendar returned a non-datetime session close")
         return session_close

@@ -53,7 +53,7 @@
 - Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
   experiment runs, backtest trades, corporate actions, historical universe membership,
   feature parity checks, and walk-forward reports are stored through Alembic revision
-  `20260907_0033`, including exact validation and ML-training contracts, normalized Paper
+  `20260908_0034`, including exact validation and ML-training contracts, normalized Paper
   order legs, shadow risk lineage, fenced workflow
   attempts, generation-attempt audit, runtime leases, and the event outbox.
 - The Phase 3 runner provides buy-and-hold, long/cash momentum, and long/cash
@@ -108,23 +108,33 @@
   limit touch rechecks reward/risk and quantity, while an untouched order records no fill.
   Missed/late bars never become forward fills. Research-only buy-and-hold cannot be
   shadow-adopted.
+- Generated momentum and mean-reversion specifications may use immutable 1, 5, 20, 63, 126,
+  or 252-session horizons. The ML label, forecast, LLM proposal, replay, and exact validation
+  share that horizon. Multi-session Shadow persists open-position accounting across restarts,
+  checks stop/target on every completed bar, handles recorded splits/dividends, and exits at
+  the maximum holding session. Global pause blocks new exposure but continues existing exits.
 - All shadow deployments are attribution sleeves of one shared virtual master account. Open
   plans atomically reserve its cash and concurrent risk; fills/cancellations settle once.
   Account stop distance, target R multiple, per-trade dollars, equity fraction, concurrent
   risk, daily loss stop, and account floor are an administrator-confirmed immutable revision,
   and changing any of them invalidates older exact validation contracts. The UI explicitly
-  separates price-stop distance from account-dollar loss and notes that the current profile
-  still closes remaining exposure in the same session.
+  separates price-stop distance from account-dollar loss. One-session strategies use the
+  base geometry; multi-session strategies begin with a 12.5% price stop while retaining the
+  same account-dollar caps, so their share quantity is smaller.
 - Active deployments recheck the exact execution contract on every tick. Engine, cost, risk,
   feature, or restriction changes move stale deployments to `REVALIDATION_REQUIRED` and
   cancel reserved plans without resetting account history.
 - A Shadow plan is first persisted as `PENDING_ACTIVATION` and becomes executable only after
   a post-commit clock check proves durability before the next session open. Shadow admission
   explicitly supports `1Day` only; unsupported minute strategies fail before deployment.
-- The deployable `next_session_day_limit_bracket_moc@0.1.0` contract now governs historical
+- The deployable `next_session_day_limit_bracket_moc@0.1.0` contract governs one-session
   validation, Forward Shadow, and Alpaca Paper. It includes identical conservative price
   rounding, DAY limit-entry semantics, stop-first ambiguity, and no target credit after an
   ordering-ambiguous intraday fill.
+- Multi-session research and Shadow use
+  `next_session_day_limit_bracket_timed_exit@0.1.0`. Alpaca Paper intentionally rejects that
+  profile until next-session-only entry expiry, durable GTC protection, and timed-exit
+  recovery are implemented and separately validated.
 - The Phase 7 Alpaca Paper adapter persists deterministic, broker-account-bound intents and
   normalized entry/target/stop/scheduled-close/emergency-exit legs. It performs idempotent
   client-ID recovery, cancels the bracket group twenty minutes before close, submits a
@@ -137,7 +147,8 @@
   containing the complete current profile and parameters can enroll. Paper remains off by
   default, account-pinned, single-lifecycle-per-symbol, and hard-pinned to the simulated host;
   the live host remains impossible.
-- A persistent hourly coordinator owns the gap-repaired market-data → source-specific
+- A persistent hourly coordinator rotates through 1, 5, 20, 63, 126, and 252-session
+  research horizons and owns the gap-repaired market-data → source-specific
   document history →
   feature → ML → forecast → Research LLM → constrained strategy → exact-validation →
   shadow-readiness DAG. It checks the full configured XNYS window instead of trusting only the
@@ -182,7 +193,8 @@
   calibration, drift, model gate, dataset, and training-contract identity. This closes the
   research-feedback wiring without granting the LLM runtime power.
 - The global new-exposure pause is enforced inside the shadow tick boundary, so a manually
-  confirmed tick cannot bypass the scheduler's kill switch.
+  confirmed tick cannot create a new plan. Existing multi-session positions continue only
+  deterministic risk-reducing mark/exit processing so the kill switch cannot strand risk.
 - Tactical risk evaluation now requires explicit, auditable catalyst, restriction-status,
   liquidity, data-health, macro-calendar, and duplicate-order facts. Unknown/unsafe facts
   reject, and `risk_policy@0.3.0` applies a 24-hour major-macro-event blackout unless the
@@ -196,12 +208,12 @@
   commit-SHA image with matching embedded/OCI source provenance; deployment rejects mismatches.
 - The source now batches large SEC company-fact writes and resolves their durable IDs in
   bounded queries after a production AAPL response with 5,291 facts exposed PostgreSQL's
-  per-statement parameter ceiling. The regression suite contains 180 tests.
+  per-statement parameter ceiling. The regression suite contains 188 tests.
 - The current end-to-end audit passes 180 tests, strict typing across 59 source files,
   authenticated local and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, fresh schema
-  upgrade and PostgreSQL schema-drift checks through `20260907_0033`,
-  and the repository secret scan. The current source migration head is `20260907_0033`;
-  production is on `20260907_0033`.
+  upgrade and PostgreSQL schema-drift checks through `20260908_0034`,
+  and the repository secret scan. The current source migration head is `20260908_0034`;
+  production remains on `20260907_0033` until this change passes immutable delivery.
 - A local real read-only dynamic scan merged 258 source names, retained 40 review candidates
   and 20 deep-research stocks, included SNDK, and excluded sampled leveraged/single-stock
   ETFs. Its budgeted Meta re-rank cost an estimated `$0.008322` and moved SNDK from
@@ -327,6 +339,10 @@
   passes the exact gate and is adopted, started in Shadow, and specifically enrolled. The
   user has authorized and the system has enabled Paper, but no fixture test or deployment
   health check may manufacture a strategy or order.
+- Multi-session Alpaca Paper execution is implementation-blocked, not evidence-blocked. The
+  safe broker contract must separate a next-session-only DAY entry from durable protective
+  exits and recoverable timed liquidation. Multi-session research/backtest/validation and
+  broker-free Shadow do not bypass that boundary.
 
 ## Decisions
 
@@ -388,3 +404,5 @@
 - ADR 0034: organize data by ticker and true event time, converge source-specific historical
   coverage, permit advisory LLM abstention to reach falsifiable generation, and govern price
   geometry separately from account-dollar risk.
+- ADR 0035: bind ML, LLM generation, replay, validation, and Shadow to explicit 1–252-session
+  horizons; keep multi-session Paper fail-closed pending a separate broker lifecycle.

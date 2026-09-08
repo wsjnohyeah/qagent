@@ -194,6 +194,52 @@ def test_cost_aware_backtest_uses_next_bar_and_records_immutable_run(
     assert events[-1]["event_type"] == "research.experiment.completed.v1"
 
 
+def test_multi_session_strategy_holds_through_multiple_daily_bars(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    ledger, market_store, research_store = _stores(settings)
+    bars = _daily_bars(count=80)
+    market_store.insert_bars(bars, raw_object_id="TEST_RAW")
+    base = default_strategy_spec(
+        "momentum",
+        timeframe="1Day",
+        code_sha256=research_code_sha256(),
+    )
+    spec = base.model_copy(
+        update={
+            "strategy_spec_id": uuid7(),
+            "name": "five_session_momentum",
+            "version": "0.1.0+five-session",
+            "data_requirements": {
+                **base.data_requirements,
+                "holding_period": "5_sessions",
+                "holding_period_sessions": 5,
+                "position_style": "swing",
+                "paper_deployable": False,
+            },
+        }
+    )
+
+    result = ResearchBacktester(research_store, ledger).run(
+        spec=spec,
+        symbol="AAPL",
+        as_of_start=bars[20].available_from,
+        as_of_end=bars[-1].available_from,
+        code_git_sha="test-git-sha",
+    )
+
+    assert result.trades
+    first = result.trades[0]
+    entry_index = next(
+        index for index, bar in enumerate(bars) if bar.event_time.date() == first.entry_time.date()
+    )
+    exit_index = next(
+        index for index, bar in enumerate(bars) if bar.event_time.date() == first.exit_time.date()
+    )
+    assert exit_index - entry_index == 4
+    assert first.exit_reason == "maximum_holding_period"
+
+
 def test_next_open_gap_is_revalidated_before_backtest_entry(
     settings,  # type: ignore[no-untyped-def]
 ) -> None:

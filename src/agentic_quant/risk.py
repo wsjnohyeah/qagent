@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 from pathlib import Path
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -56,9 +57,14 @@ class RiskPolicy(BaseModel):
 BASELINE_EXECUTION_PROFILE_VERSION = (
     "next_session_day_limit_bracket_moc@0.1.0"
 )
+MULTI_SESSION_EXECUTION_PROFILE_VERSION = (
+    "next_session_day_limit_bracket_timed_exit@0.1.0"
+)
+SUPPORTED_HOLDING_PERIOD_SESSIONS = (1, 5, 20, 63, 126, 252)
+MULTI_SESSION_STOP_FRACTION = Decimal("0.125")
 
 
-def deployable_execution_profile_parameters() -> dict[str, object]:
+def deployable_execution_profile_parameters() -> dict[str, Any]:
     """Return the canonical replay/Shadow/Paper execution semantics."""
     return {
         "decision_bar": "completed_1Day_bar",
@@ -89,6 +95,69 @@ def deployable_execution_profile_parameters() -> dict[str, object]:
         },
         "daily_bar_ambiguity": "stop_first_and_no_intraday_target_credit_after_limit_fill",
     }
+
+
+def strategy_holding_period_sessions(
+    data_requirements: dict[str, Any],
+) -> int:
+    """Resolve the immutable holding horizon encoded by a strategy spec.
+
+    Specifications created before multi-horizon support remain one-session strategies.
+    """
+    raw = data_requirements.get("holding_period_sessions", 1)
+    if isinstance(raw, bool):
+        raise ValueError("Strategy holding period must be an integer session count")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Strategy holding period must be an integer session count"
+        ) from exc
+    if value not in SUPPORTED_HOLDING_PERIOD_SESSIONS:
+        raise ValueError(
+            "Strategy holding period must be one of "
+            f"{SUPPORTED_HOLDING_PERIOD_SESSIONS} sessions"
+        )
+    return value
+
+
+def strategy_execution_profile(
+    *,
+    data_requirements: dict[str, Any],
+    account_policy: RiskPolicy,
+) -> tuple[str, dict[str, Any], RiskPolicy]:
+    """Bind a strategy horizon to deterministic price geometry and account limits."""
+    holding_sessions = strategy_holding_period_sessions(data_requirements)
+    if holding_sessions == 1:
+        return (
+            BASELINE_EXECUTION_PROFILE_VERSION,
+            deployable_execution_profile_parameters(),
+            account_policy,
+        )
+    effective_policy = account_policy.model_copy(
+        update={
+            "version": (
+                f"{account_policy.version}+multi_session_"
+                f"{holding_sessions}x{MULTI_SESSION_STOP_FRACTION}"
+            ),
+            "baseline_stop_fraction": MULTI_SESSION_STOP_FRACTION,
+        }
+    )
+    parameters = deployable_execution_profile_parameters()
+    attached = dict(parameters["attached_exits"])
+    attached["same_session"] = False
+    parameters["attached_exits"] = attached
+    parameters["maximum_holding_sessions"] = holding_sessions
+    parameters["price_stop_fraction"] = str(MULTI_SESSION_STOP_FRACTION)
+    parameters["target_r_multiple"] = str(
+        effective_policy.baseline_target_r_multiple
+    )
+    parameters["scheduled_exit"] = {
+        "type": "market_on_close",
+        "after_completed_sessions": holding_sessions,
+        "paper_compatible": False,
+    }
+    return MULTI_SESSION_EXECUTION_PROFILE_VERSION, parameters, effective_policy
 
 
 def deployable_price_increment(price: Decimal) -> Decimal:

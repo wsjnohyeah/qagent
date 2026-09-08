@@ -23,17 +23,18 @@ No override can convert an insufficient/rejected validation report into an adopt
 ## Runtime semantics
 
 - The scheduler polls at `SHADOW_POLL_SECONDS`; a confirmed `shadow.tick` runs the same path.
-- The runtime entry point itself rejects every tick while global new exposure is paused. This
-  applies to scheduled and manually confirmed calls, preventing a controller bypass.
+- The runtime entry point rejects a paused tick when there is no position to manage. If a
+  multi-session position is already open, the tick continues only its deterministic stop,
+  target, mark, and timed-exit processing; it cannot create new exposure.
 - Only `ACTIVE` deployments are evaluated.
 - A new deployment establishes its cursor at the current data edge; historical bars seed its
   first pending signal but are not replayed as pretend forward shadow results. Backtests own
   historical evaluation.
 - The runtime needs at least 21 decision bars and one following execution bar.
 - Each decision uses evidence available by the decision bar's `available_from` timestamp.
-- Momentum and mean-reversion use their immutable `StrategySpec` parameters. The baseline
-  buy-and-hold benchmark is explicitly research-only because its multi-session holding
-  contract has no matching one-bar shadow executor.
+- Momentum and mean-reversion use their immutable `StrategySpec` parameters and one of the
+  approved 1, 5, 20, 63, 126, or 252-session holding horizons. The literal buy-and-hold
+  benchmark remains research-only because it has no finite deployable exit contract.
 - A long signal becomes a persistent `SignalCandidate`, passes the deterministic baseline
   shadow risk profile, and becomes a `TradePlan` only on approval. Account floor, daily loss,
   concurrent risk, restriction, data health, liquidity, duplicate intent, expiry, reward/risk,
@@ -47,6 +48,10 @@ No override can convert an insufficient/rejected validation report into an adopt
   completed decision-bar close, fixed stop/target geometry, and same-session close. The
   actual fill price triggers a second reward/risk and quantity check. An untouched limit is
   recorded as `DAY_LIMIT_NOT_FILLED`; a fill is closed by stop, target, or modeled MOC.
+- Multi-session plans use `next_session_day_limit_bracket_timed_exit@0.1.0`. The next-session
+  DAY entry is unchanged, while filled position state survives restarts and is marked on each
+  completed daily bar until stop, target, or the immutable maximum holding session. Recorded
+  splits adjust quantity and prices; recorded cash dividends flow into virtual cash.
 - Research, Shadow, and Paper share the same price-increment rounding. When only a daily bar
   proves an intraday limit touch, replay never credits an ambiguous target print that may
   have occurred before entry; it uses a later stop or the close.
@@ -56,9 +61,11 @@ No override can convert an insufficient/rejected validation report into an adopt
   cannot each spend a duplicate copy of the same capital.
 - Account limits are immutable revisions changed through `account.risk.update`. A new risk
   revision changes the execution contract, so old validation certificates fail closed.
-- Every active deployment rechecks that certificate before a tick. A mismatch moves it to
+- Every flat active deployment rechecks that certificate before a tick. A mismatch moves it to
   `REVALIDATION_REQUIRED`, cancels any open plan without erasing account history, and cannot
-  be resumed until a current exact validation has been adopted.
+  be resumed until a current exact validation has been adopted. An already-filled
+  multi-session position continues under its persisted contract until a deterministic exit;
+  code/config drift cannot strand it.
 - Virtual fills model commission, half-spread, slippage, fixed impact, and maximum bar-volume
   participation through the deterministic event-driven portfolio engine. Quantity is fixed
   before the session from completed-bar evidence; execution-bar volume is used only to model
@@ -89,10 +96,10 @@ confirmation endpoint. The `shadow-active` system list is synchronized with acti
 
 ## Known limitations
 
-This baseline closes tactical positions within one execution bar and does not yet model
-multi-bar partial fills, cancellation, queue position, quote-derived dynamic spread,
-delistings, or symbol-change replay. These limitations affect realism, not the persistence,
-point-in-time, confirmation, or no-broker invariants.
+The runtime does not yet model multi-bar partial fills, cancellation, queue position,
+quote-derived dynamic spread, delistings, or symbol-change replay. A symbol change during an
+open virtual position fails for manual review. These limitations affect realism, not the
+persistence, point-in-time, confirmation, or no-broker invariants.
 
 The completed-bar simulator is a forward-workflow validation harness, not an exchange clock:
 the next bar is already complete when its open/close are replayed. True order-time market

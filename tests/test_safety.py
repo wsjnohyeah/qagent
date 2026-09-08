@@ -29,12 +29,15 @@ from agentic_quant.ledger import EventLedger
 from agentic_quant.migrations import upgrade_database
 from agentic_quant.production_bootstrap import bootstrap_production
 from agentic_quant.risk import (
+    MULTI_SESSION_EXECUTION_PROFILE_VERSION,
     RestrictionRegistry,
     RiskPolicy,
     baseline_long_exit,
     deployable_long_exit,
     deployable_long_limit_fill,
     evaluate_candidate,
+    strategy_execution_profile,
+    strategy_holding_period_sessions,
 )
 
 
@@ -70,6 +73,29 @@ def test_baseline_bracket_executes_stop_first_when_intrabar_order_is_unknown() -
         target=Decimal("104"),
     )
     assert (price, reason) == (Decimal("98"), "protective_stop")
+
+
+def test_multi_session_profile_widens_price_stop_without_expanding_account_caps(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    account_policy = RiskPolicy.from_yaml(settings.risk_policy_path)
+    profile, parameters, effective = strategy_execution_profile(
+        data_requirements={"holding_period_sessions": 252},
+        account_policy=account_policy,
+    )
+
+    assert profile == MULTI_SESSION_EXECUTION_PROFILE_VERSION
+    assert parameters["maximum_holding_sessions"] == 252
+    assert parameters["scheduled_exit"]["paper_compatible"] is False
+    assert effective.baseline_stop_fraction == Decimal("0.125")
+    assert effective.maximum_trade_risk_usd == account_policy.maximum_trade_risk_usd
+    assert (
+        effective.maximum_concurrent_risk_usd
+        == account_policy.maximum_concurrent_risk_usd
+    )
+    assert strategy_holding_period_sessions({}) == 1
+    with pytest.raises(ValueError, match="must be one of"):
+        strategy_holding_period_sessions({"holding_period_sessions": 2})
 
 
 def test_deployable_limit_entry_caps_price_and_rejects_untouched_order() -> None:

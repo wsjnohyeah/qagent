@@ -21,6 +21,12 @@ Current state: the validator, Shadow simulator, and broker runtime emit and requ
 `next_session_day_limit_bracket_moc@0.1.0` contract. Certificates from any older profile fail
 closed and must be regenerated; never edit a certificate to bypass this check.
 
+This Paper contract is intentionally one-session-only. Research, validation, and Forward
+Shadow also support 5, 20, 63, 126, and 252-session positions, but those deployments cannot
+enroll in Paper yet. Paper needs a separately validated lifecycle that expires an unfilled
+entry after the next session while preserving GTC stop/target protection and a recoverable
+timed exit for a filled position.
+
 1. Configure the Alpaca credentials in the ignored environment file or approved production
    secret store. Never place them in Git, logs, screenshots, or discussion posts.
 2. Open **Paper trading** in Control Center and run **Test read-only connection**. Confirm the

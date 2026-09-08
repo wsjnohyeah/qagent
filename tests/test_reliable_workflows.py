@@ -868,6 +868,38 @@ def test_autonomous_coordinator_rejects_unsupported_timeframe(
         )
 
 
+def test_autonomous_coordinator_partitions_cycles_by_research_horizon(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+
+    async def handler(job, dependencies):  # type: ignore[no-untyped-def]
+        del job, dependencies
+        return {}
+
+    coordinator = AutonomousCoordinator(
+        WorkflowJobStore(EventLedger(settings.database_url).engine),
+        handler=handler,
+    )
+    cutoff = datetime(2026, 9, 5, 22, tzinfo=UTC)
+    daily_group, daily_jobs = coordinator.plan(
+        symbols=("AAPL",),
+        as_of=cutoff,
+        horizon_bars=1,
+    )
+    annual_group, annual_jobs = coordinator.plan(
+        symbols=("AAPL",),
+        as_of=cutoff,
+        horizon_bars=252,
+    )
+
+    assert annual_group != daily_group
+    assert {job.payload["horizon_bars"] for job in daily_jobs} == {1}
+    assert {job.payload["horizon_bars"] for job in annual_jobs} == {252}
+    with pytest.raises(ValueError, match="horizon is not approved"):
+        coordinator.plan(symbols=("AAPL",), as_of=cutoff, horizon_bars=2)
+
+
 def test_autonomous_coordinator_recovers_failed_group_after_hour_rollover(
     settings,  # type: ignore[no-untyped-def]
 ) -> None:

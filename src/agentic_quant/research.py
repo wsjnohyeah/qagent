@@ -41,17 +41,19 @@ from agentic_quant.research_store import ResearchStore, _canonical_hash
 from agentic_quant.risk import (
     RestrictionRegistry,
     RiskPolicy,
+    baseline_long_exit,
     baseline_long_geometry,
     deployable_long_exit,
     deployable_long_limit_fill,
     evaluate_candidate,
     normalize_deployable_long_prices,
+    strategy_execution_profile,
 )
 from agentic_quant.config import TradingMode
 
 
 FEATURE_SET_VERSION = "price_event_pit@0.3.0"
-BACKTEST_ENGINE_VERSION = "event_driven_portfolio@0.4.0"
+BACKTEST_ENGINE_VERSION = "event_driven_portfolio@0.5.0"
 SUPPORTED_STRATEGIES = ("buy_and_hold", "momentum", "mean_reversion")
 _MINIMUM_HISTORY = 21
 _ZERO = Decimal("0")
@@ -336,8 +338,14 @@ def default_strategy_spec(
             "holding_period": (
                 "backtest_end" if strategy_type == "buy_and_hold" else "one_bar"
             ),
+            **(
+                {"holding_period_sessions": 1, "position_style": "day"}
+                if strategy_type != "buy_and_hold"
+                else {}
+            ),
             "entry_liquidity_source": "latest completed decision bar volume",
             "shadow_deployable": strategy_type != "buy_and_hold",
+            "paper_deployable": strategy_type != "buy_and_hold",
             "point_in_time_required": True,
             "backtest_engine": BACKTEST_ENGINE_VERSION,
             "corporate_action_accounting": ["split", "cash_dividend"],
@@ -593,7 +601,16 @@ class ResearchBacktester:
         action_index = 0
         day_start_cash = initial_equity
         current_day = None
+        _, profile, effective_policy = strategy_execution_profile(
+            data_requirements=spec.data_requirements,
+            account_policy=self.risk_policy,
+        )
+        holding_sessions = int(profile.get("maximum_holding_sessions", 1))
+        final_execution_index = decision_indices[-1] + 1
+        last_exit_index = -1
         for index, snapshot in zip(decision_indices, snapshots, strict=True):
+            if index < last_exit_index:
+                continue
             execution_bar = bars[index + 1]
             should_trade = self._should_trade(spec, snapshot)
             portfolio.record_signal(
@@ -608,14 +625,14 @@ class ResearchBacktester:
                 cutoff=entry_time,
             )
             entered = False
-            if should_trade:
+            if should_trade and index + holding_sessions <= final_execution_index:
                 day = entry_time.astimezone(UTC).date()
                 if day != current_day:
                     current_day = day
                     day_start_cash = portfolio.cash
                 raw_invalidation, raw_target = baseline_long_geometry(
                     bars[index].close,
-                    self.risk_policy,
+                    effective_policy,
                 )
                 entry_limit, target, invalidation = normalize_deployable_long_prices(
                     entry_limit_price=bars[index].close,
@@ -646,7 +663,9 @@ class ResearchBacktester:
                     ),
                     invalidation=invalidation,
                     targets=(target,),
-                    expires_at=execution_bar.available_from,
+                    expires_at=self._bar_close_time(
+                        bars[index + holding_sessions]
+                    ),
                 )
                 decision = evaluate_candidate(
                     candidate=candidate,
@@ -667,7 +686,7 @@ class ResearchBacktester:
                         concurrent_planned_risk=_ZERO,
                     ),
                     mode=TradingMode.BACKTEST,
-                    policy=self.risk_policy,
+                    policy=effective_policy,
                     restrictions=self.restrictions,
                     context=RiskEvaluationContext(
                         catalyst_required=False,
@@ -697,35 +716,78 @@ class ResearchBacktester:
                     feature_snapshot_id=snapshot.feature_snapshot_id,
                     quantity_limit=decision.max_quantity,
                 )
-            exit_time = self._bar_close_time(execution_bar)
-            action_index = self._apply_actions_until(
-                portfolio=portfolio,
-                actions=actions,
-                start_index=action_index,
-                cutoff=exit_time,
-            )
             if entered:
                 assert limit_fill is not None
-                exit_price, exit_reason = deployable_long_exit(
-                    entry_kind=limit_fill[1],
-                    open_price=execution_bar.open,
-                    high_price=execution_bar.high,
-                    low_price=execution_bar.low,
-                    close_price=execution_bar.close,
-                    invalidation=invalidation,
-                    target=target,
-                )
-                trade = portfolio.exit_long(
-                    exit_time=exit_time,
-                    raw_price=exit_price,
-                    available_volume=execution_bar.volume,
-                    exit_reason=exit_reason,
-                )
-                if trade is not None:
-                    trades.append(trade)
+                planned_exit_index = index + holding_sessions
+                for held_index in range(index + 1, planned_exit_index + 1):
+                    held_bar = bars[held_index]
+                    exit_time = self._bar_close_time(held_bar)
+                    previous_action_index = action_index
+                    action_index = self._apply_actions_until(
+                        portfolio=portfolio,
+                        actions=actions,
+                        start_index=action_index,
+                        cutoff=exit_time,
+                    )
+                    for action in actions[previous_action_index:action_index]:
+                        if action.action_type == CorporateActionType.SPLIT:
+                            assert action.split_ratio is not None
+                            invalidation /= action.split_ratio
+                            target /= action.split_ratio
+                    if held_index == index + 1:
+                        exit_price, exit_reason = deployable_long_exit(
+                            entry_kind=limit_fill[1],
+                            open_price=held_bar.open,
+                            high_price=held_bar.high,
+                            low_price=held_bar.low,
+                            close_price=held_bar.close,
+                            invalidation=invalidation,
+                            target=target,
+                        )
+                    else:
+                        exit_price, exit_reason = baseline_long_exit(
+                            open_price=held_bar.open,
+                            high_price=held_bar.high,
+                            low_price=held_bar.low,
+                            close_price=held_bar.close,
+                            invalidation=invalidation,
+                            target=target,
+                        )
+                    forced_exit = held_index == planned_exit_index
+                    triggered = exit_reason not in {"session_close", "market_on_close"}
+                    if triggered or forced_exit:
+                        trade = portfolio.exit_long(
+                            exit_time=exit_time,
+                            raw_price=(
+                                held_bar.close
+                                if forced_exit and not triggered
+                                else exit_price
+                            ),
+                            available_volume=held_bar.volume,
+                            exit_reason=(
+                                "maximum_holding_period"
+                                if forced_exit and not triggered
+                                else exit_reason
+                            ),
+                        )
+                        if trade is not None:
+                            trades.append(trade)
+                        curve.append(portfolio.cash)
+                        last_exit_index = held_index
+                        break
+                    curve.append(
+                        portfolio.mark(event_time=exit_time, raw_price=held_bar.close)
+                    )
             else:
+                exit_time = self._bar_close_time(execution_bar)
+                action_index = self._apply_actions_until(
+                    portfolio=portfolio,
+                    actions=actions,
+                    start_index=action_index,
+                    cutoff=exit_time,
+                )
                 portfolio.mark(event_time=exit_time, raw_price=execution_bar.close)
-            curve.append(portfolio.cash)
+                curve.append(portfolio.cash)
         return tuple(trades), tuple(curve), portfolio.events
 
     def _run_buy_and_hold(

@@ -23,6 +23,7 @@ COORDINATOR_STAGES = (
     "validate_strategy",
     "await_shadow_adoption",
 )
+COORDINATOR_RESEARCH_HORIZONS = (1, 5, 20, 63, 126, 252)
 
 CoordinatorHandler = Callable[
     [WorkflowJob, tuple[WorkflowJob, ...]], Awaitable[dict[str, Any]]
@@ -62,24 +63,30 @@ class AutonomousCoordinator:
         timeframe: str = "1Day",
         max_attempts: int = 5,
         universe_scan_id: str | None = None,
+        horizon_bars: int = 1,
     ) -> tuple[str, tuple[WorkflowJob, ...]]:
         if as_of.tzinfo is None:
             raise ValueError("Coordinator cutoff must be timezone-aware")
         if timeframe != "1Day":
             raise ValueError("Autonomous research currently supports only 1Day bars")
+        if horizon_bars not in COORDINATOR_RESEARCH_HORIZONS:
+            raise ValueError("Autonomous research horizon is not approved")
         normalized = tuple(sorted({value.strip().upper() for value in symbols if value.strip()}))
         if not normalized:
             raise ValueError("Coordinator requires at least one governed symbol")
         cycle_key = as_of.astimezone(UTC).strftime("%Y-%m-%dT%H")
         group_id = (
             stable_uuid(
-                "autonomous-research",
+                "autonomous-research-v2",
                 timeframe,
                 cycle_key,
+                horizon_bars,
                 universe_scan_id,
             )
             if universe_scan_id is not None
-            else stable_uuid("autonomous-research", timeframe, cycle_key)
+            else stable_uuid(
+                "autonomous-research-v2", timeframe, cycle_key, horizon_bars
+            )
         )
         now = datetime.now(UTC)
         planned: list[WorkflowJob] = []
@@ -94,6 +101,7 @@ class AutonomousCoordinator:
                     "as_of": as_of.astimezone(UTC).isoformat(),
                     "stage": stage,
                     "cycle_key": cycle_key,
+                    "horizon_bars": horizon_bars,
                 }
                 if universe_scan_id is not None:
                     payload["universe_scan_id"] = universe_scan_id
@@ -129,12 +137,14 @@ class AutonomousCoordinator:
         timeframe: str = "1Day",
         max_jobs: int | None = None,
         universe_scan_id: str | None = None,
+        horizon_bars: int = 1,
     ) -> dict[str, Any]:
         group_id, _ = self.plan(
             symbols=symbols,
             as_of=as_of,
             timeframe=timeframe,
             universe_scan_id=universe_scan_id,
+            horizon_bars=horizon_bars,
         )
         backlog_group_ids = self.jobs.incomplete_group_ids(
             job_type_prefix="coordinator.",

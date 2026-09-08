@@ -32,6 +32,7 @@ from agentic_quant.providers.alpaca_paper import (
     AlpacaPaperTradingProvider,
     normalize_long_bracket_prices,
 )
+from agentic_quant.risk import MULTI_SESSION_EXECUTION_PROFILE_VERSION
 from agentic_quant.shadow import ShadowRuntime
 
 
@@ -1029,4 +1030,23 @@ def test_paper_enrollment_rejects_shadow_only_execution_certificate(
         trading_mode="paper",
     )
     with pytest.raises(ValueError, match="unified deployable"):
+        runtime.enrollment_preview("deployment-1")
+
+
+def test_paper_enrollment_rejects_multi_session_shadow_certificate(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    shadow = _FakeShadow()
+    shadow.execution_profile = MULTI_SESSION_EXECUTION_PROFILE_VERSION
+    runtime = PaperTradingRuntime(
+        ledger.engine,
+        cast(ShadowRuntime, shadow),
+        broker_factory=lambda: cast(PaperBroker, _FakeBroker()),
+        enabled=True,
+        trading_mode="paper",
+    )
+
+    with pytest.raises(ValueError, match="multi-session deployment"):
         runtime.enrollment_preview("deployment-1")

@@ -27,21 +27,23 @@ from agentic_quant.research import (
     research_code_sha256,
 )
 from agentic_quant.research_store import ResearchStore
+from agentic_quant.risk import SUPPORTED_HOLDING_PERIOD_SESSIONS
 
 
-STRATEGY_PROPOSAL_SCHEMA = "strategy_proposal@0.1.0"
+STRATEGY_PROPOSAL_SCHEMA = "strategy_proposal@0.2.0"
 STRATEGY_CRITIQUE_SCHEMA = "strategy_critique@0.1.0"
 
 
 class ConstrainedStrategyProposal(FrozenModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    schema_version: str = Field(pattern=r"^strategy_proposal@0\.1\.0$")
+    schema_version: str = Field(pattern=r"^strategy_proposal@0\.2\.0$")
     strategy_type: str = Field(pattern=r"^(momentum|mean_reversion)$")
     timeframe: str = Field(pattern=r"^1Day$")
     return_window: int = Field(ge=1, le=20)
     slow_window: int = Field(ge=2, le=21)
     threshold: Decimal = Field(ge=Decimal("-0.25"), le=Decimal("0.25"))
+    holding_period_sessions: int
     thesis: str = Field(min_length=10, max_length=2_000)
     evidence_ids: tuple[str, ...] = Field(min_length=3, max_length=12)
 
@@ -53,6 +55,10 @@ class ConstrainedStrategyProposal(FrozenModel):
             raise ValueError("momentum threshold cannot be negative")
         if self.strategy_type == "mean_reversion" and self.threshold > 0:
             raise ValueError("mean-reversion threshold cannot be positive")
+        if self.holding_period_sessions not in SUPPORTED_HOLDING_PERIOD_SESSIONS:
+            raise ValueError(
+                "holding_period_sessions must use an approved horizon"
+            )
         return self
 
 
@@ -115,6 +121,12 @@ class HybridStrategyGenerator:
             raise ValueError("Analysis was not bound to this forecast")
         if snapshot.feature_set_version != FEATURE_SET_VERSION:
             raise ValueError("Feature snapshot uses an obsolete executable feature contract")
+        try:
+            forecast_horizon_sessions = int(str(forecast.horizon).split()[0])
+        except (TypeError, ValueError, IndexError) as exc:
+            raise ValueError("Forecast horizon is not a supported session count") from exc
+        if forecast_horizon_sessions not in SUPPORTED_HOLDING_PERIOD_SESSIONS:
+            raise ValueError("Forecast horizon is not approved for strategy generation")
         evidence_ids = {
             f"FEATURE:{snapshot.feature_snapshot_id}",
             f"ANALYSIS:{analysis.analysis_id}",
@@ -141,6 +153,7 @@ class HybridStrategyGenerator:
                 "expected_return": str(forecast.expected_return),
                 "probability_up": str(forecast.probability_up),
                 "uncertainty": str(forecast.uncertainty),
+                "horizon": forecast.horizon,
             },
         }
         attempt_id = uuid7()
@@ -176,6 +189,10 @@ class HybridStrategyGenerator:
                 proposal=raw_proposal,
             )
             proposal = ConstrainedStrategyProposal.model_validate(raw_proposal)
+            if proposal.holding_period_sessions != forecast_horizon_sessions:
+                raise ValueError(
+                    "Strategy holding period must match the bound ML forecast horizon"
+                )
             proposal_json = proposal.model_dump(mode="json")
             if set(proposal.evidence_ids) != evidence_ids:
                 raise ValueError("Strategy proposal must cite the exact hybrid evidence set")
@@ -283,7 +300,7 @@ class HybridStrategyGenerator:
             strategy_spec_id=uuid7(),
             name=(
                 f"hybrid_{proposal.strategy_type}_{symbol.casefold()}_"
-                f"{proposal.timeframe.casefold()}"
+                f"{proposal.timeframe.casefold()}_{proposal.holding_period_sessions}s"
             ),
             version=f"0.1.0+{digest[:12]}",
             strategy_type=proposal.strategy_type,
@@ -296,11 +313,20 @@ class HybridStrategyGenerator:
                     "signal available at t; conditional market-on-open at the next "
                     "bar with open-price risk revalidation"
                 ),
-                "holding_period": "one_bar",
+                "holding_period": f"{proposal.holding_period_sessions}_sessions",
+                "holding_period_sessions": proposal.holding_period_sessions,
+                "position_style": (
+                    "day"
+                    if proposal.holding_period_sessions == 1
+                    else "swing"
+                    if proposal.holding_period_sessions <= 20
+                    else "position"
+                ),
                 "entry_liquidity_source": "latest completed decision bar volume",
                 "point_in_time_required": True,
                 "backtest_engine": BACKTEST_ENGINE_VERSION,
                 "shadow_deployable": True,
+                "paper_deployable": proposal.holding_period_sessions == 1,
                 "origin": "hybrid_ml_llm_constrained_dsl",
                 "feature_snapshot_id": feature_snapshot_id,
                 "analysis_id": analysis_id,
@@ -359,7 +385,9 @@ class HybridStrategyGenerator:
             "with schema_version="
             f"{STRATEGY_PROPOSAL_SCHEMA}, strategy_type momentum or mean_reversion, "
             "timeframe=1Day, return_window 1..20, slow_window 2..21 and longer than "
-            "return_window, threshold, thesis, and evidence_ids. Momentum threshold must "
+            "return_window, threshold, holding_period_sessions, thesis, and evidence_ids. "
+            "holding_period_sessions must exactly match the supplied forecast horizon and "
+            f"must be one of {SUPPORTED_HOLDING_PERIOD_SESSIONS}. Momentum threshold must "
             "be nonnegative; mean-reversion threshold nonpositive. Cite all and only the "
             "three supplied evidence IDs. Do not emit code, orders, sizing, or promotion."
         )

@@ -32,7 +32,10 @@ from agentic_quant.providers.alpaca_paper import (
     AlpacaPaperResponseError,
     normalize_long_bracket_prices,
 )
-from agentic_quant.risk import BASELINE_EXECUTION_PROFILE_VERSION
+from agentic_quant.risk import (
+    BASELINE_EXECUTION_PROFILE_VERSION,
+    MULTI_SESSION_EXECUTION_PROFILE_VERSION,
+)
 from agentic_quant.shadow import ShadowRuntime
 
 
@@ -331,10 +334,14 @@ class PaperTradingRuntime:
         if deployment.get("contract_status") != "CURRENT":
             raise ValueError("The deployment requires exact-contract revalidation")
         execution_contract = dict(deployment.get("execution_contract_json") or {})
-        if (
-            execution_contract.get("execution_profile")
-            != PAPER_EXECUTION_PROFILE_VERSION
-        ):
+        execution_profile = execution_contract.get("execution_profile")
+        if execution_profile != PAPER_EXECUTION_PROFILE_VERSION:
+            if execution_profile == MULTI_SESSION_EXECUTION_PROFILE_VERSION:
+                raise ValueError(
+                    "This multi-session deployment is not compatible with the "
+                    "one-session Alpaca Paper lifecycle. Its broker entry-expiry "
+                    "and GTC-exit contract must be implemented and separately validated"
+                )
             raise ValueError(
                 "This deployment uses an obsolete execution profile; Alpaca Paper "
                 "requires a current unified deployable validation"

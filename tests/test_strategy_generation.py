@@ -44,10 +44,12 @@ from agentic_quant.strategy_generation import (
         (ResearchAnalysisStatus.ABSTAINED, ResearchRecommendation.ABSTAIN),
     ),
 )
+@pytest.mark.parametrize("horizon_sessions", (1, 20))
 def test_hybrid_generator_compiles_only_a_bounded_research_spec(
     settings,  # type: ignore[no-untyped-def]
     analysis_status: ResearchAnalysisStatus,
     recommendation: ResearchRecommendation,
+    horizon_sessions: int,
 ) -> None:
     upgrade_database(settings.database_url)
     ledger = EventLedger(settings.database_url)
@@ -94,7 +96,7 @@ def test_hybrid_generator_compiles_only_a_bounded_research_spec(
             forecast_id=uuid7(),
             symbol="AAPL",
             as_of=as_of,
-            horizon="1 bar",
+            horizon=f"{horizon_sessions} bars",
             expected_return=Decimal("0.01"),
             probability_up=Decimal("0.64"),
             uncertainty=Decimal("0.20"),
@@ -134,7 +136,7 @@ def test_hybrid_generator_compiles_only_a_bounded_research_spec(
             schema_version="research_analysis@0.2.0",
             symbol="AAPL",
             as_of=as_of,
-            horizon="1 bar",
+            horizon=f"{horizon_sessions} bars",
             recommendation=recommendation,
             confidence=Decimal("0.6"),
             thesis="Evidence and ML agree directionally.",
@@ -180,12 +182,13 @@ def test_hybrid_generator_compiles_only_a_bounded_research_spec(
             self.calls += 1
             if request.workload.value == "strategy_generation":
                 output = {
-                    "schema_version": "strategy_proposal@0.1.0",
+                    "schema_version": "strategy_proposal@0.2.0",
                     "strategy_type": "momentum",
                     "timeframe": "1Day",
                     "return_window": 5,
                     "slow_window": 20,
                     "threshold": "0.01",
+                    "holding_period_sessions": horizon_sessions,
                     "thesis": "Use corroborated trend and evidence as a research candidate.",
                     "evidence_ids": evidence_ids,
                 }
@@ -238,6 +241,13 @@ def test_hybrid_generator_compiles_only_a_bounded_research_spec(
     assert spec["data_requirements"]["research_llm_status"] == analysis_status.value
     assert spec["data_requirements"]["research_llm_role"] == (
         "advisory_not_promotion_gate"
+    )
+    assert spec["data_requirements"]["holding_period_sessions"] == horizon_sessions
+    assert spec["data_requirements"]["position_style"] == (
+        "day" if horizon_sessions == 1 else "swing"
+    )
+    assert spec["data_requirements"]["paper_deployable"] is (
+        horizon_sessions == 1
     )
     assert retry["strategy_spec"]["strategy_spec_id"] == spec["strategy_spec_id"]
     assert "generation_invocation_id" not in spec["data_requirements"]
@@ -297,12 +307,13 @@ def test_generated_strategy_dsl_rejects_unsupported_fields() -> None:
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         ConstrainedStrategyProposal.model_validate(
             {
-                "schema_version": "strategy_proposal@0.1.0",
+                "schema_version": "strategy_proposal@0.2.0",
                 "strategy_type": "momentum",
                 "timeframe": "1Day",
                 "return_window": 5,
                 "slow_window": 20,
                 "threshold": "0.01",
+                "holding_period_sessions": 1,
                 "thesis": "A sufficiently long bounded test thesis.",
                 "evidence_ids": ("FEATURE:x", "ANALYSIS:y", "FORECAST:z"),
                 "stop_loss": "0.01",
