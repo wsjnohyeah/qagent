@@ -7,11 +7,11 @@
   Phase 1B open-session checks, corrected point-in-time research/ML contracts, constrained
   ML + LLM strategy generation, and the authenticated Control Center/System Steward/shadow
   decision lineage. Phase 5 statistical promotion and Phase 6 continuous-operation exit
-  criteria have not passed because bounded development data and elapsed observation time are
-  intentionally insufficient.
+  criteria have not passed because no production candidate has passed the exact statistical
+  gate and no adopted strategy has accumulated forward observation time.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `356ea1ee200d6f67f86c55a922b905c8d0fee535` image, PostgreSQL, Redis, API, Shadow worker,
+  `2c25c57eb77d9af742e9916d8e60e85e6fd9cdeb` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled; new exposure is paused. Live money remains
@@ -150,7 +150,8 @@
   Exhausted jobs do not starve later groups and require one confirmation-gated retry. Every
   stage honors its persisted subsystem pause control.
 - Production daily bars and Alpaca News/SEC evidence target 1,826 days. News advances backward
-  in bounded 90-day partitions while its current edge is refreshed; SEC filing metadata and
+  in bounded partitions (90-day default; current production override 180 days) while its
+  current edge is refreshed; SEC filing metadata and
   company facts refresh once per symbol per day. Trades, quotes, and option chains are
   truthfully labeled forward-only, while corporate actions and historical universe
   membership still require reviewed reference data rather than fabricated backfill.
@@ -188,7 +189,7 @@
   stop/target geometry used identically by research and shadow. Candidate/snapshot mismatches
   and future signal/feature timestamps also reject.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; production currently runs the
-  verified immutable functional commit `356ea1ee200d6f67f86c55a922b905c8d0fee535`.
+  verified immutable functional commit `2c25c57eb77d9af742e9916d8e60e85e6fd9cdeb`.
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases. A verified `main` push publishes an immutable GHCR
   commit-SHA image with matching embedded/OCI source provenance; deployment rejects mismatches.
@@ -215,6 +216,17 @@
   or order. Total settled project LLM spend at verification was `$1.218124` against the `$20`
   daily cap; one deploy-interrupted `$0.118510` reservation was expired and reserved spend
   returned to zero without altering settled spend.
+- The current production research campaign has 23 symbols with complete five-year daily bars
+  or an evidenced listing/resumption boundary, 119,952 SEC facts across the active 20-symbol
+  research set, and explicit Alpaca News coverage certificates for every one of those 20
+  symbols. News history is still converging backward by durable 180-day partitions and must
+  not be described as fully backfilled yet. The hybrid funnel has compiled 12 exact strategy
+  specifications from 13 generation attempts. At the 2026-09-08 06:04 UTC checkpoint, the
+  first six exact validations (AAPL, AOUT, HPE, COHR, IREN, and KLAC) were all `REJECTED` on
+  deterministic out-of-sample evidence; positive-OOS fold rates ranged from 0 to 0.2185 and
+  compounded OOS returns were non-positive. Consequently there is no eligible adoption,
+  Shadow deployment, Paper enrollment, position, or order. The coordinator remains enabled
+  and new exposure remains paused.
 - The production NBIS retry established an evidenced post-suspension boundary at `2024-10-21`.
   Its 470-bar resumed segment passed strict quality with zero missing intervals; the older raw
   and normalized history remains available for audit but is excluded from current research.

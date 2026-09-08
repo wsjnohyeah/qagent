@@ -4,13 +4,14 @@ Last updated: 2026-09-07 PDT
 
 Context format: v1
 
-Current phase: implementation foundations through the Phase 7 broker boundary are deployed to
-a fresh production data plane in guarded Shadow mode. Alpaca Paper probing/reconciliation is
-present, but order authorization remains code-blocked until a separately validated Paper
-execution lifecycle exists; paid research, off-site backup/alerting, and statistical/elapsed
-production evidence remain open
+Current phase: the unified research, Shadow, and Alpaca Paper foundations are deployed to a
+fresh production data plane. Paid ML + LLM research and source-specific historical backfill
+are active, while new exposure remains paused and no external simulated order is eligible
+until an exact strategy passes deterministic validation and receives the separate adoption,
+Shadow-start, and Paper-enrollment confirmations. Off-site backup/alerting and statistical/
+elapsed production evidence remain open
 
-Current documented baseline: C045 — `Record autonomous scanner production activation`
+Current documented baseline: C056 — `Record current production research rollout`
 
 ## Purpose and authority
 
@@ -137,22 +138,20 @@ A Git commit cannot contain its own content-derived hash without changing that h
 - Phase 7 persists Paper enrollments, deterministic client-order intents, broker lifecycle
   events, account/position snapshots, and runtime runs through Alembic revision
   `20260907_0031`. The only broker host is exactly `paper-api.alpaca.markets`.
-- Existing one-bar Shadow certificates cannot authorize a different Paper broker lifecycle.
-  Paper requires `alpaca_day_limit_bracket_one_session@0.1.0`, which no current validator
-  issues, so enrollment/submission is intentionally blocked. The adapter uses account-bound
-  intents, stable client IDs, Alpaca price increments, DAY brackets, and current authorization
-  before every POST. Partial-fill expiry cancels the remaining entry, but any nonzero broker
-  position remains `POSITION_OPEN_REQUIRES_EXIT` and blocks new exposure. Read-only probing
-  and reconciliation remain available. Reconciliation now observes an order transition before
-  refreshing the associated position, so a late partial fill cannot be closed against a stale
-  account snapshot. Automatic position exit and complete child-order persistence remain open.
+- Validation, Shadow, and Paper now share
+  `next_session_day_limit_bracket_moc@0.1.0`. The Paper adapter uses account-bound intents,
+  stable client IDs, normalized entry/target/stop/close/emergency legs, Alpaca price
+  increments, DAY brackets, and current authorization before every POST. Reconciliation reads
+  orders before positions, and deterministic session-close plus emergency-exit behavior keeps
+  new exposure blocked until the broker account is flat. Paper infrastructure is enabled in
+  production, but no strategy has passed its exact gate or been adopted/enrolled, so it has
+  no eligible order to submit.
 - Code modification is represented by scoped change sessions. The web process exposes no
   shell; a trusted external coding worker must produce a diff and passing test record before
   a separate local-commit approval. Push and deployment remain external actions.
-- GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`. A fresh SFO3 VPS now runs the
-  production stack at `https://qagent.143.110.239.251.sslip.io` behind Caddy TLS. The initial
-  bootstrap used verified immutable commit `34a76b0`; this iteration corrects the measured
-  worker-health timing before advancing the deployed image.
+- GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`. A fresh SFO3 VPS runs the
+  production stack at `https://qagent.143.110.239.251.sslip.io` behind Caddy TLS on verified
+  immutable functional commit `2c25c57eb77d9af742e9916d8e60e85e6fd9cdeb`.
 - The independent `06b6853` fix verification is mapped item-by-item in
   `docs/REVIEW_REMEDIATION_2026-09-05.md`. The deterministic F01–F11 counterexamples are
   followed by the corrections from the `56bb979` review in
@@ -3658,6 +3657,57 @@ lifecycle. No Paper order was used as a build or deployment test.
   the exact image is deployed.
 - Corrections/follow-ups: record the production retry, final first-cycle candidate/validation
   counts, and ongoing backfill state in the next entry.
+
+### C056 — `Record current production research rollout`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-07 PDT.
+- User intent: finish the corrected production rollout, keep five-year-capable data sources
+  converging, run the ML + LLM strategy funnel, and make clear why Shadow has not produced an
+  order.
+- Scope:
+  - Recorded deployment of immutable functional commit
+    `2c25c57eb77d9af742e9916d8e60e85e6fd9cdeb` after its exact GitHub verification and image
+    publication passed.
+  - Refreshed the durable current state to distinguish completed daily/SEC history, still-
+    converging News coverage, generated research specifications, deterministic rejection,
+    and order eligibility.
+  - Corrected stale current-state language from the earlier Paper boundary: validation,
+    Shadow, and Paper now share the implemented one-session limit/bracket/MOC profile, but no
+    strategy may use it until exact evidence and human confirmations exist.
+- Architecture/decision impact: none. This is deployment and production-evidence
+  reconciliation; it does not change a strategy, promotion gate, risk rule, or execution
+  authority.
+- Validation:
+  - GitHub Actions run `34192489253` passed `verify` and `publish-image` for the exact
+    functional commit. Its local release gate passed 180 tests, Flake8, strict mypy across 59
+    source files, authenticated local and Compose doctors, secret scan, image rebuild, and
+    PostgreSQL schema-drift detection.
+  - The guarded VPS deployment reported `ready_paused`; the repository, application image,
+    and OCI revision all resolve to the same functional commit. Alembic is at
+    `20260907_0033`, all five Compose services are healthy, HTTPS readiness returns 200,
+    anonymous system access returns 401, and live-money execution remains disabled.
+  - At the 2026-09-08 06:04 UTC checkpoint, production stored complete five-year daily bars
+    or evidenced listing/resumption windows for 23 symbols, 119,952 SEC facts across the
+    active 20-symbol research set, and News coverage certificates for all 20 symbols. News
+    has not yet reached five years for every symbol and continues in durable 180-day
+    production partitions.
+  - Thirteen generation attempts produced 12 accepted immutable hybrid specifications. The
+    first six exact reports—AAPL, AOUT, HPE, COHR, IREN, and KLAC—were all `REJECTED`; their
+    positive-OOS fold rates ranged from 0 to 0.2185 and compounded OOS returns were
+    non-positive. The production account therefore still has zero Shadow deployments, zero
+    Shadow plans, and zero Paper orders. Current UTC-day estimated LLM spend was `$4.825990`
+    against the `$20` project cap with no in-flight reservation.
+- Global state after commit:
+  - Production runs the bounded-feedback fix with the coordinator, scanner, paid research,
+    Shadow worker, and Paper worker enabled. The latest process is continuing older
+    incomplete validation groups before newer research groups; new exposure remains paused.
+  - Strategy cards are genuine ML + LLM hypotheses, but none is currently an eligible
+    trading strategy. The system will not fabricate a Shadow order or treat a 50% win rate as
+    sufficient evidence.
+- Corrections/follow-ups: the pre-deploy AOUT feedback-length failure and PLTR citation-set
+  generation failure remain bounded retryable job records until their groups are revisited.
+  Record their eventual outcomes and final News coverage in a later substantive commit.
 
 ## Template for future commit entries
 
