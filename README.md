@@ -648,14 +648,13 @@ in `docs/DEPLOYMENT.md`.
 
 ## GitHub and cloud path
 
-Current delivery order: the four pre-cloud hardening tasks and the fail-closed Phase 7 Alpaca
-Paper boundary are implemented and locally release-tested. A real bounded AAPL ML + Research LLM run is
-documented in `docs/E2E_DEPLOYMENT_READINESS_AUDIT_2026-09-06.md`; it correctly abstained on
-weak evidence and did not generate, adopt, or trade a strategy. Cloud bootstrap and a
-read-only production Paper account probe may proceed; the matching Paper execution
-validator/lifecycle, production-scale backfill, statistical promotion evidence, and continuous
-shadow/Paper observation remain. No Paper order has been sent as
-part of local build verification.
+The production stack is online at
+[https://qagent.143.110.239.251.sslip.io](https://qagent.143.110.239.251.sslip.io) from an
+immutable GHCR commit-SHA image. Its data coordinator, scanner, ML + LLM research, Shadow,
+and one-session Alpaca Paper infrastructure are enabled, while new exposure starts paused.
+Production-scale statistical promotion evidence, continuous Shadow/Paper observation,
+off-site backups, and external alert delivery remain open. No strategy or Paper order is
+manufactured as a deployment check.
 
 Main-branch CI publishes an immutable GHCR commit-SHA image after all checks pass. The guarded
 deploy verifies that the image tag and embedded source revision agree. VPS backup creation and
@@ -679,8 +678,8 @@ feature branch -> pull request -> CI -> merge main
 ```
 
 The cloud agent must follow `docs/DEPLOYMENT.md`. It must not invent missing credentials,
-expose PostgreSQL/Redis publicly, or bypass TLS/authentication. Cloud deployment has not yet
-been attempted because the VPS, domain/TLS approach, production secret channel, backup, and
-monitoring choices are still unresolved. Once those inputs exist,
-`infra/deploy/deploy_vps.sh` performs migration, idempotent environment/bootstrap checks,
-service startup, and health gates while keeping new exposure paused.
+expose PostgreSQL/Redis publicly, or bypass TLS/authentication. The temporary `sslip.io` TLS
+deployment is active; a permanent domain, off-site backup destination, and external monitoring
+channel remain operator decisions. `infra/deploy/deploy_vps.sh` performs migration,
+idempotent environment/bootstrap checks, service startup, and health gates while keeping new
+exposure paused.

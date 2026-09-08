@@ -11,7 +11,7 @@
   gate and no adopted strategy has accumulated forward observation time.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `d207d187977f241aca4763edd1234aaf31514aac` image, PostgreSQL, Redis, API, Shadow worker,
+  `173809e466698ff32a0dd0409313d74d9e51b9a6` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled; new exposure is paused. Live money remains
@@ -202,7 +202,7 @@
   stop/target geometry used identically by research and shadow. Candidate/snapshot mismatches
   and future signal/feature timestamps also reject.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; production currently runs the
-  verified immutable functional commit `d207d187977f241aca4763edd1234aaf31514aac`.
+  verified immutable functional commit `173809e466698ff32a0dd0409313d74d9e51b9a6`.
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases. A verified `main` push publishes an immutable GHCR
   commit-SHA image with matching embedded/OCI source provenance; deployment rejects mismatches.
@@ -213,7 +213,7 @@
   authenticated local and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, fresh schema
   upgrade and PostgreSQL schema-drift checks through `20260908_0034`,
   and the repository secret scan. The current source migration head is `20260908_0034`;
-  production remains on `20260907_0033` until this change passes immutable delivery.
+  production is on `20260908_0034`.
 - A local real read-only dynamic scan merged 258 source names, retained 40 review candidates
   and 20 deep-research stocks, included SNDK, and excluded sampled leveraged/single-stock
   ETFs. Its budgeted Meta re-rank cost an estimated `$0.008322` and moved SNDK from

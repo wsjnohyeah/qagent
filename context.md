@@ -11,7 +11,7 @@ until an exact strategy passes deterministic validation and receives the separat
 Shadow-start, and Paper-enrollment confirmations. Off-site backup/alerting and statistical/
 elapsed production evidence remain open
 
-Current documented baseline: C059 — `Add multi-horizon strategy lifecycles`
+Current documented baseline: C060 — `Record multi-horizon production rollout`
 
 ## Purpose and authority
 
@@ -3848,6 +3848,42 @@ lifecycle. No Paper order was used as a build or deployment test.
   stale because the backtest engine version changes.
 - Corrections/follow-ups: implement and independently validate the separate multi-session
   Alpaca Paper broker lifecycle before enabling those profiles externally.
+
+### C060 — `Record multi-horizon production rollout`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-08 PDT.
+- User intent: make both same-day and multi-day/long-term strategy research available in the
+  running system rather than leaving the change local.
+- Scope:
+  - Recorded successful CI/image publication and guarded production deployment of functional
+    commit `173809e466698ff32a0dd0409313d74d9e51b9a6`.
+  - Recorded the pre-migration backup verification and isolated restore drill, schema 0034,
+    runtime safety flags, service health, public readiness/authentication checks, and first
+    horizon-aware coordinator group.
+- Architecture/decision impact: none beyond C059/ADR 0035. This entry reconciles source and
+  observed production state.
+- Validation:
+  - GitHub Actions run `34200109386` passed both `verify` and `publish-image` for the exact
+    functional commit.
+  - Backup `20260908T074108Z` passed checksums/catalog validation and restored in an isolated
+    disposable PostgreSQL instance at pre-migration schema `20260907_0033`.
+  - The guarded deploy reported `ready_paused`; Alembic advanced to `20260908_0034`; Git,
+    running API image, worker image, and coordinator image resolve to the same functional SHA.
+  - API, Shadow worker, Paper worker, and coordinator health checks passed; all five containers
+    are healthy. HTTPS readiness returns 200, anonymous system access returns 401,
+    `APP_ENV=production`, `TRADING_MODE=paper`, `LIVE_TRADING_ENABLED=false`, and
+    `GLOBAL_NEW_EXPOSURE_PAUSED=true` remain effective.
+  - The coordinator created new horizon-aware jobs carrying `horizon_bars=5`. Production still
+    has zero Shadow deployments, open Shadow positions, and Paper orders; no strategy or
+    order was manufactured for rollout verification.
+- Global state after commit: production can research all six horizons and can run a future
+  exact-gate-eligible multi-session strategy in broker-free Shadow after explicit adoption and
+  start confirmation. One-session Alpaca Paper remains available behind its existing gates;
+  multi-session Paper remains fail-closed.
+- Corrections/follow-ups: observe the first completed cycles for every horizon and implement a
+  separately validated multi-session Paper lifecycle only after its entry/exit semantics are
+  reviewed.
 
 ## Template for future commit entries
 
