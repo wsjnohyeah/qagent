@@ -297,6 +297,30 @@ def test_training_can_pin_one_feature_version_when_legacy_rows_remain(
     }
 
 
+def test_training_excludes_snapshots_and_labels_before_verified_history_start(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    research = ResearchStore(EventLedger(settings.database_url).engine)
+    snapshots = _seed_snapshots(research, count=50)
+    verified_start = snapshots[25].as_of
+
+    examples = MLDatasetBuilder(research).build(
+        symbol="AAPL",
+        timeframe="1Day",
+        as_of_start=verified_start,
+        as_of_end=snapshots[-1].as_of,
+        horizon_bars=1,
+        policy=load_ml_policy(ROOT / "configs/ml_policy.yaml"),
+    )
+
+    assert examples
+    assert all(item.as_of >= verified_start for item in examples)
+    assert {item.feature_snapshot_id for item in examples}.isdisjoint(
+        {item.feature_snapshot_id for item in snapshots[:25]}
+    )
+
+
 def test_coordinator_retrains_when_ml_policy_contract_changes(
     settings,  # type: ignore[no-untyped-def]
 ) -> None:

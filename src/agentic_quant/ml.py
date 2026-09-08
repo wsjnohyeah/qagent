@@ -206,6 +206,7 @@ class MLDatasetBuilder:
         symbol: str,
         timeframe: str,
         as_of_end: datetime,
+        as_of_start: datetime | None = None,
         horizon_bars: int,
         policy: MLPolicy,
         feature_set_version: str | None = None,
@@ -216,6 +217,7 @@ class MLDatasetBuilder:
             symbol=symbol,
             timeframe=timeframe,
             as_of_end=as_of_end,
+            as_of_start=as_of_start,
             feature_set_version=feature_set_version,
         )
         if len(snapshots) <= horizon_bars:
@@ -224,6 +226,7 @@ class MLDatasetBuilder:
             symbol=symbol,
             timeframe=timeframe,
             as_of_end=as_of_end,
+            as_of_start=as_of_start,
         )
         if len(bars) <= horizon_bars:
             raise ValueError("Not enough market bars to construct executable ML labels")

@@ -4292,6 +4292,27 @@ lifecycle. No Paper order was used as a build or deployment test.
   deployments quarantined by the defect, then confirm the next unseen bar—not historical
   replay—is the first bar eligible for a new signal.
 
+### C075 — `Propagate verified history boundaries into ML`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-08 PDT.
+- User intent: ensure every horizon's ML and hybrid-strategy stage uses the same verified
+  issuer history as backfill, features, and validation.
+- Scope: add an optional lower bound to market-bar and feature-snapshot training reads, pass
+  the coordinator's immutable `verified_window_start` into ML dataset construction, and add a
+  regression proving pre-boundary snapshots and labels cannot enter the dataset.
+- Architecture/decision impact: ticker-reuse and post-suspension boundaries now propagate
+  through the complete market → feature → ML → LLM → validation lineage. Historical raw rows
+  and old feature snapshots remain append-only evidence but are not training observations for
+  the current security.
+- Validation: focused ML boundary and Candidate Shadow runtime tests plus strict mypy pass;
+  full repository checks, CI, and production replay remain to be recorded.
+- Expected global state after commit: short post-boundary histories such as current-issuer SPCX
+  stop cleanly at `WAITING_MORE_ML_SAMPLES` instead of training on a predecessor security;
+  mature symbols retain their existing behavior.
+- Corrections/follow-ups: verify the new SPCX 252-session workflow result in production and
+  preserve the earlier contaminated attempt as audit history rather than deleting it.
+
 ## Template for future commit entries
 
 Copy this section before making a commit:

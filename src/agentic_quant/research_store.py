@@ -64,17 +64,19 @@ class ResearchStore:
         symbol: str,
         timeframe: str,
         as_of_end: datetime,
+        as_of_start: datetime | None = None,
     ) -> tuple[StockBar, ...]:
+        predicates = [
+            market_bars.c.symbol == symbol.upper(),
+            market_bars.c.timeframe == timeframe,
+            market_bars.c.event_time <= as_of_end,
+            market_bars.c.available_from <= as_of_end,
+        ]
+        if as_of_start is not None:
+            predicates.append(market_bars.c.event_time >= as_of_start)
         statement = (
             select(market_bars)
-            .where(
-                and_(
-                    market_bars.c.symbol == symbol.upper(),
-                    market_bars.c.timeframe == timeframe,
-                    market_bars.c.event_time <= as_of_end,
-                    market_bars.c.available_from <= as_of_end,
-                )
-            )
+            .where(and_(*predicates))
             .order_by(market_bars.c.event_time.asc())
         )
         with self.engine.connect() as connection:
@@ -334,6 +336,7 @@ class ResearchStore:
         symbol: str,
         timeframe: str,
         as_of_end: datetime,
+        as_of_start: datetime | None = None,
         feature_set_version: str | None = None,
     ) -> tuple[PointInTimeFeatureSnapshot, ...]:
         predicates = [
@@ -342,6 +345,8 @@ class ResearchStore:
             feature_snapshots.c.as_of <= as_of_end,
             feature_snapshots.c.source_max_available_from <= as_of_end,
         ]
+        if as_of_start is not None:
+            predicates.append(feature_snapshots.c.as_of >= as_of_start)
         if feature_set_version is not None:
             predicates.append(
                 feature_snapshots.c.feature_set_version == feature_set_version

@@ -915,11 +915,18 @@ class ResearchCoordinatorHandler:
         if snapshot is None:
             return {"outcome": "WAITING_FEATURES"}
         horizon_bars = int(context.get("horizon_bars", 1))
+        raw_verified_start = context.get("verified_window_start")
+        verified_start = (
+            datetime.fromisoformat(str(raw_verified_start)).astimezone(UTC)
+            if raw_verified_start is not None
+            else None
+        )
         try:
             examples = MLDatasetBuilder(self.research).build(
                 symbol=snapshot.symbol,
                 timeframe=snapshot.timeframe,
                 as_of_end=snapshot.as_of,
+                as_of_start=verified_start,
                 horizon_bars=horizon_bars,
                 policy=self.ml_policy,
                 feature_set_version=FEATURE_SET_VERSION,
