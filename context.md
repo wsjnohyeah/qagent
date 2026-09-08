@@ -3633,6 +3633,32 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: measure actual completion/cost and retain 8,192 only if production
   evidence supports it.
 
+### C055 — `Bound research outcome feedback`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-07 PDT.
+- User intent: keep the autonomous research loop running correctly as real backtest and
+  validation history accumulates.
+- Scope:
+  - Replaced raw recent experiment/validation payloads in Research LLM evidence with a
+    versioned compact summary of decision-useful returns, risk, trade, and gate fields.
+  - Added deterministic reduction to the newest records and finally aggregate counts if the
+    4,000-character evidence-item contract would still be exceeded.
+  - Preserved the underlying full records and their IDs for Control Center inspection; only
+    the bounded LLM prompt representation changes.
+  - Extended the point-in-time outcome-feedback regression with deliberately oversized gate
+    diagnostics and valid-JSON/length assertions.
+- Architecture/decision impact: `research_outcome_feedback@0.2.0` reduces prompt growth from
+  accumulated results while preserving time cutoffs and immutable source records.
+- Validation: the full release gate passes 180 tests, Flake8, strict mypy across 59 source
+  files, local and Compose doctors, the secret scan, container rebuild, and PostgreSQL schema-
+  drift detection. CI, immutable rollout, and successful AOUT retry remain required.
+- Expected global state after commit: source prevents accumulated backtest history from
+  breaking Research LLM evidence construction; production coordinator remains paused until
+  the exact image is deployed.
+- Corrections/follow-ups: record the production retry, final first-cycle candidate/validation
+  counts, and ongoing backfill state in the next entry.
+
 ## Template for future commit entries
 
 Copy this section before making a commit:

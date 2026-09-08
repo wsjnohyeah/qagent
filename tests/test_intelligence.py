@@ -283,7 +283,10 @@ def test_retrieval_includes_only_point_in_time_outcome_feedback(
         "aggregate_metrics": {"mean_test_sharpe": "0.5"},
         "regime_metrics": {},
         "robustness_metrics": {},
-        "gate_assessment": {"eligible_for_human_review": False},
+        "gate_assessment": {
+            "eligible_for_human_review": False,
+            "threshold_failures": ["long diagnostic " + "x" * 500] * 20,
+        },
         "code_git_sha": "test-sha",
     }
     with ledger.engine.begin() as connection:
@@ -313,6 +316,9 @@ def test_retrieval_includes_only_point_in_time_outcome_feedback(
         item for item in bundle.items if item.evidence_type == "research_outcome_feedback"
     )
     assert feedback.citation_id.startswith("OUTCOMES:AAPL:")
+    assert feedback.source == "research_outcome_feedback@0.2.0"
+    assert len(feedback.text) <= 4_000
+    assert json.loads(feedback.text)["symbol"] == "AAPL"
     assert "known-report" in feedback.text
     assert "future-report" not in feedback.text
 

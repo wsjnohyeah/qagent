@@ -174,7 +174,9 @@
   segment feeds feature construction and exact validation; ordinary internal gaps still fail.
 - Later Research LLM calls receive a bounded, content-hashed, point-in-time outcome summary
   derived from backtests, validation reports, Shadow events, and Paper state already known at
-  the cutoff. Forecast evidence also carries label semantics, untouched-holdout metrics,
+  the cutoff. That summary selects decision-useful metrics and falls back to counts/latest
+  records instead of exceeding the evidence-item size contract as history accumulates.
+  Forecast evidence also carries label semantics, untouched-holdout metrics,
   calibration, drift, model gate, dataset, and training-contract identity. This closes the
   research-feedback wiring without granting the LLM runtime power.
 - The global new-exposure pause is enforced inside the shadow tick boundary, so a manually

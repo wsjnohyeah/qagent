@@ -333,17 +333,119 @@ class ResearchEvidenceRetriever:
             ]
         if not any((experiments, validations, shadow, paper)):
             return None
-        payload = {
-            "schema_version": "research_outcome_feedback@0.1.0",
+        compact_experiments = [
+            {
+                "experiment_run_id": item["experiment_run_id"],
+                "strategy_spec_id": item["strategy_spec_id"],
+                "as_of_start": item["as_of_start"],
+                "as_of_end": item["as_of_end"],
+                "status": item["status"],
+                "finished_at": item["finished_at"],
+                "metrics": {
+                    key: dict(item.get("metrics_json") or {})[key]
+                    for key in (
+                        "total_return",
+                        "annualized_return",
+                        "sharpe_ratio",
+                        "sortino_ratio",
+                        "max_drawdown",
+                        "trade_count",
+                        "win_rate",
+                        "total_cost",
+                    )
+                    if key in dict(item.get("metrics_json") or {})
+                },
+            }
+            for item in experiments
+        ]
+        compact_validations = []
+        for item in validations:
+            aggregate = dict(item.get("aggregate_metrics") or {})
+            gate = dict(item.get("gate_assessment") or {})
+            compact_validations.append(
+                {
+                    "validation_report_id": item["validation_report_id"],
+                    "validation_subject": item["validation_subject"],
+                    "validated_strategy_spec_ids": item[
+                        "validated_strategy_spec_ids"
+                    ],
+                    "aggregate_metrics": {
+                        key: aggregate[key]
+                        for key in (
+                            "compounded_selected_oos_return",
+                            "mean_selected_oos_return",
+                            "mean_selected_oos_sharpe",
+                            "worst_selected_oos_drawdown",
+                            "positive_oos_fold_rate",
+                            "mean_train_to_test_sharpe_degradation",
+                        )
+                        if key in aggregate
+                    },
+                    "gate": {
+                        "status": gate.get("status"),
+                        "eligible_for_human_review": gate.get(
+                            "eligible_for_human_review"
+                        ),
+                        "evidence_shortfalls": [
+                            str(value)[:200]
+                            for value in gate.get("evidence_shortfalls", [])[:5]
+                        ],
+                        "threshold_failures": [
+                            str(value)[:200]
+                            for value in gate.get("threshold_failures", [])[:5]
+                        ],
+                    },
+                    "created_at": item["created_at"],
+                }
+            )
+        payload: dict[str, Any] = {
+            "schema_version": "research_outcome_feedback@0.2.0",
             "symbol": symbol.upper(),
             "timeframe": timeframe,
             "as_of": as_of.isoformat(),
-            "recent_backtests": experiments,
-            "recent_validations": validations,
+            "recent_backtests": compact_experiments,
+            "recent_validations": compact_validations,
             "shadow_summary": shadow,
             "paper_summary": paper,
         }
         text = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+        if len(text) > 4_000:
+            payload = {
+                "schema_version": "research_outcome_feedback@0.2.0",
+                "symbol": symbol.upper(),
+                "timeframe": timeframe,
+                "as_of": as_of.isoformat(),
+                "recent_backtests": compact_experiments[:2],
+                "recent_validations": compact_validations[:1],
+                "shadow_summary": shadow,
+                "paper_summary": paper,
+                "truncated": True,
+                "available_record_counts": {
+                    "backtests": len(experiments),
+                    "validations": len(validations),
+                },
+            }
+            text = json.dumps(
+                payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                default=str,
+            )
+        if len(text) > 4_000:
+            payload = {
+                "schema_version": "research_outcome_feedback@0.2.0",
+                "symbol": symbol.upper(),
+                "timeframe": timeframe,
+                "as_of": as_of.isoformat(),
+                "truncated": True,
+                "available_record_counts": {
+                    "backtests": len(experiments),
+                    "validations": len(validations),
+                    "shadow_statuses": len(shadow),
+                    "paper_statuses": len(paper),
+                },
+            }
+            text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         content_sha256 = hashlib.sha256(text.encode()).hexdigest()
         timestamps = [
             value
@@ -361,7 +463,7 @@ class ResearchEvidenceRetriever:
             evidence_type="research_outcome_feedback",
             event_time=available_from,
             available_from=available_from,
-            source="research_outcome_feedback@0.1.0",
+            source="research_outcome_feedback@0.2.0",
             text=text,
             content_sha256=content_sha256,
         )

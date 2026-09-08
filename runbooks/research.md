@@ -189,5 +189,9 @@ curl -fsS \
 - The LLM research and predictive ML tools are connected through the persistent coordinator,
   but paid stages default off. Generated strategies remain research-only until exact
   validation and separate administrator-confirmed adoption.
+- Outcome feedback sent back into later Research LLM cycles is a bounded, schema-versioned
+  summary of the newest backtests, validation gates, Shadow events, and Paper events. It does
+  not embed complete fold histories in the prompt; the underlying records remain inspectable
+  by ID in the Control Center.
 - Production-scale statistical acceptance remains open. Local CPCV/PBO/DSR output validates
   computation and fail-closed behavior, not alpha or eligibility for deployment.
