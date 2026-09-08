@@ -11,7 +11,7 @@ until an exact strategy passes deterministic validation and receives the separat
 Shadow-start, and Paper-enrollment confirmations. Off-site backup/alerting and statistical/
 elapsed production evidence remain open
 
-Current documented baseline: C057 — `Carry research boundaries into validation folds`
+Current documented baseline: C058 — `Record verified boundary rollout`
 
 ## Purpose and authority
 
@@ -151,7 +151,7 @@ A Git commit cannot contain its own content-derived hash without changing that h
   a separate local-commit approval. Push and deployment remain external actions.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`. A fresh SFO3 VPS runs the
   production stack at `https://qagent.143.110.239.251.sslip.io` behind Caddy TLS on verified
-  immutable functional commit `2c25c57eb77d9af742e9916d8e60e85e6fd9cdeb`.
+  immutable functional commit `d207d187977f241aca4763edd1234aaf31514aac`.
 - The independent `06b6853` fix verification is mapped item-by-item in
   `docs/REVIEW_REMEDIATION_2026-09-05.md`. The deterministic F01–F11 counterexamples are
   followed by the corrections from the `56bb979` review in
@@ -3740,6 +3740,36 @@ lifecycle. No Paper order was used as a build or deployment test.
   the existing global new-exposure pause.
 - Corrections/follow-ups: record the exact production retry and resulting deterministic NBIS
   validation outcome after rollout.
+
+### C058 — `Record verified boundary rollout`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-07 PDT.
+- User intent: deploy the production-discovered validation correction and verify the research
+  funnel instead of merely assuming the local regression covered the cloud state.
+- Scope:
+  - Recorded GitHub Actions run `34193625719`, immutable deployment of C057, and the real NBIS
+    retry outcome.
+  - Updated the current production revision and preserved the distinction between a healthy
+    completed validation and an eligible strategy.
+- Architecture/decision impact: none; ADR 0032's intended boundary behavior is now both
+  implemented and demonstrated against the production dataset.
+- Validation:
+  - GitHub Actions passed verification and image publication for exact commit
+    `d207d187977f241aca4763edd1234aaf31514aac`.
+  - The guarded deployment reported `ready_paused`; Git checkout, image label, and running
+    application revision match. Alembic remains at `20260907_0033`; all five services became
+    healthy, HTTPS readiness returned 200, anonymous system access returned 401, and
+    `LIVE_TRADING_ENABLED=false` remained effective.
+  - NBIS `validate_strategy` retried at attempt 2, consumed only the 470-bar verified segment,
+    and completed without `DataQualityError`. Its exact report was deterministically
+    `REJECTED` with positive-OOS fold rate `0.2750` and compounded OOS return `-0.000205`.
+- Global state after commit:
+  - Production runs C057. The coordinator continues the remaining exact validations and later
+    hourly News partitions. There is still no gate-eligible strategy, Shadow deployment, or
+    simulated broker order, and global new exposure remains paused.
+- Corrections/follow-ups: record later coverage and strategy outcomes as they accumulate; do
+  not loosen evidence gates solely to force visible orders.
 
 ## Template for future commit entries
 

@@ -11,7 +11,7 @@
   gate and no adopted strategy has accumulated forward observation time.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `2c25c57eb77d9af742e9916d8e60e85e6fd9cdeb` image, PostgreSQL, Redis, API, Shadow worker,
+  `d207d187977f241aca4763edd1234aaf31514aac` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled; new exposure is paused. Live money remains
@@ -190,7 +190,7 @@
   stop/target geometry used identically by research and shadow. Candidate/snapshot mismatches
   and future signal/feature timestamps also reject.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; production currently runs the
-  verified immutable functional commit `2c25c57eb77d9af742e9916d8e60e85e6fd9cdeb`.
+  verified immutable functional commit `d207d187977f241aca4763edd1234aaf31514aac`.
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases. A verified `main` push publishes an immutable GHCR
   commit-SHA image with matching embedded/OCI source provenance; deployment rejects mismatches.
@@ -231,6 +231,9 @@
 - The production NBIS retry established an evidenced post-suspension boundary at `2024-10-21`.
   Its 470-bar resumed segment passed strict quality with zero missing intervals; the older raw
   and normalized history remains available for audit but is excluded from current research.
+  After the validation-fold boundary propagation fix, its previously failing exact validation
+  completed normally and returned `REJECTED` on statistical evidence (0.275 positive-OOS fold
+  rate and -0.000205 compounded OOS return) rather than a data-quality infrastructure error.
 - A real bounded AAPL coordinator run trained 734 point-in-time examples, persisted two ML
   candidates and a one-bar forecast, supplied 14 time-safe feature/forecast/document items to
   `gpt-5.6-sol`, and received a citation-valid `ABSTAIN` at 0.90 confidence. The selected ML
