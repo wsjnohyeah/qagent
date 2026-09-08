@@ -339,6 +339,7 @@ class AdminActionService:
             return self.shadow.adoption_preview(
                 strategy_spec_id=target_id,
                 validation_report_id=report_id,
+                admission_tier=str(parameters.get("admission_tier", "QUALIFIED")),
             )
         if action_type == "shadow.start":
             try:
@@ -523,6 +524,7 @@ class AdminActionService:
                 validation_report_id=str(parameters["validation_report_id"]),
                 reason=reason,
                 approved_by=confirmed_by,
+                admission_tier=str(parameters.get("admission_tier", "QUALIFIED")),
             )
         if action_type in {"strategy.pause", "strategy.retire"}:
             return self.shadow.set_adoption_status(

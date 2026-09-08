@@ -200,6 +200,7 @@ class _FakeShadow:
     def __init__(self) -> None:
         self.deployment_status = "ACTIVE"
         self.contract_status = "CURRENT"
+        self.admission_tier = "QUALIFIED"
         self.execution_profile = PAPER_EXECUTION_PROFILE_VERSION
         self.maximum_trade_risk_usd = "130"
 
@@ -211,6 +212,7 @@ class _FakeShadow:
             "symbol": "AAPL",
             "status": self.deployment_status,
             "contract_status": self.contract_status,
+            "admission_tier": self.admission_tier,
             "execution_contract_json": {
                 "execution_profile": self.execution_profile,
             },
@@ -1049,4 +1051,23 @@ def test_paper_enrollment_rejects_multi_session_shadow_certificate(
     )
 
     with pytest.raises(ValueError, match="multi-session deployment"):
+        runtime.enrollment_preview("deployment-1")
+
+
+def test_paper_enrollment_rejects_candidate_shadow(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    shadow = _FakeShadow()
+    shadow.admission_tier = "CANDIDATE"
+    runtime = PaperTradingRuntime(
+        ledger.engine,
+        cast(ShadowRuntime, shadow),
+        broker_factory=lambda: cast(PaperBroker, _FakeBroker()),
+        enabled=True,
+        trading_mode="paper",
+    )
+
+    with pytest.raises(ValueError, match="observation-only"):
         runtime.enrollment_preview("deployment-1")

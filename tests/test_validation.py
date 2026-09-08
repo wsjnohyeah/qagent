@@ -311,12 +311,19 @@ def test_real_static_validation_can_reach_adoption_and_shadow_start(
     permissive_test_policy = PromotionGatePolicy(
         version="research_gate@0.2.0",
         minimum_oos_folds=4,
+        minimum_active_oos_folds=0,
+        minimum_oos_trades=0,
         minimum_candidate_count=3,
         minimum_regime_count=1,
         maximum_probability_of_backtest_overfitting=Decimal("0.20"),
         minimum_deflated_sharpe_probability=Decimal("0"),
-        minimum_positive_oos_fold_rate=Decimal("0"),
+        minimum_positive_active_oos_fold_rate=Decimal("0"),
         maximum_allowed_drawdown=Decimal("-1"),
+        candidate_shadow_minimum_oos_folds=1,
+        candidate_shadow_minimum_active_oos_folds=1,
+        candidate_shadow_minimum_oos_trades=1,
+        candidate_shadow_minimum_compounded_oos_return=Decimal("-1"),
+        candidate_shadow_maximum_allowed_drawdown=Decimal("-1"),
     )
     validator = WalkForwardValidator(
         store,
@@ -366,7 +373,96 @@ def test_real_static_validation_can_reach_adoption_and_shadow_start(
         requested_by="test-admin",
     )
     assert adoption["status"] == "ADOPTED_FOR_SHADOW"
+    assert adoption["admission_tier"] == "QUALIFIED"
     assert deployment["status"] == "ACTIVE"
+
+
+def test_strictly_rejected_strategy_can_enter_candidate_shadow_only(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    market = MarketDataStore(ledger.engine)
+    store = ResearchStore(ledger.engine)
+    bars = _regime_bars(count=75)
+    market.insert_bars(bars, raw_object_id="TEST_RAW")
+    spec = store.record_strategy_spec(
+        default_strategy_spec(
+            "mean_reversion",
+            timeframe="1Day",
+            code_sha256=research_code_sha256(),
+        )
+    )
+    candidate_policy = PromotionGatePolicy(
+        version="research_gate@0.3.0",
+        minimum_oos_folds=4,
+        minimum_active_oos_folds=0,
+        minimum_oos_trades=0,
+        minimum_candidate_count=3,
+        minimum_regime_count=1,
+        maximum_probability_of_backtest_overfitting=Decimal("0.20"),
+        minimum_deflated_sharpe_probability=Decimal("1"),
+        minimum_positive_active_oos_fold_rate=Decimal("0"),
+        maximum_allowed_drawdown=Decimal("-1"),
+        candidate_shadow_minimum_oos_folds=1,
+        candidate_shadow_minimum_active_oos_folds=1,
+        candidate_shadow_minimum_oos_trades=1,
+        candidate_shadow_minimum_compounded_oos_return=Decimal("-1"),
+        candidate_shadow_maximum_allowed_drawdown=Decimal("-1"),
+    )
+    restrictions = RestrictionRegistry.from_yaml(
+        settings.restricted_securities_path
+    )
+    report = WalkForwardValidator(
+        store,
+        ledger,
+        promotion_policy=candidate_policy,
+        risk_policy=RiskPolicy.from_yaml(settings.risk_policy_path),
+        restrictions=restrictions,
+    ).run(
+        symbol="AAPL",
+        timeframe="1Day",
+        as_of_start=bars[20].available_from,
+        as_of_end=bars[-1].available_from,
+        code_git_sha="test-git-sha",
+        strategy_spec=spec,
+        train_bars=22,
+        test_bars=5,
+        step_bars=5,
+        embargo_bars=1,
+    )
+    assert report.gate_assessment["status"] == "REJECTED"
+    assert report.gate_assessment["candidate_shadow"][
+        "eligible_for_human_review"
+    ] is True
+    objects = SystemObjectStore(ledger.engine, ledger)
+    objects.ensure_defaults()
+    shadow = ShadowRuntime(
+        ledger.engine,
+        store,
+        objects,
+        risk_policy=RiskPolicy.from_yaml(settings.risk_policy_path),
+        restrictions=restrictions,
+        promotion_policy=candidate_policy,
+    )
+    shadow.initialize_virtual_account()
+
+    adoption = shadow.adopt_strategy(
+        strategy_spec_id=spec.strategy_spec_id,
+        validation_report_id=report.validation_report_id,
+        admission_tier="CANDIDATE",
+        reason="Observe positive candidate evidence without Paper authority",
+        approved_by="test-admin",
+    )
+    deployment = shadow.start_deployment(
+        strategy_spec_id=spec.strategy_spec_id,
+        symbol="AAPL",
+        initial_cash=Decimal("100000"),
+        requested_by="test-admin",
+    )
+
+    assert adoption["admission_tier"] == "CANDIDATE"
+    assert deployment["admission_tier"] == "CANDIDATE"
 
 
 def test_walk_forward_validation_respects_verified_history_start(
@@ -439,12 +535,19 @@ def test_validation_cache_and_adoption_require_current_gate_assessment(
     permissive = PromotionGatePolicy(
         version="research_gate@0.2.1",
         minimum_oos_folds=4,
+        minimum_active_oos_folds=0,
+        minimum_oos_trades=0,
         minimum_candidate_count=3,
         minimum_regime_count=1,
         maximum_probability_of_backtest_overfitting=Decimal("1"),
         minimum_deflated_sharpe_probability=Decimal("0"),
-        minimum_positive_oos_fold_rate=Decimal("0"),
+        minimum_positive_active_oos_fold_rate=Decimal("0"),
         maximum_allowed_drawdown=Decimal("-1"),
+        candidate_shadow_minimum_oos_folds=1,
+        candidate_shadow_minimum_active_oos_folds=1,
+        candidate_shadow_minimum_oos_trades=1,
+        candidate_shadow_minimum_compounded_oos_return=Decimal("-1"),
+        candidate_shadow_maximum_allowed_drawdown=Decimal("-1"),
     )
     restrictions = RestrictionRegistry.from_yaml(
         settings.restricted_securities_path
@@ -818,19 +921,29 @@ def test_research_gate_never_auto_promotes_and_requires_enough_evidence() -> Non
     policy = PromotionGatePolicy(
         version="research_gate@0.1.0",
         minimum_oos_folds=4,
+        minimum_active_oos_folds=2,
+        minimum_oos_trades=2,
         minimum_candidate_count=2,
         minimum_regime_count=2,
         maximum_probability_of_backtest_overfitting=Decimal("0.25"),
         minimum_deflated_sharpe_probability=Decimal("0.90"),
-        minimum_positive_oos_fold_rate=Decimal("0.50"),
+        minimum_positive_active_oos_fold_rate=Decimal("0.50"),
         maximum_allowed_drawdown=Decimal("-0.20"),
+        candidate_shadow_minimum_oos_folds=2,
+        candidate_shadow_minimum_active_oos_folds=1,
+        candidate_shadow_minimum_oos_trades=1,
+        candidate_shadow_minimum_compounded_oos_return=Decimal("0"),
+        candidate_shadow_maximum_allowed_drawdown=Decimal("-0.20"),
     )
     eligible = assess_research_gate(
         policy=policy,
         fold_count=8,
+        active_fold_count=6,
+        oos_trade_count=8,
         candidate_count=3,
         regime_count=3,
-        positive_fold_rate=Decimal("0.75"),
+        positive_active_fold_rate=Decimal("0.75"),
+        compounded_oos_return=Decimal("0.10"),
         worst_drawdown=Decimal("-0.10"),
         probability_of_backtest_overfitting=Decimal("0.10"),
         deflated_sharpe_probability=Decimal("0.97"),
@@ -838,9 +951,12 @@ def test_research_gate_never_auto_promotes_and_requires_enough_evidence() -> Non
     insufficient = assess_research_gate(
         policy=policy,
         fold_count=2,
+        active_fold_count=1,
+        oos_trade_count=1,
         candidate_count=3,
         regime_count=1,
-        positive_fold_rate=Decimal("0.75"),
+        positive_active_fold_rate=Decimal("0.75"),
+        compounded_oos_return=Decimal("0.10"),
         worst_drawdown=Decimal("-0.10"),
         probability_of_backtest_overfitting=Decimal("0.10"),
         deflated_sharpe_probability=Decimal("0.97"),
@@ -854,19 +970,29 @@ def test_static_strategy_gate_treats_candidate_count_and_pbo_as_not_applicable()
     policy = PromotionGatePolicy(
         version="research_gate@0.2.0",
         minimum_oos_folds=4,
+        minimum_active_oos_folds=2,
+        minimum_oos_trades=2,
         minimum_candidate_count=3,
         minimum_regime_count=2,
         maximum_probability_of_backtest_overfitting=Decimal("0.20"),
         minimum_deflated_sharpe_probability=Decimal("0.90"),
-        minimum_positive_oos_fold_rate=Decimal("0.50"),
+        minimum_positive_active_oos_fold_rate=Decimal("0.50"),
         maximum_allowed_drawdown=Decimal("-0.20"),
+        candidate_shadow_minimum_oos_folds=2,
+        candidate_shadow_minimum_active_oos_folds=1,
+        candidate_shadow_minimum_oos_trades=1,
+        candidate_shadow_minimum_compounded_oos_return=Decimal("0"),
+        candidate_shadow_maximum_allowed_drawdown=Decimal("-0.20"),
     )
     result = assess_research_gate(
         policy=policy,
         fold_count=12,
+        active_fold_count=8,
+        oos_trade_count=12,
         candidate_count=1,
         regime_count=3,
-        positive_fold_rate=Decimal("0.75"),
+        positive_active_fold_rate=Decimal("0.75"),
+        compounded_oos_return=Decimal("0.10"),
         worst_drawdown=Decimal("-0.10"),
         probability_of_backtest_overfitting=Decimal("0"),
         deflated_sharpe_probability=Decimal("0.97"),
@@ -878,3 +1004,48 @@ def test_static_strategy_gate_treats_candidate_count_and_pbo_as_not_applicable()
     assert result["eligible_for_human_review"] is True
     assert result["pbo_applicable"] is False
     assert result["evidence_shortfalls"] == []
+
+
+def test_sparse_strategy_uses_active_folds_and_can_enter_candidate_shadow() -> None:
+    policy = PromotionGatePolicy(
+        version="research_gate@0.3.0",
+        minimum_oos_folds=12,
+        minimum_active_oos_folds=2,
+        minimum_oos_trades=5,
+        minimum_candidate_count=3,
+        minimum_regime_count=2,
+        maximum_probability_of_backtest_overfitting=Decimal("0.20"),
+        minimum_deflated_sharpe_probability=Decimal("0.95"),
+        minimum_positive_active_oos_fold_rate=Decimal("0.50"),
+        maximum_allowed_drawdown=Decimal("-0.20"),
+        candidate_shadow_minimum_oos_folds=6,
+        candidate_shadow_minimum_active_oos_folds=2,
+        candidate_shadow_minimum_oos_trades=5,
+        candidate_shadow_minimum_compounded_oos_return=Decimal("0"),
+        candidate_shadow_maximum_allowed_drawdown=Decimal("-0.20"),
+    )
+
+    result = assess_research_gate(
+        policy=policy,
+        fold_count=20,
+        active_fold_count=2,
+        oos_trade_count=5,
+        candidate_count=1,
+        regime_count=3,
+        positive_active_fold_rate=Decimal("0.50"),
+        compounded_oos_return=Decimal("0.03"),
+        worst_drawdown=Decimal("-0.10"),
+        probability_of_backtest_overfitting=Decimal("0"),
+        deflated_sharpe_probability=Decimal("0.40"),
+        pbo_applicable=False,
+        validation_subject="static_strategy",
+    )
+
+    assert result["status"] == "REJECTED"
+    assert result["threshold_failures"] == [
+        "deflated_sharpe_probability is below policy minimum"
+    ]
+    assert result["candidate_shadow"]["status"] == (
+        "ELIGIBLE_FOR_CANDIDATE_SHADOW_REVIEW"
+    )
+    assert result["candidate_shadow"]["eligible_for_human_review"] is True

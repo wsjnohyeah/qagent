@@ -134,29 +134,47 @@ def validation_input_fingerprint(
 class PromotionGatePolicy(FrozenModel):
     version: str = Field(pattern=r"^research_gate@[0-9]+\.[0-9]+\.[0-9]+$")
     minimum_oos_folds: int = Field(ge=4)
+    minimum_active_oos_folds: int = Field(ge=0)
+    minimum_oos_trades: int = Field(ge=0)
     minimum_candidate_count: int = Field(ge=2)
     minimum_regime_count: int = Field(ge=1, le=3)
     maximum_probability_of_backtest_overfitting: Decimal = Field(ge=0, le=1)
     minimum_deflated_sharpe_probability: Decimal = Field(ge=0, le=1)
-    minimum_positive_oos_fold_rate: Decimal = Field(ge=0, le=1)
+    minimum_positive_active_oos_fold_rate: Decimal = Field(ge=0, le=1)
     maximum_allowed_drawdown: Decimal = Field(le=0)
+    candidate_shadow_minimum_oos_folds: int = Field(ge=1)
+    candidate_shadow_minimum_active_oos_folds: int = Field(ge=1)
+    candidate_shadow_minimum_oos_trades: int = Field(ge=1)
+    candidate_shadow_minimum_compounded_oos_return: Decimal = Field(ge=-1)
+    candidate_shadow_maximum_allowed_drawdown: Decimal = Field(le=0)
 
     @model_validator(mode="after")
     def thresholds_are_conservative(self) -> Self:
         if self.maximum_allowed_drawdown < Decimal("-1"):
             raise ValueError("maximum_allowed_drawdown cannot be below -1")
+        if self.candidate_shadow_maximum_allowed_drawdown < Decimal("-1"):
+            raise ValueError(
+                "candidate_shadow_maximum_allowed_drawdown cannot be below -1"
+            )
         return self
 
 
 DEFAULT_PROMOTION_GATE_POLICY = PromotionGatePolicy(
-    version="research_gate@0.2.0",
+    version="research_gate@0.3.0",
     minimum_oos_folds=12,
+    minimum_active_oos_folds=8,
+    minimum_oos_trades=30,
     minimum_candidate_count=3,
     minimum_regime_count=2,
     maximum_probability_of_backtest_overfitting=Decimal("0.20"),
     minimum_deflated_sharpe_probability=Decimal("0.95"),
-    minimum_positive_oos_fold_rate=Decimal("0.55"),
+    minimum_positive_active_oos_fold_rate=Decimal("0.55"),
     maximum_allowed_drawdown=Decimal("-0.20"),
+    candidate_shadow_minimum_oos_folds=6,
+    candidate_shadow_minimum_active_oos_folds=3,
+    candidate_shadow_minimum_oos_trades=10,
+    candidate_shadow_minimum_compounded_oos_return=Decimal("0"),
+    candidate_shadow_maximum_allowed_drawdown=Decimal("-0.20"),
 )
 
 
@@ -363,9 +381,12 @@ def assess_research_gate(
     *,
     policy: PromotionGatePolicy,
     fold_count: int,
+    active_fold_count: int,
+    oos_trade_count: int,
     candidate_count: int,
     regime_count: int,
-    positive_fold_rate: Decimal,
+    positive_active_fold_rate: Decimal,
+    compounded_oos_return: Decimal,
     worst_drawdown: Decimal,
     probability_of_backtest_overfitting: Decimal,
     deflated_sharpe_probability: Decimal,
@@ -380,6 +401,14 @@ def assess_research_gate(
     if fold_count < policy.minimum_oos_folds:
         evidence_shortfalls.append(
             f"oos_folds {fold_count} < {policy.minimum_oos_folds}"
+        )
+    if active_fold_count < policy.minimum_active_oos_folds:
+        evidence_shortfalls.append(
+            f"active_oos_folds {active_fold_count} < {policy.minimum_active_oos_folds}"
+        )
+    if oos_trade_count < policy.minimum_oos_trades:
+        evidence_shortfalls.append(
+            f"oos_trades {oos_trade_count} < {policy.minimum_oos_trades}"
         )
     if not static_strategy and candidate_count < policy.minimum_candidate_count:
         evidence_shortfalls.append(
@@ -402,8 +431,13 @@ def assess_research_gate(
         )
     if deflated_sharpe_probability < policy.minimum_deflated_sharpe_probability:
         threshold_failures.append("deflated_sharpe_probability is below policy minimum")
-    if positive_fold_rate < policy.minimum_positive_oos_fold_rate:
-        threshold_failures.append("positive_oos_fold_rate is below policy minimum")
+    if (
+        positive_active_fold_rate
+        < policy.minimum_positive_active_oos_fold_rate
+    ):
+        threshold_failures.append(
+            "positive_active_oos_fold_rate is below policy minimum"
+        )
     if worst_drawdown < policy.maximum_allowed_drawdown:
         threshold_failures.append("worst_selected_oos_drawdown exceeds policy loss limit")
     if evidence_shortfalls:
@@ -412,6 +446,42 @@ def assess_research_gate(
         status = "REJECTED"
     else:
         status = "ELIGIBLE_FOR_HUMAN_REVIEW"
+    candidate_evidence_shortfalls: list[str] = []
+    candidate_threshold_failures: list[str] = []
+    if not static_strategy:
+        candidate_evidence_shortfalls.append(
+            "candidate Shadow requires an exact static strategy validation"
+        )
+    if fold_count < policy.candidate_shadow_minimum_oos_folds:
+        candidate_evidence_shortfalls.append(
+            "oos_folds "
+            f"{fold_count} < {policy.candidate_shadow_minimum_oos_folds}"
+        )
+    if active_fold_count < policy.candidate_shadow_minimum_active_oos_folds:
+        candidate_evidence_shortfalls.append(
+            "active_oos_folds "
+            f"{active_fold_count} < "
+            f"{policy.candidate_shadow_minimum_active_oos_folds}"
+        )
+    if oos_trade_count < policy.candidate_shadow_minimum_oos_trades:
+        candidate_evidence_shortfalls.append(
+            "oos_trades "
+            f"{oos_trade_count} < {policy.candidate_shadow_minimum_oos_trades}"
+        )
+    if compounded_oos_return <= policy.candidate_shadow_minimum_compounded_oos_return:
+        candidate_threshold_failures.append(
+            "compounded_selected_oos_return is not above the candidate minimum"
+        )
+    if worst_drawdown < policy.candidate_shadow_maximum_allowed_drawdown:
+        candidate_threshold_failures.append(
+            "worst_selected_oos_drawdown exceeds the candidate loss limit"
+        )
+    if candidate_evidence_shortfalls:
+        candidate_status = "INSUFFICIENT_EVIDENCE"
+    elif candidate_threshold_failures:
+        candidate_status = "REJECTED"
+    else:
+        candidate_status = "ELIGIBLE_FOR_CANDIDATE_SHADOW_REVIEW"
     return {
         "policy_version": policy.version,
         "policy_sha256": promotion_policy_sha256(policy),
@@ -422,6 +492,15 @@ def assess_research_gate(
         "pbo_applicable": pbo_applicable,
         "evidence_shortfalls": evidence_shortfalls,
         "threshold_failures": threshold_failures,
+        "candidate_shadow": {
+            "status": candidate_status,
+            "eligible_for_human_review": (
+                candidate_status == "ELIGIBLE_FOR_CANDIDATE_SHADOW_REVIEW"
+            ),
+            "automatic_promotion": False,
+            "evidence_shortfalls": candidate_evidence_shortfalls,
+            "threshold_failures": candidate_threshold_failures,
+        },
     }
 
 
@@ -787,6 +866,14 @@ class WalkForwardValidator:
         strategy_spec: StrategySpec | None,
     ) -> WalkForwardValidationReport:
         test_returns = [fold.selected_test_metrics.total_return for fold in folds]
+        active_test_returns = [
+            fold.selected_test_metrics.total_return
+            for fold in folds
+            if fold.selected_test_metrics.trade_count > 0
+        ]
+        oos_trade_count = sum(
+            fold.selected_test_metrics.trade_count for fold in folds
+        )
         test_sharpes = [fold.selected_test_metrics.sharpe_ratio for fold in folds]
         degradation = [
             fold.selected_train_metrics.sharpe_ratio
@@ -820,6 +907,15 @@ class WalkForwardValidator:
                 sum(value > 0 for value in test_returns)
             )
             / Decimal(len(folds)),
+            "active_oos_fold_count": len(active_test_returns),
+            "zero_trade_oos_fold_count": len(folds) - len(active_test_returns),
+            "oos_trade_count": oos_trade_count,
+            "positive_active_oos_fold_rate": (
+                Decimal(sum(value > 0 for value in active_test_returns))
+                / Decimal(len(active_test_returns))
+                if active_test_returns
+                else _ZERO
+            ),
             "mean_train_to_test_sharpe_degradation": _mean(degradation),
             "selected_oos_below_median_rate": Decimal(below_median)
             / Decimal(len(folds)),
@@ -858,10 +954,15 @@ class WalkForwardValidator:
         gate_assessment = assess_research_gate(
             policy=self.promotion_policy,
             fold_count=len(folds),
+            active_fold_count=len(active_test_returns),
+            oos_trade_count=oos_trade_count,
             candidate_count=len(strategy_types),
             regime_count=len(regime_metrics),
-            positive_fold_rate=Decimal(
-                str(aggregate["positive_oos_fold_rate"])
+            positive_active_fold_rate=Decimal(
+                str(aggregate["positive_active_oos_fold_rate"])
+            ),
+            compounded_oos_return=Decimal(
+                str(aggregate["compounded_selected_oos_return"])
             ),
             worst_drawdown=Decimal(
                 str(aggregate["worst_selected_oos_drawdown"])

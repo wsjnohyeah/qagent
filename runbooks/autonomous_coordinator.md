@@ -26,6 +26,12 @@ confirmations still apply, and neither candidate nor pool membership can submit 
 
 ## Stages
 
+Each hourly group is partitioned by an approved 1, 5, 20, 63, 126, or 252-session
+`horizon_bars`. Every stage reconstructs that value from the immutable job payload; do not
+infer it from a dependency result or a one-session default. The ML label, forecast, Research
+LLM context, generated holding period, replay, validation window, and Shadow contract must
+all agree.
+
 1. `collect_market_data`: incrementally ingest Alpaca `1Day` bars. A fresh production store
    starts with `COORDINATOR_INITIAL_LOOKBACK_DAYS` (default 1,826); development is still
    capped by its bounded-data setting. For a newly listed symbol, a fully exhausted leading-
@@ -49,8 +55,10 @@ confirmations still apply, and neither candidate nor pool membership can submit 
 8. `validate_strategy`: run exact-spec walk-forward validation under the current shared
    account risk contract. Cached admission also requires the current promotion policy and
    current search-trial count.
-9. `await_shadow_adoption`: report the strategy/report IDs and wait for the administrator's
-   separate `strategy.adopt` and `shadow.start` confirmations.
+9. `await_shadow_adoption`: report the strategy/report IDs and available Candidate/Qualified
+   admission tiers, then wait for the administrator's separate `strategy.adopt` and
+   `shadow.start` confirmations. Candidate is broker-free observation only and cannot enter
+   Alpaca Paper.
 
 ## Configuration
 

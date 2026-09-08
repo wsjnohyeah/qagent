@@ -1210,7 +1210,11 @@ class SystemObjectStore:
 
     def strategies(self, *, limit: int = 200) -> list[dict[str, Any]]:
         statement = (
-            select(strategy_specs, strategy_adoptions.c.status.label("adoption_status"))
+            select(
+                strategy_specs,
+                strategy_adoptions.c.status.label("adoption_status"),
+                strategy_adoptions.c.admission_tier,
+            )
             .outerjoin(
                 strategy_adoptions,
                 strategy_adoptions.c.strategy_spec_id == strategy_specs.c.strategy_spec_id,

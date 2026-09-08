@@ -124,17 +124,21 @@ selection rate, strategy switches, and realized up/down/sideways regime summarie
 also resamples candidate selection across combinations of the already purged, non-overlapping
 OOS folds to estimate PBO, and calculates Deflated Sharpe from those OOS fold returns.
 
-The versioned thresholds live in `configs/research_promotion_policy.yaml`. The assessment can
-only return `INSUFFICIENT_EVIDENCE`, `REJECTED`, or `ELIGIBLE_FOR_HUMAN_REVIEW`; it never
-promotes automatically. The bounded smoke sample is intentionally too small for eligibility.
+The versioned thresholds live in `configs/research_promotion_policy.yaml`. The strict
+assessment can only return `INSUFFICIENT_EVIDENCE`, `REJECTED`, or
+`ELIGIBLE_FOR_HUMAN_REVIEW`; it never promotes automatically. The report separately records
+Candidate Shadow eligibility, which is an observation-only human-review gate rather than a
+statistical qualification. The bounded smoke sample is intentionally too small for either.
 
-`research_gate@0.2.0` distinguishes two subjects. An `adaptive_selector` must satisfy the
+`research_gate@0.3.0` distinguishes two subjects. An `adaptive_selector` must satisfy the
 configured candidate breadth and PBO threshold. A frozen `static_strategy` has no within-
 report selection contest, so candidate count and PBO are explicitly N/A; it must still pass
-the fold, regime, drawdown, positive-OOS, and Deflated Sharpe requirements. Deflated Sharpe
-uses the recorded search-trial count for the symbol/timeframe, including rejected and failed
-hybrid attempts. This scope is intentionally conservative until explicit research-campaign
-isolation is implemented.
+the total-fold, active-fold, trade-count, regime, drawdown, positive-active-OOS, and Deflated
+Sharpe requirements. No-trade folds remain counted and displayed but are not treated as
+losing folds. Deflated Sharpe uses the recorded search-trial count for the symbol/timeframe,
+including rejected and failed hybrid attempts. Candidate Shadow additionally requires an
+exact static spec, minimum activity, positive cost-adjusted compounded OOS return, and bounded
+drawdown; it does not satisfy the strict gate and cannot reach Paper.
 
 This is a bias-detection baseline, not a claim that the selected strategy generalizes.
 Inspect reports with:

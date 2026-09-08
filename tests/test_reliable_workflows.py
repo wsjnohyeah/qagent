@@ -39,6 +39,8 @@ from agentic_quant.domain import (
     SourceDocument,
     SourceTier,
     StockBar,
+    WorkflowJob,
+    WorkflowJobStatus,
 )
 from agentic_quant.ledger import EventLedger
 from agentic_quant.market_ingestion import IngestionSummary
@@ -898,6 +900,47 @@ def test_autonomous_coordinator_partitions_cycles_by_research_horizon(
     assert {job.payload["horizon_bars"] for job in annual_jobs} == {252}
     with pytest.raises(ValueError, match="horizon is not approved"):
         coordinator.plan(symbols=("AAPL",), as_of=cutoff, horizon_bars=2)
+
+
+def test_research_handler_propagates_planned_horizon_into_stage_context() -> None:
+    observed: dict[str, object] = {}
+
+    async def train_ml(context):  # type: ignore[no-untyped-def]
+        observed.update(context)
+        return {"outcome": "COMPLETED"}
+
+    handler = ResearchCoordinatorHandler.__new__(ResearchCoordinatorHandler)
+    handler.pipeline_enabled = lambda _name: True
+    handler._train_ml = train_ml
+    now = datetime(2026, 9, 8, 12, tzinfo=UTC)
+    job = WorkflowJob(
+        workflow_job_id="00000000-0000-7000-8000-000000000201",
+        job_group_id="00000000-0000-7000-8000-000000000202",
+        job_type="coordinator.train_ml",
+        partition_key="AAPL:04:train_ml",
+        request_sha256="a" * 64,
+        payload={
+            "symbol": "AAPL",
+            "timeframe": "1Day",
+            "as_of": now.isoformat(),
+            "stage": "train_ml",
+            "cycle_key": "2026-09-08T12",
+            "horizon_bars": 20,
+        },
+        status=WorkflowJobStatus.PENDING,
+        attempt_count=0,
+        max_attempts=5,
+        dependency_job_ids=(),
+        cursor={},
+        result={},
+        created_at=now,
+        updated_at=now,
+    )
+
+    result = asyncio.run(handler(job, ()))
+
+    assert observed["horizon_bars"] == 20
+    assert result["horizon_bars"] == 20
 
 
 def test_autonomous_coordinator_recovers_failed_group_after_hour_rollover(

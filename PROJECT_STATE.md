@@ -53,7 +53,7 @@
 - Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
   experiment runs, backtest trades, corporate actions, historical universe membership,
   feature parity checks, and walk-forward reports are stored through Alembic revision
-  `20260908_0034`, including exact validation and ML-training contracts, normalized Paper
+  `20260908_0035`, including exact validation and ML-training contracts, normalized Paper
   order legs, shadow risk lineage, fenced workflow
   attempts, generation-attempt audit, runtime leases, and the event outbox.
 - The Phase 3 runner provides buy-and-hold, long/cash momentum, and long/cash
@@ -100,7 +100,10 @@
   conversations; and can propose allowlisted admin actions. It cannot execute them; a separate
   exact confirmation is required.
 - The persistent broker-free shadow runtime admits only the exact static strategy ID and
-  execution contract covered by a gate-eligible, human-confirmed validation certificate.
+  execution contract covered by a tier-eligible, human-confirmed validation certificate.
+  `CANDIDATE` is observation-only and may collect forward evidence without passing strict
+  statistical qualification; `QUALIFIED` passed the strict gate. Candidate deployments are
+  deterministically blocked from Alpaca Paper.
   It records candidate → deterministic risk decision → approved plan → execution-price risk
   review → modeled virtual order/fill lineage, cash, and P&L. Actual observation, approval,
   and persistence timestamps are separate from the market-data cutoff; a plan must exist
@@ -160,6 +163,10 @@
   and current research-search count. ML reuse is bound to dataset plus full training contract.
   Exhausted jobs do not starve later groups and require one confirmation-gated retry. Every
   stage honors its persisted subsystem pause control.
+  Every stage now reapplies the immutable job's `horizon_bars`; the earlier runtime omission
+  caused labeled multi-horizon groups to fall back to one-session ML/validation and is covered
+  by a regression test. Historical records remain immutable and new cycles rebuild correct
+  horizon-bound evidence.
 - Production daily bars and Alpaca News/SEC evidence target 1,826 days. News advances backward
   in bounded partitions (90-day default; current production override 180 days) while its
   current edge is refreshed; SEC filing metadata and
@@ -235,11 +242,13 @@
   symbols. News history is still converging backward by durable 180-day partitions and must
   not be described as fully backfilled yet. The hybrid funnel has compiled 12 exact strategy
   specifications from 13 generation attempts. At the 2026-09-08 06:04 UTC checkpoint, the
-  first six exact validations (AAPL, AOUT, HPE, COHR, IREN, and KLAC) were all `REJECTED` on
-  deterministic out-of-sample evidence; positive-OOS fold rates ranged from 0 to 0.2185 and
-  compounded OOS returns were non-positive. Consequently there is no eligible adoption,
-  Shadow deployment, Paper enrollment, position, or order. The coordinator remains enabled
-  and new exposure remains paused.
+  first exact validations were all `REJECTED` by the former strict gate. A later audit found
+  that roughly 73% of recorded OOS folds had no trade and were incorrectly included in the
+  old positive-fold denominator; several strategies had actual trade win rates above 50%.
+  `research_gate@0.3.0` now separates total/active/no-trade folds and OOS trade count, while
+  Candidate Shadow retains positive, sufficiently active exact specs for broker-free forward
+  observation. No production adoption, Shadow deployment, Paper enrollment, position, or
+  order has yet been created; new exposure remains paused pending rollout and review.
 - The production NBIS retry established an evidenced post-suspension boundary at `2024-10-21`.
   Its 470-bar resumed segment passed strict quality with zero missing intervals; the older raw
   and normalized history remains available for audit but is excluded from current research.
@@ -318,9 +327,10 @@
 1. Replace the temporary `sslip.io` hostname with the operator's permanent domain, select an
    off-site backup target and external alert destination, then automate both retention and
    notification checks.
-2. Let production research accumulate new point-in-time evidence. When a candidate passes the
-   exact gate, review/adopt it, start its Shadow deployment, and enroll that exact deployment
-   before the first future Paper plan. Do not manufacture a candidate merely to create activity.
+2. Deploy schema 0035 and `research_gate@0.3.0`, let new horizon-correct cycles revalidate
+   exact strategies, and review any Candidate/Qualified Shadow eligibility without
+   manufacturing a pass. Candidate deployments may gather broker-free forward evidence;
+   only a Qualified one-session deployment may be separately enrolled in Paper.
 3. Continue production-scale history/evidence coverage and collect Phase 5 statistical plus
    continuous-Shadow evidence and ML-only versus ML+LLM ablations.
 4. Continue interactive Phase 6.1 UI review with real operator navigation and refine labels;
@@ -406,3 +416,5 @@
   geometry separately from account-dollar risk.
 - ADR 0035: bind ML, LLM generation, replay, validation, and Shadow to explicit 1–252-session
   horizons; keep multi-session Paper fail-closed pending a separate broker lifecycle.
+- ADR 0036: preserve the planned horizon through every coordinator stage, use active folds for
+  sparse-strategy stability, and split broker-free Candidate Shadow from Qualified/Paper.

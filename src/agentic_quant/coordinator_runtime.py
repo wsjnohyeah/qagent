@@ -321,6 +321,11 @@ class ResearchCoordinatorHandler:
                 "symbol": str(job.payload["symbol"]),
                 "timeframe": str(job.payload["timeframe"]),
                 "as_of": str(job.payload["as_of"]),
+                # The research horizon is part of the immutable job request.  It
+                # must be re-applied at every stage instead of relying on a
+                # dependency result to happen to carry it forward.  Legacy jobs
+                # created before horizon partitioning are explicitly one-day.
+                "horizon_bars": int(job.payload.get("horizon_bars", 1)),
             }
         )
         if job.payload.get("universe_scan_id") is not None:
@@ -1189,11 +1194,17 @@ class ResearchCoordinatorHandler:
             None,
         )
         if prior is not None:
+            prior_gate = dict(prior["gate_assessment"])
             return {
                 "outcome": "REUSED",
                 "validation_report_id": str(prior["validation_report_id"]),
                 "eligible_for_human_review": bool(
-                    dict(prior["gate_assessment"]).get("eligible_for_human_review")
+                    prior_gate.get("eligible_for_human_review")
+                ),
+                "eligible_for_candidate_shadow_review": bool(
+                    dict(prior_gate.get("candidate_shadow") or {}).get(
+                        "eligible_for_human_review"
+                    )
                 ),
             }
         try:
@@ -1230,6 +1241,11 @@ class ResearchCoordinatorHandler:
             "eligible_for_human_review": bool(
                 report.gate_assessment.get("eligible_for_human_review")
             ),
+            "eligible_for_candidate_shadow_review": bool(
+                dict(report.gate_assessment.get("candidate_shadow") or {}).get(
+                    "eligible_for_human_review"
+                )
+            ),
         }
 
     def _verified_research_bars(
@@ -1252,7 +1268,9 @@ class ResearchCoordinatorHandler:
     async def _await_shadow_adoption(self, context: dict[str, Any]) -> dict[str, Any]:
         if not context.get("validation_report_id"):
             return {"outcome": "WAITING_EXACT_VALIDATION"}
-        if not context.get("eligible_for_human_review"):
+        qualified = bool(context.get("eligible_for_human_review"))
+        candidate = bool(context.get("eligible_for_candidate_shadow_review"))
+        if not qualified and not candidate:
             return {"outcome": "WAITING_FUTURE_RESEARCH_EVIDENCE"}
         universe = self.objects.get_list("trading-universe")
         governed = {
@@ -1277,6 +1295,14 @@ class ResearchCoordinatorHandler:
         return {
             "outcome": "WAITING_HUMAN_CONFIRMATION",
             "required_actions": ["strategy.adopt", "shadow.start"],
+            "available_admission_tiers": [
+                tier
+                for tier, available in (
+                    ("QUALIFIED", qualified),
+                    ("CANDIDATE", candidate),
+                )
+                if available
+            ],
             "trading_pool_authority": (
                 "MANUAL_TRADING_UNIVERSE"
                 if symbol in governed

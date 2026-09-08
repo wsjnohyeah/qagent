@@ -11,7 +11,7 @@ until an exact strategy passes deterministic validation and receives the separat
 Shadow-start, and Paper-enrollment confirmations. Off-site backup/alerting and statistical/
 elapsed production evidence remain open
 
-Current documented baseline: C060 — `Record multi-horizon production rollout`
+Current documented baseline: C061 — `Repair horizon execution and retain Shadow candidates`
 
 ## Purpose and authority
 
@@ -69,8 +69,10 @@ A Git commit cannot contain its own content-derived hash without changing that h
   both in and out of sample, with selection degradation, below-median selection rate, and
   realized-regime summaries retained rather than reporting only the winner.
 - Phase 3D adds combinatorial selection-risk/PBO diagnostics and Deflated Sharpe to every
-  report. A versioned gate can only mark sufficient results eligible for later human review;
-  it never promotes automatically, and bounded local samples fail closed.
+  report. `research_gate@0.3.0` distinguishes calendar folds, active folds, no-trade folds,
+  and OOS trades; no-trade windows no longer masquerade as losing windows in the stability
+  ratio. A strict Qualified gate and a lower-authority Candidate Shadow gate can only mark
+  exact static results eligible for later human review; neither promotes automatically.
 - Phase 5A adds persisted fail-closed market-data audits, configured half-spread fill costs,
   governed point-in-time reference imports, and idempotent resumable backfill partitions.
 - A front-loaded Phase 4B gateway and local Control Center now present one audited contract over OpenAI GPT-5.6 Sol
@@ -126,7 +128,9 @@ A Git commit cannot contain its own content-derived hash without changing that h
 - Sensitive operations are two-step: a proposal records parameters and preview, then expires
   after 15 minutes unless the administrator submits its exact single-use confirmation phrase.
 - The broker-free shadow runtime admits only the exact static strategy and execution contract
-  covered by a gate-eligible report and separate human confirmations. Every attempted
+  covered by a tier-eligible report and separate human confirmations. Candidate Shadow is
+  explicitly observation-only; Qualified Shadow passed the strict statistical gate, and only
+  Qualified one-session deployments can proceed to a separate Alpaca Paper review. Every attempted
   exposure persists candidate → deterministic risk decision → approved plan → open-price
   risk review → virtual order/fill lineage, including account context and known decision-bar
   liquidity. Observation, decision completion, pending persistence, and durable activation use
@@ -144,8 +148,8 @@ A Git commit cannot contain its own content-derived hash without changing that h
   while allowing an existing position to exit. The literal unbounded buy-and-hold benchmark
   remains research-only. Shadow itself makes no broker call.
 - Phase 7 persists Paper enrollments, deterministic client-order intents, broker lifecycle
-  events, account/position snapshots, and runtime runs through Alembic revision
-  `20260907_0031`. The only broker host is exactly `paper-api.alpaca.markets`.
+  events, account/position snapshots, and runtime runs; the complete schema is now at Alembic
+  revision `20260908_0035`. The only broker host is exactly `paper-api.alpaca.markets`.
 - Validation, Shadow, and Paper now share
   `next_session_day_limit_bracket_moc@0.1.0`. The Paper adapter uses account-bound intents,
   stable client IDs, normalized entry/target/stop/close/emergency legs, Alpaca price
@@ -163,7 +167,8 @@ A Git commit cannot contain its own content-derived hash without changing that h
   a separate local-commit approval. Push and deployment remain external actions.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`. A fresh SFO3 VPS runs the
   production stack at `https://qagent.143.110.239.251.sslip.io` behind Caddy TLS on verified
-  immutable functional commit `d207d187977f241aca4763edd1234aaf31514aac`.
+  immutable functional commit `173809e466698ff32a0dd0409313d74d9e51b9a6`. C061 is the local
+  remediation candidate and must pass CI plus guarded deployment before this line advances.
 - The independent `06b6853` fix verification is mapped item-by-item in
   `docs/REVIEW_REMEDIATION_2026-09-05.md`. The deterministic F01–F11 counterexamples are
   followed by the corrections from the `56bb979` review in
@@ -200,6 +205,9 @@ A Git commit cannot contain its own content-derived hash without changing that h
   are consumed before current work. Validation reuse requires the full execution contract,
   exact market-data/window fingerprint, semantic current promotion-policy hash, and current
   research-search count. Non-daily coordinator requests now fail closed.
+  Every stage reapplies the immutable job's `horizon_bars`. This closes a production-discovered
+  defect in which 5/20-day job labels could fall back to one-session ML and validation despite
+  correct planning metadata; legacy jobs without the field remain explicitly one-session.
 - A bounded discovery stage can now precede that DAG. It merges Alpaca's top 100 active names,
   top 50 gainers and losers, 83 reviewed AI-infrastructure/high-beta/cross-sector theme seeds,
   and the administrator Focus Watchlist. Deterministic price, dollar-volume, restricted-
@@ -223,8 +231,10 @@ A Git commit cannot contain its own content-derived hash without changing that h
   metrics, calibration, drift, model gate, and both data/contract identities. A failed provider
   invocation remains infrastructure failure and cannot become a cached research rejection.
 - Static exact-spec validation now has a subject-specific gate: multi-candidate breadth and
-  PBO are N/A rather than impossible requirements, while folds, regimes, drawdown, positive
-  OOS rate and Deflated Sharpe remain enforced. Deflated Sharpe uses the recorded market-
+  PBO are N/A rather than impossible requirements, while total/active folds, OOS trades,
+  regimes, drawdown, positive-active-OOS rate and Deflated Sharpe remain enforced. Candidate
+  Shadow separately requires minimum activity, positive cost-adjusted compounded OOS return,
+  and bounded drawdown. Deflated Sharpe uses the recorded market-
   contract search count, including failed/rejected hybrid attempts, rather than the size of
   the submitted candidate list.
 - Daily ML labels use the real exchange-session entry open and exit availability boundary.
@@ -302,8 +312,8 @@ Development service ports bind only to loopback. The local Compose credentials a
 
 - `make check`: passed.
 - Flake8: passed.
-- Strict mypy: passed for 58 source files.
-- Pytest: 121 passed for the Phase 7 implementation.
+- Strict mypy: passed for 59 source files.
+- Pytest: 192 passed for the C061 remediation candidate.
 - `make doctor`: passed against the local-lite SQLite profile.
 - `make docker-doctor`: passed against the PostgreSQL-backed Compose profile.
 - PostgreSQL query: passed; the first container replay stored six lineage events.
@@ -672,8 +682,8 @@ only training metrics, while every test result is retained for rank and selectio
 analysis. Realized test returns define transparent up/down/sideways report buckets; they do
 not feed the strategy. Phase 3D resamples selection across the already embargoed,
 non-overlapping OOS folds, records PBO and Deflated Sharpe diagnostics, and applies the
-versioned `research_gate@0.2.0` policy. The gate is advisory eligibility only and cannot
-promote a candidate.
+versioned `research_gate@0.3.0` policy. The gate is advisory eligibility only and cannot
+promote a candidate; Candidate Shadow is a separate broker-free observation tier.
 
 The front-loaded Phase 4A gateway gives OpenAI and Meta one internal Responses-style
 contract. `configs/model_routing.yaml` sends critical research/generation/critique to the
@@ -735,15 +745,19 @@ The Phase 6 shadow runtime reads already-ingested normalized bars, builds the sa
 time feature snapshots, applies immutable strategy parameters, and persists candidate → risk
 decision → approved plan → virtual order/fill state with modeled costs. Admission requires a
 static validation certificate bound to the exact strategy ID, feature version, engine, cost
-model, timeframe, and `eligible_for_human_review=true`, plus confirmed human adoption. The
-future execution bar's completed volume cannot size an entry. Scheduler and manual ticks
-share one lock and one idempotent bar cursor. Production gives the scheduler to a dedicated
-heartbeat-reporting worker; the API is not a second scheduler owner. The runtime contains no
-broker SDK or order-submission route.
+model, timeframe, current policy/search identity, and the selected tier's eligibility, plus
+confirmed human adoption. Candidate Shadow is labeled observation-only and can gather forward
+evidence without claiming strict qualification; Qualified Shadow passed the full statistical
+gate. Candidate deployments are hard-blocked from Paper. The future execution bar's completed
+volume cannot size an entry. Scheduler and manual ticks share one lock and one idempotent bar
+cursor. Production gives the scheduler to a dedicated heartbeat-reporting worker; the API is
+not a second scheduler owner. The runtime contains no broker SDK or order-submission route.
 
 Strategy horizon is now a first-class immutable contract rather than an implied one-bar
 default. The coordinator rotates through 1/5/20/63/126/252-session ML labels; the Research LLM
-and constrained generator must use the same horizon. Replay and validation select either the
+and constrained generator must use the same horizon. Each runtime stage reconstructs that
+context from the immutable job payload, so a dependency result cannot silently erase it.
+Replay and validation select either the
 same-session MOC profile or the multi-session timed-exit profile. Forward Shadow persists an
 open multi-session position, including entry basis, filled quantity, cost basis, maximum exit,
 and applied corporate actions, across worker restarts. The global pause remains a new-exposure
@@ -2579,11 +2593,10 @@ Ordered near-term work:
 2. Run a read-only Alpaca Paper probe in the intended environment. Build and validate the
    separate Paper execution profile, nested-child lifecycle, and deterministic session-close
    exit before any enrollment or external order.
-3. Review the production scanner's precision and theme catalog, approve licensed corporate-
-   action/historical-universe and primary evidence refresh inputs, run production long-horizon
-   backfill, enable paid coordinator stages only after route/USD-budget review, and collect
-   Phase 5 statistical plus continuous-Shadow evidence and controlled ML-only versus ML+LLM
-   ablations.
+3. Roll out C061, let new cycles replace the invalid one-session fallbacks with genuinely
+   horizon-bound evidence, and review exact specs offered for Candidate or Qualified Shadow.
+   Candidate observation may collect broker-free forward evidence but cannot enter Paper.
+   Continue controlled ML-only versus ML+LLM ablations without manufacturing a gate pass.
 4. Continue interactive UI review and add account/coordinator affordances where operator use
    shows they are needed.
 5. Add a governed point-in-time macro-event calendar and remaining licensed data sources.
@@ -3884,6 +3897,43 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: observe the first completed cycles for every horizon and implement a
   separately validated multi-session Paper lifecycle only after its entry/exit semantics are
   reviewed.
+
+### C061 — `Repair horizon execution and retain Shadow candidates`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-08 PDT.
+- User intent: fix the apparent universal rejection of one-session strategies and verify that
+  multi-session research is actually executing at its labeled horizon.
+- Scope:
+  - Added a failing-then-passing regression proving every coordinator stage receives the
+    immutable job's `horizon_bars`; legacy jobs without it remain explicitly one-session.
+  - Replaced the misleading all-calendar-fold success denominator with explicit total,
+    active, and no-trade fold counts, OOS trade count, and positive-active-fold rate under
+    `research_gate@0.3.0`.
+  - Added a separately assessed Candidate Shadow tier for exact static strategies with enough
+    OOS activity, positive cost-adjusted compounded return, and bounded drawdown. Strict DSR,
+    stability, and selection diagnostics remain required for Qualified status.
+  - Persisted each adoption's `CANDIDATE` or `QUALIFIED` tier in schema 0035, rechecked the
+    exact current contract before deployment, and blocked Candidate deployments from Paper.
+  - Updated Strategy/Shadow/Paper UI explanations and metrics so inactivity, rejection,
+    candidate observation, and qualification are visually distinct.
+  - Added ADR 0036 and updated the research/Shadow runbooks, README, and project state.
+- Architecture/decision impact: rejected research artifacts are retained as before, but an
+  exact strategy with bounded positive evidence may now collect broker-free forward evidence
+  after explicit human confirmation. This does not weaken Paper, deterministic risk, or the
+  prohibition on live-money execution.
+- Validation: focused coordinator regression passed; validation, Control Center, Paper, and
+  reliable-workflow suites passed; full pytest passed 192 tests; Flake8 and strict mypy across
+  59 source files passed. Local/authenticated Compose doctors, secret scan, browser parse,
+  fresh SQLite schema 0035 upgrade/downgrade/re-upgrade, and PostgreSQL zero-drift passed.
+  CI and guarded production rollout remain required before deployment is recorded.
+- Expected global state after commit: new coordinator cycles create models, forecasts,
+  strategies, and validation at their true planned horizon. Sparse one-session strategies are
+  no longer rejected merely because they correctly stayed in cash in many windows, and
+  eligible-but-unqualified ideas can be observed in Candidate Shadow without broker access.
+- Corrections/follow-ups: inspect the first production reports under policy 0.3.0 before any
+  adoption; production new exposure remains paused until an administrator confirms an exact
+  candidate and its Shadow deployment.
 
 ## Template for future commit entries
 

@@ -10,15 +10,20 @@ portfolio events.
 ## Admission path
 
 1. A strategy specification and validation report exist.
-2. The deterministic report gate has `eligible_for_human_review=true`, has subject
-   `static_strategy`, and binds the exact strategy ID, timeframe, feature version, backtest
-   engine version, and cost model used by the runtime.
-3. The administrator confirms `strategy.adopt`.
+2. The deterministic report has subject `static_strategy`, binds the exact strategy ID,
+   timeframe, feature version, engine version, cost/risk policy, current promotion-policy
+   hash, and research-search count, and is eligible for the selected tier:
+   - `QUALIFIED`: the strict report gate has `eligible_for_human_review=true`.
+   - `CANDIDATE`: the candidate gate has `eligible_for_human_review=true`; this is
+     observation-only and never Paper-eligible.
+3. The administrator confirms `strategy.adopt` with the explicit admission tier.
 4. The administrator confirms `shadow.start` for one symbol. Its validated capital must
    match the shared virtual master account.
 5. The shadow pipeline and global new-exposure control are enabled.
 
-No override can convert an insufficient/rejected validation report into an adoption.
+No override can convert a report that failed the selected tier into an adoption. A strict
+rejection may still have independently computed Candidate eligibility; that is not an
+override and does not claim qualification.
 
 ## Runtime semantics
 

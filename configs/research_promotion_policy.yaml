@@ -1,11 +1,22 @@
-version: research_gate@0.2.0
+version: research_gate@0.3.0
 
 # These gates only determine eligibility for later human review. They never promote a
 # strategy or authorize shadow/paper execution automatically.
 minimum_oos_folds: 12
+minimum_active_oos_folds: 8
+minimum_oos_trades: 30
 minimum_candidate_count: 3
 minimum_regime_count: 2
 maximum_probability_of_backtest_overfitting: 0.20
 minimum_deflated_sharpe_probability: 0.95
-minimum_positive_oos_fold_rate: 0.55
+minimum_positive_active_oos_fold_rate: 0.55
 maximum_allowed_drawdown: -0.20
+
+# Candidate Shadow is broker-free forward observation, never qualification or Paper.
+# It may omit DSR/PBO thresholds, but still requires an exact static specification,
+# real OOS activity, positive cost-adjusted OOS return, and bounded drawdown.
+candidate_shadow_minimum_oos_folds: 6
+candidate_shadow_minimum_active_oos_folds: 3
+candidate_shadow_minimum_oos_trades: 10
+candidate_shadow_minimum_compounded_oos_return: 0
+candidate_shadow_maximum_allowed_drawdown: -0.20

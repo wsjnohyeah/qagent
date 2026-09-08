@@ -377,6 +377,10 @@ class ResearchEvidenceRetriever:
                             "mean_selected_oos_sharpe",
                             "worst_selected_oos_drawdown",
                             "positive_oos_fold_rate",
+                            "positive_active_oos_fold_rate",
+                            "active_oos_fold_count",
+                            "zero_trade_oos_fold_count",
+                            "oos_trade_count",
                             "mean_train_to_test_sharpe_degradation",
                         )
                         if key in aggregate
@@ -386,6 +390,7 @@ class ResearchEvidenceRetriever:
                         "eligible_for_human_review": gate.get(
                             "eligible_for_human_review"
                         ),
+                        "candidate_shadow": gate.get("candidate_shadow"),
                         "evidence_shortfalls": [
                             str(value)[:200]
                             for value in gate.get("evidence_shortfalls", [])[:5]

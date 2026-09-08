@@ -166,7 +166,11 @@ class ShadowRuntime:
         *,
         strategy_spec_id: str,
         validation_report_id: str,
+        admission_tier: str = "QUALIFIED",
     ) -> dict[str, Any]:
+        normalized_tier = admission_tier.strip().upper()
+        if normalized_tier not in {"CANDIDATE", "QUALIFIED"}:
+            raise ValueError("Shadow admission tier must be CANDIDATE or QUALIFIED")
         with self.engine.connect() as connection:
             spec = connection.execute(
                 select(strategy_specs).where(
@@ -183,9 +187,15 @@ class ShadowRuntime:
         if report is None:
             raise ValueError("Validation report not found")
         gate = dict(report.gate_assessment)
-        if gate.get("eligible_for_human_review") is not True:
+        tier_gate = (
+            gate
+            if normalized_tier == "QUALIFIED"
+            else dict(gate.get("candidate_shadow") or {})
+        )
+        if tier_gate.get("eligible_for_human_review") is not True:
             raise ValueError(
-                "Strategy is not eligible for human review under the deterministic gate"
+                f"Strategy is not eligible for {normalized_tier.lower()} Shadow "
+                "review under the deterministic gate"
             )
         if str(report.validation_subject) != "static_strategy":
             raise ValueError(
@@ -255,9 +265,13 @@ class ShadowRuntime:
                 "research search count"
             )
         return {
-            "summary": f"Adopt {spec.name}@{spec.version} for shadow use",
+            "summary": (
+                f"Adopt {spec.name}@{spec.version} for "
+                f"{normalized_tier.lower()} Shadow use"
+            ),
             "strategy_spec_id": strategy_spec_id,
             "validation_report_id": validation_report_id,
+            "admission_tier": normalized_tier,
             "gate_assessment": gate,
             "symbol": report.symbol,
             "timeframe": report.timeframe,
@@ -271,11 +285,14 @@ class ShadowRuntime:
         validation_report_id: str,
         reason: str,
         approved_by: str,
+        admission_tier: str = "QUALIFIED",
     ) -> dict[str, Any]:
-        self.adoption_preview(
+        preview = self.adoption_preview(
             strategy_spec_id=strategy_spec_id,
             validation_report_id=validation_report_id,
+            admission_tier=admission_tier,
         )
+        normalized_tier = str(preview["admission_tier"])
         now = datetime.now(UTC)
         with self.engine.begin() as connection:
             spec = connection.execute(
@@ -299,6 +316,7 @@ class ShadowRuntime:
             ).one_or_none()
             values = {
                 "status": "ADOPTED_FOR_SHADOW",
+                "admission_tier": normalized_tier,
                 "validation_report_id": validation_report_id,
                 "reason": reason,
                 "approved_by": approved_by,
@@ -328,7 +346,10 @@ class ShadowRuntime:
             author_kind="admin",
             author_name=approved_by,
             body=f"Adopted for shadow operation. {reason}",
-            metadata={"validation_report_id": validation_report_id},
+            metadata={
+                "validation_report_id": validation_report_id,
+                "admission_tier": normalized_tier,
+            },
         )
         return self.adoption(adoption_id)
 
@@ -540,6 +561,8 @@ class ShadowRuntime:
             row = connection.execute(
                 select(
                     strategy_adoptions.c.status,
+                    strategy_adoptions.c.admission_tier,
+                    strategy_adoptions.c.validation_report_id,
                     strategy_specs.c.name,
                     strategy_specs.c.version,
                     validation_reports.c.symbol.label("validated_symbol"),
@@ -561,6 +584,11 @@ class ShadowRuntime:
             ).one_or_none()
         if row is None or row.status != "ADOPTED_FOR_SHADOW":
             raise ValueError("Strategy must be adopted before shadow deployment")
+        self.adoption_preview(
+            strategy_spec_id=strategy_spec_id,
+            validation_report_id=str(row.validation_report_id),
+            admission_tier=str(row.admission_tier),
+        )
         if str(row.validated_symbol) != normalized_symbol:
             raise ValueError("Shadow symbol does not match the reviewed validation report")
         validated_capital = dict(row.execution_contract_json or {}).get(
@@ -573,6 +601,7 @@ class ShadowRuntime:
         return {
             "summary": f"Start {row.name}@{row.version} on {normalized_symbol}",
             "strategy_spec_id": strategy_spec_id,
+            "admission_tier": str(row.admission_tier),
             "symbol": normalized_symbol,
             "initial_cash": str(initial_cash),
             "live_broker_effect": False,
@@ -624,6 +653,7 @@ class ShadowRuntime:
                 adoption_row = connection.execute(
                     select(
                         strategy_adoptions.c.status,
+                        strategy_adoptions.c.admission_tier,
                         strategy_adoptions.c.validation_report_id,
                     ).where(
                         strategy_adoptions.c.strategy_spec_id == row.strategy_spec_id
@@ -634,6 +664,7 @@ class ShadowRuntime:
                 self.adoption_preview(
                     strategy_spec_id=str(row.strategy_spec_id),
                     validation_report_id=str(adoption_row.validation_report_id),
+                    admission_tier=str(adoption_row.admission_tier),
                 )
             connection.execute(
                 update(shadow_deployments)
@@ -716,6 +747,7 @@ class ShadowRuntime:
                 strategy_specs.c.parameters_json,
                 strategy_specs.c.data_requirements_json,
                 strategy_adoptions.c.validation_report_id,
+                strategy_adoptions.c.admission_tier,
                 validation_reports.c.execution_contract_sha256,
                 validation_reports.c.execution_contract_json,
             )
@@ -752,6 +784,7 @@ class ShadowRuntime:
                 self.adoption_preview(
                     strategy_spec_id=str(value["strategy_spec_id"]),
                     validation_report_id=str(value["validation_report_id"]),
+                    admission_tier=str(value["admission_tier"]),
                 )
             except ValueError as exc:
                 value["contract_status"] = "REVALIDATION_REQUIRED"

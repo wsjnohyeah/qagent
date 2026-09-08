@@ -333,6 +333,10 @@ class PaperTradingRuntime:
             raise ValueError("Only an active shadow deployment can enter paper trading")
         if deployment.get("contract_status") != "CURRENT":
             raise ValueError("The deployment requires exact-contract revalidation")
+        if deployment.get("admission_tier") != "QUALIFIED":
+            raise ValueError(
+                "Candidate Shadow is observation-only and cannot enter Alpaca Paper"
+            )
         execution_contract = dict(deployment.get("execution_contract_json") or {})
         execution_profile = execution_contract.get("execution_profile")
         if execution_profile != PAPER_EXECUTION_PROFILE_VERSION:

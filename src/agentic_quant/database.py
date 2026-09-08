@@ -1178,6 +1178,13 @@ strategy_adoptions = Table(
     ),
     Column("status", String(32), nullable=False, index=True),
     Column(
+        "admission_tier",
+        String(32),
+        nullable=False,
+        server_default="QUALIFIED",
+        index=True,
+    ),
+    Column(
         "validation_report_id",
         String(36),
         ForeignKey("validation_reports.validation_report_id"),

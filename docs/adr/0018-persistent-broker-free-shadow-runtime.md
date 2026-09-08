@@ -1,9 +1,10 @@
 # ADR 0018: Persistent broker-free shadow runtime
 
 - Status: accepted for Phase 6.
-- Decision: admit only deterministically gate-eligible, human-confirmed strategies to a
+- Decision: admit only deterministically tier-eligible, human-confirmed strategies to a
   persistent shadow runtime that reuses point-in-time features and portfolio cost semantics
-  while having no broker order path.
+  while having no broker order path. ADR 0036 adds an explicitly observation-only Candidate
+  tier while retaining the strict Qualified tier.
 
 ## Context
 
@@ -15,9 +16,11 @@ requiring a multi-year development dataset.
 ## Consequences
 
 - Strategy adoption checks the immutable validation report's exact static strategy ID,
-  timeframe, feature version, engine version, cost model, and
-  `eligible_for_human_review` gate before recording administrator approval. Selector reports
-  and research-only buy-and-hold benchmarks cannot authorize a shadow deployment.
+  timeframe, feature version, engine version, cost model, current policy/search identity, and
+  selected Candidate or Qualified gate before recording administrator approval. Selector
+  reports and research-only buy-and-hold benchmarks cannot authorize a shadow deployment.
+- Candidate Shadow remains broker-free and is never eligible for Paper. Qualified Shadow may
+  reach the separate one-session Paper review only when every Paper-specific gate also passes.
 - A deployment owns virtual cash/P&L, status, last processed bar, and an ordered virtual
   event journal. Unique deployment/bar/type and sequence constraints make replay observable
   and idempotent.

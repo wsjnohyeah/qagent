@@ -84,10 +84,14 @@ Deflated Sharpe, and a versioned research gate. The gate may only mark a result 
 human review; it never promotes a strategy automatically, and bounded synthetic evidence is
 expected to fail its minimum-sample requirements.
 
-`research_gate@0.2.0` separates candidate-selection evidence from exact frozen-strategy
+`research_gate@0.3.0` separates candidate-selection evidence from exact frozen-strategy
 evidence. PBO and minimum candidate breadth apply to an adaptive selector; they are explicitly
-N/A for one static spec, which must still pass fold, regime, positive-OOS, drawdown, and
-search-trial-adjusted Deflated Sharpe requirements.
+N/A for one static spec. Sparse strategies report total folds, active folds, no-trade folds,
+and OOS trades separately; only active folds enter the positive-fold stability ratio. Strict
+qualification still requires the configured coverage, activity, regime, drawdown, and
+search-trial-adjusted Deflated Sharpe thresholds. A separate human-reviewed Candidate Shadow
+tier may collect broker-free forward evidence after positive cost-adjusted OOS performance
+and bounded drawdown, but is never eligible for Alpaca Paper.
 
 Phase 5A adds fail-closed market-data checks, explicit half-spread fill cost, governed
 corporate-action/universe imports, and durable resumable backfill partitions. These are
@@ -490,6 +494,9 @@ The web application is organized around system objects rather than a fixed dashb
   the complete creation chain: point-in-time inputs, ML forecast/model, cited Research LLM
   comment, generator proposal, independent critique, exact spec, validation, replay trades,
   and forward shadow results. Raw IDs and hashes are collapsed under Advanced diagnostics.
+- Strategy validation cards distinguish calendar folds from active/no-trade folds and show
+  both Candidate and Qualified admission. Candidate Shadow is explicitly observation-only;
+  its durable admission tier is visible in Strategy and Shadow views and blocked from Paper.
 - **Shadow** explains the broker-free boundary and exposes candidate → risk → plan → fill
   lineage, virtual cash/P&L, alerts, reports, diagnostic ticks, and pause/retire controls.
 - **Pipelines, Models, Audit, and Steward code work** expose worker liveness, jobs, quality
@@ -507,7 +514,8 @@ See `runbooks/control_center.md`, `runbooks/shadow_runtime.md`, ADR 0017, and AD
 Coordinator operation is documented in `runbooks/autonomous_coordinator.md`; shared-account
 and environment-isolation decisions are recorded in ADR 0022; dynamic discovery is recorded
 in ADR 0028. Provider-observed history starts are governed by ADR 0029. Subject-aware validation and
-open-price execution review are recorded in ADR 0023. The independent review of
+open-price execution review are recorded in ADR 0023; tiered Shadow admission and horizon
+propagation are recorded in ADR 0036. The independent review of
 `3b3926e` and its current disposition are recorded in
 `docs/REVIEW_REMEDIATION_3B3926E_2026-09-06.md`.
 
