@@ -609,6 +609,16 @@ def test_strictly_rejected_strategy_can_enter_candidate_shadow_only(
 
     assert adoption["admission_tier"] == "CANDIDATE"
     assert deployment["admission_tier"] == "CANDIDATE"
+    result = asyncio.run(
+        shadow.tick(
+            trigger="candidate-contract-check",
+            new_exposure_paused=False,
+        )
+    )
+    assert result["status"] == "SUCCEEDED"
+    refreshed = shadow.deployment(str(deployment["shadow_deployment_id"]))
+    assert refreshed["status"] == "ACTIVE"
+    assert refreshed["contract_status"] == "CURRENT"
 
 
 def test_walk_forward_validation_respects_verified_history_start(

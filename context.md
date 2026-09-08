@@ -4269,6 +4269,29 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: deploy exact verified image, repeat SPCX collection, and verify the
   new boundary event and quality report before downstream research.
 
+### C074 — `Preserve Candidate Shadow admission tier at runtime`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-08 PDT.
+- User intent: make strategies that passed the deliberately lower, broker-free Candidate
+  Shadow gate participate in forward observation without weakening Paper or Qualified gates.
+- Scope: pass each persisted adoption's exact `admission_tier` back through the runtime
+  certificate check. Add a regression that adopts a strictly rejected but Candidate-eligible
+  strategy, starts it, runs the Shadow engine, and proves that its current certificate remains
+  active.
+- Architecture/decision impact: fixes an execution-path mismatch: preview and deployment
+  listing understood Candidate certificates, while the actual tick silently rechecked every
+  deployment as Qualified and quarantined it. The change does not alter validation thresholds,
+  create a Paper enrollment, or grant broker authority.
+- Validation: the focused Candidate Shadow runtime regression passes; full repository checks,
+  doctor, secret scan, CI, and production deployment evidence remain to be recorded.
+- Expected global state after commit: a current, explicitly adopted Candidate strategy can run
+  broker-free Shadow under the same deterministic risk and stale-contract checks as before;
+  a strategy that is not Candidate-eligible remains blocked.
+- Corrections/follow-ups: deploy the exact verified image, resume the 12 current 126-session
+  deployments quarantined by the defect, then confirm the next unseen bar—not historical
+  replay—is the first bar eligible for a new signal.
+
 ## Template for future commit entries
 
 Copy this section before making a commit:

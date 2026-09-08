@@ -1331,6 +1331,7 @@ class ShadowRuntime:
                 self.adoption_preview(
                     strategy_spec_id=str(deployment["strategy_spec_id"]),
                     validation_report_id=str(deployment["validation_report_id"]),
+                    admission_tier=str(deployment["admission_tier"]),
                     require_current_search_count=False,
                     require_current_universe_authority=False,
                 )
