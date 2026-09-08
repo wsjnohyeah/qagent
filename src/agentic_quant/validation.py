@@ -488,6 +488,7 @@ class WalkForwardValidator:
         initial_equity: Decimal = Decimal("100000"),
         cost_model: BacktestCostModel | None = None,
         strategy_spec: StrategySpec | None = None,
+        history_start: datetime | None = None,
     ) -> WalkForwardValidationReport:
         if strategy_spec is not None:
             if strategy_spec.timeframe != timeframe:
@@ -506,6 +507,13 @@ class WalkForwardValidator:
             timeframe=timeframe,
             as_of_end=as_of_end,
         )
+        if history_start is not None:
+            if history_start.tzinfo is None:
+                raise ValueError("Validation history start must be timezone-aware")
+            normalized_history_start = history_start.astimezone(UTC)
+            bars = tuple(
+                bar for bar in bars if bar.event_time >= normalized_history_start
+            )
         decision_indices = tuple(
             index
             for index in range(20, len(bars) - 1)
@@ -553,6 +561,7 @@ class WalkForwardValidator:
                 initial_equity=initial_equity,
                 cost_model=costs,
                 strategy_spec=strategy_spec,
+                history_start=history_start,
             )
             for name, result in train_results.items():
                 prior = validated_strategy_spec_ids.setdefault(
@@ -578,6 +587,7 @@ class WalkForwardValidator:
                 initial_equity=initial_equity,
                 cost_model=costs,
                 strategy_spec=strategy_spec,
+                history_start=history_start,
             )
             for name, result in test_results.items():
                 if validated_strategy_spec_ids[name] != result.strategy_spec.strategy_spec_id:
@@ -670,6 +680,7 @@ class WalkForwardValidator:
         initial_equity: Decimal,
         cost_model: BacktestCostModel,
         strategy_spec: StrategySpec | None = None,
+        history_start: datetime | None = None,
     ) -> dict[str, BacktestResult]:
         start, end = self._window_bounds(bars, indices)
         return {
@@ -689,6 +700,7 @@ class WalkForwardValidator:
                 code_git_sha=code_git_sha,
                 initial_equity=initial_equity,
                 cost_model=cost_model,
+                history_start=history_start,
             )
             for strategy_type in strategy_types
         }

@@ -11,7 +11,7 @@ until an exact strategy passes deterministic validation and receives the separat
 Shadow-start, and Paper-enrollment confirmations. Off-site backup/alerting and statistical/
 elapsed production evidence remain open
 
-Current documented baseline: C056 — `Record current production research rollout`
+Current documented baseline: C057 — `Carry research boundaries into validation folds`
 
 ## Purpose and authority
 
@@ -3708,6 +3708,38 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: the pre-deploy AOUT feedback-length failure and PLTR citation-set
   generation failure remain bounded retryable job records until their groups are revisited.
   Record their eventual outcomes and final News coverage in a later substantive commit.
+
+### C057 — `Carry research boundaries into validation folds`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-07 PDT.
+- User intent: continue the production research funnel until its true blockers are understood
+  and corrected, without bypassing exact validation to manufacture a Shadow order.
+- Scope:
+  - Reproduced the production NBIS `DataQualityError` after feature, ML, LLM, and generation
+    had correctly selected the evidenced 2024-10-21 post-suspension segment.
+  - Added an optional, timezone-checked research-history start to the walk-forward validator
+    and underlying backtester, and passed the coordinator's exact verified first bar into
+    every train/test replay.
+  - Added a regression with retained pre-boundary bars and a large excluded gap: validation
+    fails without the boundary, succeeds with it, and fingerprints only the verified segment.
+- Architecture/decision impact:
+  - This makes executable behavior match ADR 0032. Raw pre-boundary observations remain
+    immutable and visible, but no fold may accidentally reintroduce them when its backtester
+    reloads data from the store.
+  - Internal or trailing gaps inside the verified segment still fail closed. No statistical,
+    adoption, risk, Shadow, Paper, or broker gate is weakened.
+- Validation: the focused validation/reliable-workflow suite passes 35 tests. The full
+  release gate passes 181 tests, Flake8, strict mypy across 59 source files, authenticated
+  local and Compose doctors, the secret scan, image rebuild, and PostgreSQL schema-drift
+  detection. GitHub CI/image publication, immutable production rollout, and a successful
+  NBIS retry remain required.
+- Expected global state after commit: local source fixes the production-discovered boundary
+  propagation defect. Production remains on C055's functional image until this exact commit
+  passes every release and deployment gate; the coordinator continues unrelated work under
+  the existing global new-exposure pause.
+- Corrections/follow-ups: record the exact production retry and resulting deterministic NBIS
+  validation outcome after rollout.
 
 ## Template for future commit entries
 

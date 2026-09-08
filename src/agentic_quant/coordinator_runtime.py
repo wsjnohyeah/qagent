@@ -1201,6 +1201,7 @@ class ResearchCoordinatorHandler:
                 initial_equity=initial_equity,
                 cost_model=costs,
                 strategy_spec=spec,
+                history_start=bars[0].event_time,
             )
         except ValueError as exc:
             return {

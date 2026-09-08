@@ -172,7 +172,8 @@
   samples still fail closed.
 - A distinct post-suspension boundary requires at least 20 missing sessions after 20 explicit
   zero-volume placeholders and a positive-volume resumption. Only the strictly valid resumed
-  segment feeds feature construction and exact validation; ordinary internal gaps still fail.
+  segment feeds feature construction and every underlying exact-validation backtest; older
+  rows remain auditable, while ordinary internal gaps inside the selected segment still fail.
 - Later Research LLM calls receive a bounded, content-hashed, point-in-time outcome summary
   derived from backtests, validation reports, Shadow events, and Paper state already known at
   the cutoff. That summary selects decision-useful metrics and falls back to counts/latest

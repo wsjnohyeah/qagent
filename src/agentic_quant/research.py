@@ -386,11 +386,17 @@ class ResearchBacktester:
         code_git_sha: str,
         initial_equity: Decimal = Decimal("100000"),
         cost_model: BacktestCostModel | None = None,
+        history_start: datetime | None = None,
     ) -> BacktestResult:
         if as_of_start.tzinfo is None or as_of_end.tzinfo is None:
             raise ValueError("Backtest boundaries must be timezone-aware")
         if as_of_start >= as_of_end:
             raise ValueError("Backtest start must be before end")
+        if history_start is not None:
+            if history_start.tzinfo is None:
+                raise ValueError("Backtest history start must be timezone-aware")
+            if history_start >= as_of_end:
+                raise ValueError("Backtest history start must be before end")
         if initial_equity <= 0:
             raise ValueError("Initial equity must be positive")
         costs = cost_model or BacktestCostModel()
@@ -400,6 +406,11 @@ class ResearchBacktester:
             timeframe=spec.timeframe,
             as_of_end=as_of_end,
         )
+        if history_start is not None:
+            normalized_history_start = history_start.astimezone(UTC)
+            bars = tuple(
+                bar for bar in bars if bar.event_time >= normalized_history_start
+            )
         quality_report = self.data_quality.require_bars(
             bars,
             symbol=symbol,

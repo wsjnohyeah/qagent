@@ -24,8 +24,10 @@ post-suspension research boundary only when all of these deterministic condition
 The coordinator records the boundary as `market.history.boundary.observed.v1` with
 `PROVIDER_OBSERVED_POST_SUSPENSION_START`, the full probe window, and ingestion-run evidence.
 Feature materialization and exact strategy validation use only bars at or after the verified
-boundary. The record is operational provider evidence, not a legal assertion about listing,
-corporate identity, or corporate actions.
+boundary. Every train/test backtest receives that same history start; it must not reload and
+quality-check excluded pre-boundary rows merely because they remain in the audit store. The
+record is operational provider evidence, not a legal assertion about listing, corporate
+identity, or corporate actions.
 
 ## Consequences
 

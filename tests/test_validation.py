@@ -12,6 +12,7 @@ from sqlalchemy import insert, select
 from agentic_quant.api import create_app
 from agentic_quant.coordinator_runtime import ResearchCoordinatorHandler
 from agentic_quant.control_plane import SystemObjectStore
+from agentic_quant.data_quality import DataQualityError
 from agentic_quant.database import shadow_trade_plans, validation_reports
 from agentic_quant.domain import BacktestCostModel, StockBar
 from agentic_quant.ids import uuid7
@@ -365,6 +366,57 @@ def test_real_static_validation_can_reach_adoption_and_shadow_start(
     )
     assert adoption["status"] == "ADOPTED_FOR_SHADOW"
     assert deployment["status"] == "ACTIVE"
+
+
+def test_walk_forward_validation_respects_verified_history_start(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    market = MarketDataStore(ledger.engine)
+    store = ResearchStore(ledger.engine)
+    complete = _regime_bars(count=120)
+    retained = (*complete[:20], *complete[45:])
+    resumed = complete[45:]
+    market.insert_bars(retained, raw_object_id="TEST_RAW")
+    spec = default_strategy_spec(
+        "momentum",
+        timeframe="1Day",
+        code_sha256=research_code_sha256(),
+    )
+    validator = WalkForwardValidator(store, ledger)
+
+    with pytest.raises(DataQualityError, match="missing_intervals"):
+        validator.run(
+            symbol="AAPL",
+            timeframe="1Day",
+            as_of_start=resumed[20].available_from,
+            as_of_end=resumed[-1].available_from,
+            code_git_sha="test-git-sha",
+            strategy_spec=spec,
+            train_bars=22,
+            test_bars=5,
+            step_bars=5,
+            embargo_bars=1,
+        )
+
+    report = validator.run(
+        symbol="AAPL",
+        timeframe="1Day",
+        as_of_start=resumed[20].available_from,
+        as_of_end=resumed[-1].available_from,
+        code_git_sha="test-git-sha",
+        strategy_spec=spec,
+        train_bars=22,
+        test_bars=5,
+        step_bars=5,
+        embargo_bars=1,
+        history_start=resumed[0].event_time,
+    )
+
+    assert report.robustness_metrics["validation_input"]["bar_count"] == len(
+        resumed
+    )
 
 
 def test_validation_cache_and_adoption_require_current_gate_assessment(
