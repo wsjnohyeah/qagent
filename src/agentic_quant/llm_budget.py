@@ -195,6 +195,17 @@ class LLMBudgetManager:
             policy=effective_policy,
         )
         with self.engine.begin() as connection:
+            for window_key, scope, period_kind, period_start, limit in windows:
+                self._ensure_current_window(
+                    connection,
+                    window_key=window_key,
+                    scope=scope,
+                    period_kind=period_kind,
+                    period_start=period_start,
+                    limit=limit,
+                    policy_version=effective_policy.version,
+                    now=timestamp,
+                )
             connection.execute(
                 insert(llm_budget_reservations).values(
                     invocation_id=invocation_id,
@@ -214,38 +225,6 @@ class LLMBudgetManager:
                 )
             )
             for window_key, scope, period_kind, period_start, limit in windows:
-                connection.execute(
-                    self._insert_ignore(llm_budget_windows).values(
-                        window_key=window_key,
-                        policy_version=effective_policy.version,
-                        scope=scope,
-                        period_kind=period_kind,
-                        period_start=period_start,
-                        # Token totals remain diagnostic telemetry. Zero means
-                        # there is intentionally no operator token ceiling.
-                        token_limit=0,
-                        cost_limit_microusd=self._usd_to_microusd(
-                            limit.max_estimated_cost_usd
-                        ),
-                        reserved_tokens=0,
-                        consumed_tokens=0,
-                        reserved_cost_microusd=0,
-                        consumed_cost_microusd=0,
-                        updated_at=timestamp,
-                    )
-                )
-                connection.execute(
-                    update(llm_budget_windows)
-                    .where(llm_budget_windows.c.window_key == window_key)
-                    .values(
-                        policy_version=effective_policy.version,
-                        token_limit=0,
-                        cost_limit_microusd=self._usd_to_microusd(
-                            limit.max_estimated_cost_usd
-                        ),
-                        updated_at=timestamp,
-                    )
-                )
                 result = connection.execute(
                     update(llm_budget_windows)
                     .where(
@@ -370,14 +349,37 @@ class LLMBudgetManager:
             )
 
     def summary(self) -> dict[str, Any]:
-        self.release_expired()
+        timestamp = datetime.now(UTC)
+        self.release_expired(now=timestamp)
         revision = self.latest_revision()
         effective_policy = self._effective_policy(revision=revision)
+        current_windows = self._all_current_window_specs(
+            now=timestamp,
+            policy=effective_policy,
+        )
+        with self.engine.begin() as connection:
+            for window_key, scope, period_kind, period_start, limit in current_windows:
+                self._ensure_current_window(
+                    connection,
+                    window_key=window_key,
+                    scope=scope,
+                    period_kind=period_kind,
+                    period_start=period_start,
+                    limit=limit,
+                    policy_version=effective_policy.version,
+                    now=timestamp,
+                )
         with self.engine.connect() as connection:
             windows = [
                 dict(row._mapping)
                 for row in connection.execute(
-                    select(llm_budget_windows).order_by(
+                    select(llm_budget_windows)
+                    .where(
+                        llm_budget_windows.c.window_key.in_(
+                            tuple(item[0] for item in current_windows)
+                        )
+                    )
+                    .order_by(
                         llm_budget_windows.c.period_start.desc(),
                         llm_budget_windows.c.scope.asc(),
                     )
@@ -621,6 +623,134 @@ class LLMBudgetManager:
             )
             for scope, kind, start, limit in definitions
         )
+
+    def _all_current_window_specs(
+        self,
+        *,
+        now: datetime,
+        policy: LLMBudgetPolicy,
+    ) -> tuple[tuple[str, str, str, datetime, LLMBudgetLimit], ...]:
+        values: dict[str, tuple[str, str, str, datetime, LLMBudgetLimit]] = {}
+        for provider in LLMProviderName:
+            for workload in LLMWorkload:
+                for item in self._window_specs(
+                    provider=provider,
+                    workload=workload,
+                    now=now,
+                    policy=policy,
+                ):
+                    values[item[0]] = item
+        return tuple(values[key] for key in sorted(values))
+
+    def _ensure_current_window(
+        self,
+        connection: Any,
+        *,
+        window_key: str,
+        scope: str,
+        period_kind: str,
+        period_start: datetime,
+        limit: LLMBudgetLimit,
+        policy_version: str,
+        now: datetime,
+    ) -> None:
+        connection.execute(
+            self._insert_ignore(llm_budget_windows).values(
+                window_key=window_key,
+                policy_version=policy_version,
+                scope=scope,
+                period_kind=period_kind,
+                period_start=period_start,
+                # Token totals remain diagnostic telemetry. Zero means
+                # there is intentionally no operator token ceiling.
+                token_limit=0,
+                cost_limit_microusd=self._usd_to_microusd(
+                    limit.max_estimated_cost_usd
+                ),
+                reserved_tokens=0,
+                consumed_tokens=0,
+                reserved_cost_microusd=0,
+                consumed_cost_microusd=0,
+                updated_at=now,
+            )
+        )
+        # Lock the current-policy row before rebuilding its counters from the
+        # reservation ledger. This carries same-period spend across policy-version
+        # changes and prevents a config deployment from resetting today's budget.
+        connection.execute(
+            select(llm_budget_windows.c.window_key)
+            .where(llm_budget_windows.c.window_key == window_key)
+            .with_for_update()
+        ).one()
+        usage = self._reservation_usage(
+            connection,
+            scope=scope,
+            period_kind=period_kind,
+            period_start=period_start,
+        )
+        connection.execute(
+            update(llm_budget_windows)
+            .where(llm_budget_windows.c.window_key == window_key)
+            .values(
+                policy_version=policy_version,
+                token_limit=0,
+                cost_limit_microusd=self._usd_to_microusd(
+                    limit.max_estimated_cost_usd
+                ),
+                reserved_tokens=usage[0],
+                consumed_tokens=usage[1],
+                reserved_cost_microusd=usage[2],
+                consumed_cost_microusd=usage[3],
+                updated_at=now,
+            )
+        )
+
+    @staticmethod
+    def _reservation_usage(
+        connection: Any,
+        *,
+        scope: str,
+        period_kind: str,
+        period_start: datetime,
+    ) -> tuple[int, int, int, int]:
+        if period_kind == "daily":
+            period_end = period_start + timedelta(days=1)
+        elif period_kind == "monthly":
+            period_end = (
+                period_start.replace(year=period_start.year + 1, month=1)
+                if period_start.month == 12
+                else period_start.replace(month=period_start.month + 1)
+            )
+        else:
+            raise ValueError("Unsupported LLM budget period")
+        statement = select(llm_budget_reservations).where(
+            llm_budget_reservations.c.created_at >= period_start,
+            llm_budget_reservations.c.created_at < period_end,
+        )
+        if scope.startswith("provider:"):
+            statement = statement.where(
+                llm_budget_reservations.c.provider == scope.split(":", 1)[1]
+            )
+        elif scope.startswith("workload:"):
+            statement = statement.where(
+                llm_budget_reservations.c.workload == scope.split(":", 1)[1]
+            )
+        elif scope != "project":
+            raise ValueError("Unsupported LLM budget scope")
+        reserved_tokens = consumed_tokens = 0
+        reserved_cost = consumed_cost = 0
+        for row in connection.execute(statement):
+            if str(row.status) == "RESERVED":
+                reserved_tokens += int(row.reserved_input_tokens) + int(
+                    row.reserved_output_tokens
+                )
+                reserved_cost += int(row.reserved_cost_microusd)
+            elif str(row.status) == "SETTLED":
+                consumed_tokens += int(row.actual_input_tokens or 0) + int(
+                    row.actual_output_tokens or 0
+                )
+                consumed_cost += int(row.actual_cost_microusd or 0)
+        return reserved_tokens, consumed_tokens, reserved_cost, consumed_cost
 
     def _effective_policy(
         self,

@@ -21,8 +21,9 @@ then left no safe way to collect genuinely forward evidence.
 - Every coordinator stage reapplies the immutable job's `horizon_bars`; legacy jobs without
   that field are explicitly treated as one-session jobs. ML labels, forecasts, LLM context,
   generated holding period, validation windows, and Shadow execution remain horizon-bound.
-- `research_gate@0.3.0` records calendar folds, active folds, zero-trade folds, and OOS trade
-  count separately. Its stability ratio is the fraction of profitable *active* OOS folds;
+- `research_gate@0.3.0` introduced separate calendar, active, and zero-trade fold accounting;
+  ADR 0037's `research_gate@0.4.0` adds horizon-aware Candidate activity minima. OOS trade
+  count remains explicit. Its stability ratio is the fraction of profitable *active* OOS folds;
   inactivity is visible but is no longer misclassified as a loss. Strict qualification still
   requires minimum total folds, active folds, trades, regimes, Deflated Sharpe, drawdown, and
   applicable selection-risk evidence.

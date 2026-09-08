@@ -16,6 +16,12 @@
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled; new exposure is paused. Live money remains
   structurally disabled.
+- The current local remediation candidate adds `research_gate@0.4.0`, horizon-specific
+  Candidate Shadow activity minima, horizon-specific research-trial accounting, budget-
+  independent revalidation of accepted specs, scanner-pool authorization at Shadow start,
+  a stricter Research LLM output prompt, and `llm_budget@0.2.0` with a `$40` critical/daily
+  ceiling that preserves same-day spend across policy versions. It is not production state
+  until its exact commit passes CI and guarded deployment.
 - Local-lite uses Python 3.12, a project-local `uv`, SQLite, and filesystem object storage.
 - The Control API, single-admin object-centric web console, persistent System Steward,
   append-only event ledger, deterministic risk engine, and shadow runtime exist.
@@ -160,7 +166,9 @@
   Incomplete current or backlog cycles are rechecked every minute, so an expired worker lease
   is reclaimed promptly instead of waiting for the next hourly scan cadence.
   Validation reuse is bound to the exact execution/data contracts, current promotion policy,
-  and current research-search count. ML reuse is bound to dataset plus full training contract.
+  and current horizon-specific research-search count. When a new paid generation stage is
+  unavailable, validation rotates through accepted immutable specs for the same horizon. ML
+  reuse is bound to dataset plus full training contract.
   Exhausted jobs do not starve later groups and require one confirmation-gated retry. Every
   stage honors its persisted subsystem pause control.
   Every stage now reapplies the immutable job's `horizon_bars`; the earlier runtime omission
@@ -245,9 +253,9 @@
   first exact validations were all `REJECTED` by the former strict gate. A later audit found
   that roughly 73% of recorded OOS folds had no trade and were incorrectly included in the
   old positive-fold denominator; several strategies had actual trade win rates above 50%.
-  `research_gate@0.3.0` now separates total/active/no-trade folds and OOS trade count, while
-  Candidate Shadow retains positive, sufficiently active exact specs for broker-free forward
-  observation. No production adoption, Shadow deployment, Paper enrollment, position, or
+  `research_gate@0.4.0` separates total/active/no-trade folds and OOS trade count, scales
+  Candidate activity minima to the holding horizon, and retains positive exact specs for
+  broker-free forward observation. No production adoption, Shadow deployment, Paper enrollment, position, or
   order has yet been created; new exposure remains paused pending rollout and review.
 - The production NBIS retry established an evidenced post-suspension boundary at `2024-10-21`.
   Its 470-bar resumed segment passed strict quality with zero missing intervals; the older raw
@@ -327,7 +335,8 @@
 1. Replace the temporary `sslip.io` hostname with the operator's permanent domain, select an
    off-site backup target and external alert destination, then automate both retention and
    notification checks.
-2. Let new horizon-correct cycles revalidate exact strategies under `research_gate@0.3.0`,
+2. Deploy the reviewed `research_gate@0.4.0` correction, then let horizon-correct cycles
+   revalidate both new and previously accepted exact strategies,
    and review any Candidate/Qualified Shadow eligibility without
    manufacturing a pass. Candidate deployments may gather broker-free forward evidence;
    only a Qualified one-session deployment may be separately enrolled in Paper.
@@ -418,3 +427,6 @@
   horizons; keep multi-session Paper fail-closed pending a separate broker lifecycle.
 - ADR 0036: preserve the planned horizon through every coordinator stage, use active folds for
   sparse-strategy stability, and split broker-free Candidate Shadow from Qualified/Paper.
+- ADR 0037: use horizon-aware Candidate activity/search accounting, revalidate accepted specs
+  when new paid generation is unavailable, freeze approved search counts for running Shadow,
+  and carry LLM spend across budget-policy versions.

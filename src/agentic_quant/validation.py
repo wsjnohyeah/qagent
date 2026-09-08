@@ -40,6 +40,7 @@ from agentic_quant.risk import (
     RiskPolicy,
     deployable_execution_profile_parameters,
     strategy_execution_profile,
+    strategy_holding_period_sessions,
 )
 
 
@@ -131,6 +132,12 @@ def validation_input_fingerprint(
     }
 
 
+class CandidateShadowThresholds(FrozenModel):
+    minimum_oos_folds: int = Field(ge=1)
+    minimum_active_oos_folds: int = Field(ge=1)
+    minimum_oos_trades: int = Field(ge=1)
+
+
 class PromotionGatePolicy(FrozenModel):
     version: str = Field(pattern=r"^research_gate@[0-9]+\.[0-9]+\.[0-9]+$")
     minimum_oos_folds: int = Field(ge=4)
@@ -147,6 +154,9 @@ class PromotionGatePolicy(FrozenModel):
     candidate_shadow_minimum_oos_trades: int = Field(ge=1)
     candidate_shadow_minimum_compounded_oos_return: Decimal = Field(ge=-1)
     candidate_shadow_maximum_allowed_drawdown: Decimal = Field(le=0)
+    candidate_shadow_horizon_thresholds: dict[int, CandidateShadowThresholds] = (
+        Field(default_factory=dict)
+    )
 
     @model_validator(mode="after")
     def thresholds_are_conservative(self) -> Self:
@@ -156,11 +166,38 @@ class PromotionGatePolicy(FrozenModel):
             raise ValueError(
                 "candidate_shadow_maximum_allowed_drawdown cannot be below -1"
             )
+        unknown_horizons = set(self.candidate_shadow_horizon_thresholds) - {
+            1,
+            5,
+            20,
+            63,
+            126,
+            252,
+        }
+        if unknown_horizons:
+            raise ValueError(
+                "candidate_shadow_horizon_thresholds contains unsupported horizons"
+            )
         return self
+
+    def candidate_thresholds_for(
+        self,
+        holding_period_sessions: int,
+    ) -> CandidateShadowThresholds:
+        return self.candidate_shadow_horizon_thresholds.get(
+            holding_period_sessions,
+            CandidateShadowThresholds(
+                minimum_oos_folds=self.candidate_shadow_minimum_oos_folds,
+                minimum_active_oos_folds=(
+                    self.candidate_shadow_minimum_active_oos_folds
+                ),
+                minimum_oos_trades=self.candidate_shadow_minimum_oos_trades,
+            ),
+        )
 
 
 DEFAULT_PROMOTION_GATE_POLICY = PromotionGatePolicy(
-    version="research_gate@0.3.0",
+    version="research_gate@0.4.0",
     minimum_oos_folds=12,
     minimum_active_oos_folds=8,
     minimum_oos_trades=30,
@@ -175,6 +212,38 @@ DEFAULT_PROMOTION_GATE_POLICY = PromotionGatePolicy(
     candidate_shadow_minimum_oos_trades=10,
     candidate_shadow_minimum_compounded_oos_return=Decimal("0"),
     candidate_shadow_maximum_allowed_drawdown=Decimal("-0.20"),
+    candidate_shadow_horizon_thresholds={
+        1: CandidateShadowThresholds(
+            minimum_oos_folds=6,
+            minimum_active_oos_folds=3,
+            minimum_oos_trades=10,
+        ),
+        5: CandidateShadowThresholds(
+            minimum_oos_folds=6,
+            minimum_active_oos_folds=3,
+            minimum_oos_trades=8,
+        ),
+        20: CandidateShadowThresholds(
+            minimum_oos_folds=5,
+            minimum_active_oos_folds=3,
+            minimum_oos_trades=5,
+        ),
+        63: CandidateShadowThresholds(
+            minimum_oos_folds=4,
+            minimum_active_oos_folds=2,
+            minimum_oos_trades=3,
+        ),
+        126: CandidateShadowThresholds(
+            minimum_oos_folds=2,
+            minimum_active_oos_folds=1,
+            minimum_oos_trades=2,
+        ),
+        252: CandidateShadowThresholds(
+            minimum_oos_folds=1,
+            minimum_active_oos_folds=1,
+            minimum_oos_trades=1,
+        ),
+    },
 )
 
 
@@ -392,6 +461,7 @@ def assess_research_gate(
     deflated_sharpe_probability: Decimal,
     pbo_applicable: bool = True,
     validation_subject: str = "adaptive_selector",
+    holding_period_sessions: int = 1,
 ) -> dict[str, Any]:
     if validation_subject not in {"static_strategy", "adaptive_selector"}:
         raise ValueError("Unsupported validation subject")
@@ -448,25 +518,28 @@ def assess_research_gate(
         status = "ELIGIBLE_FOR_HUMAN_REVIEW"
     candidate_evidence_shortfalls: list[str] = []
     candidate_threshold_failures: list[str] = []
+    candidate_thresholds = policy.candidate_thresholds_for(
+        holding_period_sessions
+    )
     if not static_strategy:
         candidate_evidence_shortfalls.append(
             "candidate Shadow requires an exact static strategy validation"
         )
-    if fold_count < policy.candidate_shadow_minimum_oos_folds:
+    if fold_count < candidate_thresholds.minimum_oos_folds:
         candidate_evidence_shortfalls.append(
             "oos_folds "
-            f"{fold_count} < {policy.candidate_shadow_minimum_oos_folds}"
+            f"{fold_count} < {candidate_thresholds.minimum_oos_folds}"
         )
-    if active_fold_count < policy.candidate_shadow_minimum_active_oos_folds:
+    if active_fold_count < candidate_thresholds.minimum_active_oos_folds:
         candidate_evidence_shortfalls.append(
             "active_oos_folds "
             f"{active_fold_count} < "
-            f"{policy.candidate_shadow_minimum_active_oos_folds}"
+            f"{candidate_thresholds.minimum_active_oos_folds}"
         )
-    if oos_trade_count < policy.candidate_shadow_minimum_oos_trades:
+    if oos_trade_count < candidate_thresholds.minimum_oos_trades:
         candidate_evidence_shortfalls.append(
             "oos_trades "
-            f"{oos_trade_count} < {policy.candidate_shadow_minimum_oos_trades}"
+            f"{oos_trade_count} < {candidate_thresholds.minimum_oos_trades}"
         )
     if compounded_oos_return <= policy.candidate_shadow_minimum_compounded_oos_return:
         candidate_threshold_failures.append(
@@ -493,6 +566,8 @@ def assess_research_gate(
         "evidence_shortfalls": evidence_shortfalls,
         "threshold_failures": threshold_failures,
         "candidate_shadow": {
+            "holding_period_sessions": holding_period_sessions,
+            "activity_thresholds": candidate_thresholds.model_dump(mode="json"),
             "status": candidate_status,
             "eligible_for_human_review": (
                 candidate_status == "ELIGIBLE_FOR_CANDIDATE_SHADOW_REVIEW"
@@ -751,6 +826,13 @@ class WalkForwardValidator:
             trial_count=self.store.strategy_trial_count(
                 symbol=symbol,
                 timeframe=timeframe,
+                holding_period_sessions=(
+                    strategy_holding_period_sessions(
+                        strategy_spec.data_requirements
+                    )
+                    if strategy_spec is not None
+                    else None
+                ),
             ),
             validation_input=validation_input,
             code_git_sha=code_git_sha,
@@ -975,6 +1057,11 @@ class WalkForwardValidator:
             ),
             pbo_applicable=not bool(pbo_metrics.get("not_applicable", False)),
             validation_subject=validation_subject,
+            holding_period_sessions=(
+                strategy_holding_period_sessions(strategy_spec.data_requirements)
+                if strategy_spec is not None
+                else 1
+            ),
         )
         report_material = {
             "symbol": symbol.upper(),

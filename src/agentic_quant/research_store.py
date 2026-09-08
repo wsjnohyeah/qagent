@@ -20,6 +20,7 @@ from agentic_quant.database import (
     feature_parity_checks,
     feature_snapshots,
     market_bars,
+    ml_forecasts,
     strategy_specs,
     strategy_generation_attempts,
     validation_folds,
@@ -596,40 +597,148 @@ class ResearchStore:
                 ],
             )
 
-    def strategy_trial_count(self, *, symbol: str, timeframe: str) -> int:
+    def strategy_trial_count(
+        self,
+        *,
+        symbol: str,
+        timeframe: str,
+        holding_period_sessions: int | None = None,
+    ) -> int:
         """Count explored specs and rejected/failed hybrid attempts for this contract.
 
-        This is deliberately conservative until first-class research campaigns are
-        introduced: every search against the same symbol/timeframe contributes to
-        selection-bias correction, while an accepted hybrid attempt is not counted
-        twice merely because its compiled spec was subsequently backtested.
+        Trials are counted within one symbol/timeframe/holding-horizon research
+        family. Pooling one-day and annual hypotheses into the same correction made
+        long-horizon evidence progressively impossible even though those hypotheses
+        answer different questions. An accepted hybrid attempt is not counted twice
+        merely because its compiled spec was subsequently backtested.
         """
         with self.engine.connect() as connection:
             generated_ids = select(
                 strategy_generation_attempts.c.strategy_spec_id
             ).where(strategy_generation_attempts.c.strategy_spec_id.is_not(None))
-            non_generated_specs = int(
-                connection.execute(
-                    select(func.count(func.distinct(experiment_runs.c.strategy_spec_id)))
-                    .where(experiment_runs.c.symbol == symbol.upper())
-                    .where(experiment_runs.c.timeframe == timeframe)
-                    .where(experiment_runs.c.strategy_spec_id.not_in(generated_ids))
-                ).scalar_one()
-            )
-            hybrid_attempts = int(
-                connection.execute(
-                    select(func.count())
-                    .select_from(strategy_generation_attempts)
-                    .join(
-                        feature_snapshots,
-                        feature_snapshots.c.feature_snapshot_id
-                        == strategy_generation_attempts.c.feature_snapshot_id,
+            baseline_rows = connection.execute(
+                select(
+                    strategy_specs.c.strategy_spec_id,
+                    strategy_specs.c.data_requirements_json,
+                )
+                .join(
+                    experiment_runs,
+                    experiment_runs.c.strategy_spec_id
+                    == strategy_specs.c.strategy_spec_id,
+                )
+                .where(experiment_runs.c.symbol == symbol.upper())
+                .where(experiment_runs.c.timeframe == timeframe)
+                .where(experiment_runs.c.strategy_spec_id.not_in(generated_ids))
+                .distinct()
+            ).all()
+            non_generated_specs = sum(
+                1
+                for row in baseline_rows
+                if holding_period_sessions is None
+                or int(
+                    dict(row.data_requirements_json or {}).get(
+                        "holding_period_sessions",
+                        1,
                     )
-                    .where(feature_snapshots.c.symbol == symbol.upper())
-                    .where(feature_snapshots.c.timeframe == timeframe)
-                ).scalar_one()
+                )
+                == holding_period_sessions
+            )
+            hybrid_statement = (
+                select(
+                    strategy_generation_attempts.c.generation_attempt_id,
+                    ml_forecasts.c.horizon,
+                    strategy_specs.c.data_requirements_json,
+                )
+                .select_from(strategy_generation_attempts)
+                .join(
+                    feature_snapshots,
+                    feature_snapshots.c.feature_snapshot_id
+                    == strategy_generation_attempts.c.feature_snapshot_id,
+                )
+                .outerjoin(
+                    ml_forecasts,
+                    ml_forecasts.c.forecast_id
+                    == strategy_generation_attempts.c.forecast_id,
+                )
+                .outerjoin(
+                    strategy_specs,
+                    strategy_specs.c.strategy_spec_id
+                    == strategy_generation_attempts.c.strategy_spec_id,
+                )
+                .where(feature_snapshots.c.symbol == symbol.upper())
+                .where(feature_snapshots.c.timeframe == timeframe)
+            )
+            hybrid_rows = connection.execute(hybrid_statement).all()
+            hybrid_attempts = sum(
+                1
+                for row in hybrid_rows
+                if holding_period_sessions is None
+                or self._attempt_holding_period(row) == holding_period_sessions
             )
         return max(1, non_generated_specs + hybrid_attempts)
+
+    @staticmethod
+    def _attempt_holding_period(row: Any) -> int | None:
+        if row.horizon:
+            try:
+                return int(str(row.horizon).split()[0])
+            except (TypeError, ValueError, IndexError):
+                return None
+        requirements = dict(row.data_requirements_json or {})
+        if requirements:
+            return int(requirements.get("holding_period_sessions", 1))
+        return None
+
+    def generated_strategy_specs(
+        self,
+        *,
+        symbol: str,
+        timeframe: str,
+        holding_period_sessions: int,
+        feature_set_version: str,
+    ) -> tuple[StrategySpec, ...]:
+        """Return accepted hybrid specs eligible for deterministic revalidation.
+
+        A paid LLM stage is not required on every coordinator cycle. Previously
+        accepted immutable specs remain legitimate research hypotheses and should
+        be re-tested against new data/policy instead of becoming unreachable when
+        a later call is budget-blocked.
+        """
+        statement = (
+            select(strategy_specs, strategy_generation_attempts.c.created_at)
+            .join(
+                strategy_generation_attempts,
+                strategy_generation_attempts.c.strategy_spec_id
+                == strategy_specs.c.strategy_spec_id,
+            )
+            .join(
+                feature_snapshots,
+                feature_snapshots.c.feature_snapshot_id
+                == strategy_generation_attempts.c.feature_snapshot_id,
+            )
+            .where(feature_snapshots.c.symbol == symbol.upper())
+            .where(feature_snapshots.c.timeframe == timeframe)
+            .where(strategy_specs.c.timeframe == timeframe)
+            .where(strategy_specs.c.feature_set_version == feature_set_version)
+            .where(strategy_generation_attempts.c.status == "ACCEPT")
+            .order_by(strategy_generation_attempts.c.created_at.desc())
+        )
+        selected: list[StrategySpec] = []
+        seen: set[str] = set()
+        with self.engine.connect() as connection:
+            rows = connection.execute(statement).all()
+        for row in rows:
+            item = dict(row._mapping)
+            spec = self._strategy_spec_from_row(item)
+            if spec.strategy_spec_id in seen:
+                continue
+            if int(spec.data_requirements.get("holding_period_sessions", 1)) != (
+                holding_period_sessions
+            ):
+                continue
+            seen.add(spec.strategy_spec_id)
+            selected.append(spec)
+        return tuple(selected)
 
     def recent_experiments(self, *, limit: int = 50) -> list[dict[str, Any]]:
         statement = (

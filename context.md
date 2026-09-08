@@ -69,10 +69,12 @@ A Git commit cannot contain its own content-derived hash without changing that h
   both in and out of sample, with selection degradation, below-median selection rate, and
   realized-regime summaries retained rather than reporting only the winner.
 - Phase 3D adds combinatorial selection-risk/PBO diagnostics and Deflated Sharpe to every
-  report. `research_gate@0.3.0` distinguishes calendar folds, active folds, no-trade folds,
+  report. `research_gate@0.4.0` distinguishes calendar folds, active folds, no-trade folds,
   and OOS trades; no-trade windows no longer masquerade as losing windows in the stability
-  ratio. A strict Qualified gate and a lower-authority Candidate Shadow gate can only mark
-  exact static results eligible for later human review; neither promotes automatically.
+  ratio. Candidate activity requirements scale with the 1/5/20/63/126/252-session horizon,
+  while profitability after costs and drawdown limits remain mandatory. A strict Qualified
+  gate and a lower-authority Candidate Shadow gate can only mark exact static results eligible
+  for later human review; neither promotes automatically.
 - Phase 5A adds persisted fail-closed market-data audits, configured half-spread fill costs,
   governed point-in-time reference imports, and idempotent resumable backfill partitions.
 - A front-loaded Phase 4B gateway and local Control Center now present one audited contract over OpenAI GPT-5.6 Sol
@@ -138,9 +140,13 @@ A Git commit cannot contain its own content-derived hash without changing that h
   market open, and reward/risk plus quantity are recalculated from that open. Missed or late
   bars are recorded/cancelled and never fabricated as forward fills. Forward Shadow accepts
   daily-bar strategies with finite approved holding horizons; it still rejects non-`1Day`
-  strategies at adoption.
+  strategies at adoption. Manual Trading Universe membership or an exact current scanner-
+  pool scan/revision may authorize the symbol at adoption/start; both paths still require the
+  same exact validation and two human confirmations.
   Active deployments recheck their exact contract before every tick and move to
-  `REVALIDATION_REQUIRED` after an engine/config mismatch. Every strategy/symbol deployment is
+  `REVALIDATION_REQUIRED` after an engine/config mismatch. The approved research-search count
+  is frozen at adoption, so later unrelated experiments do not interrupt an otherwise current
+  deployment. Every strategy/symbol deployment is
   now an attribution sleeve under one
   `SHARED_MASTER` virtual account; open plans atomically reserve shared cash and concurrent
   risk and settle P&L once. Multi-session position state, marks, stop/target checks, timed exits,
@@ -312,7 +318,7 @@ Development service ports bind only to loopback. The local Compose credentials a
 - `make check`: passed.
 - Flake8: passed.
 - Strict mypy: passed for 59 source files.
-- Pytest: 192 passed for the C061 remediation candidate.
+- Pytest: 195 passed for the C063 remediation candidate.
 - `make doctor`: passed against the local-lite SQLite profile.
 - `make docker-doctor`: passed against the PostgreSQL-backed Compose profile.
 - PostgreSQL query: passed; the first container replay stored six lineage events.
@@ -681,7 +687,8 @@ only training metrics, while every test result is retained for rank and selectio
 analysis. Realized test returns define transparent up/down/sideways report buckets; they do
 not feed the strategy. Phase 3D resamples selection across the already embargoed,
 non-overlapping OOS folds, records PBO and Deflated Sharpe diagnostics, and applies the
-versioned `research_gate@0.3.0` policy. The gate is advisory eligibility only and cannot
+versioned `research_gate@0.4.0` policy. Search trials are counted within one
+symbol/timeframe/holding-horizon family. The gate is advisory eligibility only and cannot
 promote a candidate; Candidate Shadow is a separate broker-free observation tier.
 
 The front-loaded Phase 4A gateway gives OpenAI and Meta one internal Responses-style
@@ -704,8 +711,10 @@ with the exact feature snapshot and later ML forecast, and treats retrieved text
 data. `research_analysis@0.2.0` accepts only research recommendations; each factual claim
 must reproduce an exact quote from each cited bundle item. Malformed, invented, or
 contradictory support is retained as rejected output, and missing independent evidence causes
-a zero-cost abstention. `llm_budget@0.1.0` atomically reserves conservative estimated-USD
-capacity across project/provider/workload windows. Token counts are diagnostics, never an
+a zero-cost abstention. `llm_budget@0.2.0` atomically reserves conservative estimated-USD
+capacity across project/provider/workload windows. Its daily project, OpenAI, and critical-
+research ceilings are `$40`; policy-version changes reconstruct current-period consumption
+from the durable reservation ledger instead of resetting it. Token counts are diagnostics, never an
 operator limit. Confirmed Control Center revisions can replace the complete workload dollar-
 limit map without resetting current-period spend or exceeding the YAML project cap.
 
@@ -744,7 +753,8 @@ The Phase 6 shadow runtime reads already-ingested normalized bars, builds the sa
 time feature snapshots, applies immutable strategy parameters, and persists candidate → risk
 decision → approved plan → virtual order/fill state with modeled costs. Admission requires a
 static validation certificate bound to the exact strategy ID, feature version, engine, cost
-model, timeframe, current policy/search identity, and the selected tier's eligibility, plus
+model, timeframe, current policy and horizon-specific search identity, and the selected tier's
+eligibility, plus
 confirmed human adoption. Candidate Shadow is labeled observation-only and can gather forward
 evidence without claiming strict qualification; Qualified Shadow passed the full statistical
 gate. Candidate deployments are hard-blocked from Paper. The future execution bar's completed
@@ -3967,6 +3977,65 @@ lifecycle. No Paper order was used as a build or deployment test.
   paused.
 - Corrections/follow-ups: inspect the first completed horizon-63 training/spec/report records;
   then review, but do not auto-adopt, any exact candidate eligibility surfaced by the system.
+
+### D049 — Separate weak alpha from workflow suppression
+
+- Date: 2026-09-08 PDT.
+- Production model evidence is presently weak: aggregate holdout ROC AUC by horizon is roughly
+  0.47–0.50, near random ranking, and only a few runs pass the independent ML quality gate.
+  Do not lower that gate or the strict Qualified/Paper gate to manufacture a strategy.
+- Candidate Shadow is the controlled place to learn from promising but statistically
+  unqualified exact strategies. Its activity minima must reflect the number of independent
+  validation windows available at each holding horizon, while positive modeled net return and
+  bounded drawdown remain mandatory.
+- Search-trial correction belongs to one symbol/timeframe/holding-horizon research family.
+  Mixing one-day and annual hypotheses over-penalizes unrelated long-horizon work.
+- A valid paid hypothesis remains useful after its creation. Budget exhaustion on a later cycle
+  must not prevent deterministic revalidation against new data and policy.
+- Human adoption freezes the reviewed search-count certificate. Later research does not make
+  an active deployment stale; risk, cost, feature, restriction, engine, execution-profile, and
+  promotion-policy changes still do.
+- Formal record: ADR 0037 and
+  `docs/PRODUCTION_RESEARCH_CORRECTNESS_REVIEW_2026-09-08.md`.
+
+### C063 — `Repair production strategy admission funnel`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-08 PDT.
+- User intent: review selection, production backfill, multi-horizon ML + LLM strategy
+  construction, admission strictness, and post-open Shadow readiness; fix genuine correctness
+  problems and raise today's critical GPT budget ceiling to `$40`.
+- Scope:
+  - Added horizon-aware Candidate Shadow activity minima under `research_gate@0.4.0`; strict
+    qualification, positive net return, drawdown, human adoption, and Paper gates remain.
+  - Scoped search-trial correction to symbol/timeframe/holding horizon instead of pooling
+    unrelated 1/5/20/63/126/252-session hypotheses.
+  - Made validation rotate through previously accepted same-horizon specs when a current paid
+    LLM/generation step is unavailable, allowing current-policy revalidation without paying to
+    recreate an immutable hypothesis.
+  - Froze an administrator-approved validation's search count for subsequent Shadow operation,
+    while retaining contract/policy/risk staleness checks.
+  - Closed the scanner funnel mismatch: exact current LLM-reviewed scanner-pool lineage can
+    authorize adoption/start without copying a symbol into the manual universe.
+  - Clarified the Research LLM structured-output types/cardinalities under prompt version 0.3,
+    without coercing malformed answers or weakening exact citation checks.
+  - Raised project/OpenAI/critical daily ceilings to `$40` in `llm_budget@0.2.0` and rebuilt
+    current budget windows from durable reservations so same-day spend survives a version bump.
+  - Corrected the data manifest's stale backtest-engine declaration and made Strategy UI
+    explain horizon-specific Candidate evidence and failure reasons.
+- Architecture/decision impact: ADR 0037. This change distinguishes statistically weak alpha
+  from avoidable workflow suppression. LLMs remain advisory and have no risk, adoption, or
+  execution authority.
+- Validation: `make check` passed Flake8, strict mypy across 59 source files, and 195 tests.
+  `make doctor` and the repository secret scan passed. Compose/release, CI, immutable image,
+  production rollout, and production revalidation evidence remain to be recorded.
+- Expected global state after commit: local source can continuously re-test accepted hypotheses,
+  evaluate Candidate activity fairly across all six horizons, and preserve spend accounting
+  through the approved budget increase. Production remains on functional SHA `663c462` until
+  this exact commit passes delivery gates; zero adoptions/deployments/orders remain unchanged.
+- Corrections/follow-ups: deploy the exact verified commit, trigger/observe a current 63-session
+  revalidation, and present any eligible Candidate for explicit administrator adoption rather
+  than auto-starting Shadow.
 
 ## Template for future commit entries
 

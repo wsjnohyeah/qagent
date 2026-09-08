@@ -1,4 +1,4 @@
-version: llm_budget@0.1.0
+version: llm_budget@0.2.0
 
 # These are conservative operator estimates used only for pre-call budget reservation.
 # They are not provider invoices; review them against current contracts before production.
@@ -16,12 +16,12 @@ reservation:
 
 limits:
   project_daily:
-    max_estimated_cost_usd: "20.00"
+    max_estimated_cost_usd: "40.00"
   project_monthly:
     max_estimated_cost_usd: "200.00"
   provider_daily:
     openai:
-      max_estimated_cost_usd: "18.00"
+      max_estimated_cost_usd: "40.00"
     meta:
       max_estimated_cost_usd: "5.00"
   workload_daily:
@@ -30,7 +30,7 @@ limits:
     routine_pipeline:
       max_estimated_cost_usd: "5.00"
     critical_research:
-      max_estimated_cost_usd: "15.00"
+      max_estimated_cost_usd: "40.00"
     strategy_generation:
       max_estimated_cost_usd: "15.00"
     strategy_critique:

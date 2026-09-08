@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
+import hashlib
 from typing import Any, Callable
 
 import exchange_calendars as exchange_calendars  # type: ignore[import-untyped]
@@ -321,6 +322,7 @@ class ResearchCoordinatorHandler:
                 "symbol": str(job.payload["symbol"]),
                 "timeframe": str(job.payload["timeframe"]),
                 "as_of": str(job.payload["as_of"]),
+                "cycle_key": str(job.payload.get("cycle_key", "legacy")),
                 # The research horizon is part of the immutable job request.  It
                 # must be re-applied at every stage instead of relying on a
                 # dependency result to happen to carry it forward.  Legacy jobs
@@ -1105,7 +1107,23 @@ class ResearchCoordinatorHandler:
     async def _validate_strategy(self, context: dict[str, Any]) -> dict[str, Any]:
         spec_id = context.get("strategy_spec_id")
         if not spec_id:
-            return {"outcome": "WAITING_STRATEGY_SPEC"}
+            reusable = self.research.generated_strategy_specs(
+                symbol=str(context["symbol"]),
+                timeframe=str(context["timeframe"]),
+                holding_period_sessions=int(context.get("horizon_bars", 1)),
+                feature_set_version=FEATURE_SET_VERSION,
+            )
+            if not reusable:
+                return {"outcome": "WAITING_STRATEGY_SPEC"}
+            rotation_key = (
+                f"{context.get('cycle_key', context['as_of'])}:"
+                f"{context['symbol']}:{context.get('horizon_bars', 1)}"
+            )
+            selected_index = int(
+                hashlib.sha256(rotation_key.encode()).hexdigest()[:16],
+                16,
+            ) % len(reusable)
+            spec_id = reusable[selected_index].strategy_spec_id
         spec = self.research.strategy_spec(str(spec_id))
         if spec is None:
             return {"outcome": "WAITING_STRATEGY_SPEC"}
@@ -1165,6 +1183,7 @@ class ResearchCoordinatorHandler:
             self.research.strategy_trial_count(
                 symbol=str(context["symbol"]),
                 timeframe=str(context["timeframe"]),
+                holding_period_sessions=holding_sessions,
             ),
         )
         prior = next(
@@ -1197,6 +1216,7 @@ class ResearchCoordinatorHandler:
             prior_gate = dict(prior["gate_assessment"])
             return {
                 "outcome": "REUSED",
+                "strategy_spec_id": spec.strategy_spec_id,
                 "validation_report_id": str(prior["validation_report_id"]),
                 "eligible_for_human_review": bool(
                     prior_gate.get("eligible_for_human_review")
@@ -1237,6 +1257,7 @@ class ResearchCoordinatorHandler:
             }
         return {
             "outcome": "COMPLETED",
+            "strategy_spec_id": spec.strategy_spec_id,
             "validation_report_id": report.validation_report_id,
             "eligible_for_human_review": bool(
                 report.gate_assessment.get("eligible_for_human_review")

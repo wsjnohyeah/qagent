@@ -84,14 +84,14 @@ Deflated Sharpe, and a versioned research gate. The gate may only mark a result 
 human review; it never promotes a strategy automatically, and bounded synthetic evidence is
 expected to fail its minimum-sample requirements.
 
-`research_gate@0.3.0` separates candidate-selection evidence from exact frozen-strategy
+`research_gate@0.4.0` separates candidate-selection evidence from exact frozen-strategy
 evidence. PBO and minimum candidate breadth apply to an adaptive selector; they are explicitly
 N/A for one static spec. Sparse strategies report total folds, active folds, no-trade folds,
 and OOS trades separately; only active folds enter the positive-fold stability ratio. Strict
 qualification still requires the configured coverage, activity, regime, drawdown, and
 search-trial-adjusted Deflated Sharpe thresholds. A separate human-reviewed Candidate Shadow
-tier may collect broker-free forward evidence after positive cost-adjusted OOS performance
-and bounded drawdown, but is never eligible for Alpaca Paper.
+tier may collect broker-free forward evidence after horizon-scaled minimum activity, positive
+cost-adjusted OOS performance, and bounded drawdown, but is never eligible for Alpaca Paper.
 
 Phase 5A adds fail-closed market-data checks, explicit half-spread fill cost, governed
 corporate-action/universe imports, and durable resumable backfill partitions. These are
@@ -108,6 +108,9 @@ reservations stop over-budget calls before they reach a provider. Token counts r
 diagnostic telemetry, not operator-configured limits. An interrupted provider call releases
 its abandoned reservation after the configured provider timeout plus a five-minute safety
 margin, so a process restart cannot permanently consume budget capacity.
+`llm_budget@0.2.0` sets the daily project, OpenAI-provider, and critical-research ceilings to
+`$40`; same-period consumption is reconstructed from durable reservations across policy
+versions, so deploying a higher ceiling does not reset money already spent that day.
 
 Phase 4B exposes that gateway in the local Control Center. The operator can create immutable
 workload-routing revisions and chat through `Auto`, OpenAI, or Meta while preserving model,
@@ -159,9 +162,11 @@ gap-repaired market data and source-specific document history through feature/ML
 constrained generation, exact validation, and human-gated shadow readiness. It resumes
 retryable groups without repeating completed parents, and rechecks incomplete cycles every
 minute rather than leaving an expired worker lease until the next hourly cycle. Exhausted
-stages are explicit and require a confirmed one-attempt retry. Validation reuse requires the exact
-execution contract, market-data/window fingerprint, current promotion policy, and current
-research-search count. ML reuse separately requires the exact versioned training contract.
+stages are explicit and require a confirmed one-attempt retry. Validation can rotate through
+previously accepted same-horizon specs when a new paid generation stage is unavailable. Reuse
+requires the exact execution contract, market-data/window fingerprint, current promotion
+policy, and current horizon-specific research-search count. ML reuse separately requires the
+exact versioned training contract.
 Later Research LLM calls receive bounded, point-in-time summaries of already-known backtest,
 validation, Shadow, and Paper outcomes plus the forecast model's label, untouched-holdout
 metrics, calibration, drift, and gate status. Paid LLM stages default off, and the coordinator
@@ -186,8 +191,9 @@ most once every four hours; invalid output, provider failure, or exhausted budge
 to deterministic ranking. Scan evidence, scores, reasons, LLM comments, and coordinator
 lineage are persisted. When separately enabled, only a successfully completed LLM-reviewed
 scan refreshes a bounded Scanner Trading Pool; skipped or failed LLM review cannot admit a new
-symbol. Exact validation and separate strategy-adoption/Shadow confirmations still apply, and
-pool membership has no broker-order authority.
+symbol. An exact current scan/list revision can authorize the symbol at adoption and Shadow
+start; exact validation and both human confirmations still apply, and pool membership alone
+has no broker-order authority.
 
 ## Commands
 

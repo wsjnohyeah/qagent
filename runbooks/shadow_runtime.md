@@ -16,6 +16,9 @@ portfolio events.
    - `QUALIFIED`: the strict report gate has `eligible_for_human_review=true`.
    - `CANDIDATE`: the candidate gate has `eligible_for_human_review=true`; this is
      observation-only and never Paper-eligible.
+   Candidate activity minima are horizon-aware because a five-year history can contain many
+   independent one-session windows but only one annual window. Positive modeled net return
+   and the drawdown ceiling remain mandatory at every horizon.
 3. The administrator confirms `strategy.adopt` with the explicit admission tier.
 4. The administrator confirms `shadow.start` for one symbol. Its validated capital must
    match the shared virtual master account.
@@ -71,6 +74,9 @@ override and does not claim qualification.
   be resumed until a current exact validation has been adopted. An already-filled
   multi-session position continues under its persisted contract until a deterministic exit;
   code/config drift cannot strand it.
+- The research-search count is frozen into the administrator-approved validation certificate.
+  New, unrelated experiments after adoption do not invalidate an active Shadow deployment;
+  current policy, risk, cost, feature, restriction, and execution contracts still do.
 - Virtual fills model commission, half-spread, slippage, fixed impact, and maximum bar-volume
   participation through the deterministic event-driven portfolio engine. Quantity is fixed
   before the session from completed-bar evidence; execution-bar volume is used only to model

@@ -275,7 +275,12 @@ def test_workload_budget_update_requires_confirmation(settings: Settings) -> Non
         initial = client.get("/v1/llm/budget").json()
         limits = initial["limits"]["workload_daily"]
         over_cap = {name: dict(limit) for name, limit in limits.items()}
-        over_cap["interactive_explanation"]["max_estimated_cost_usd"] = "20.01"
+        project_cap = Decimal(
+            initial["limits"]["project_daily"]["max_estimated_cost_usd"]
+        )
+        over_cap["interactive_explanation"]["max_estimated_cost_usd"] = str(
+            project_cap + Decimal("0.01")
+        )
         rejected = client.put(
             "/v1/llm/budget",
             json={"workload_daily": over_cap, "reason": "Unsafe oversized limit"},

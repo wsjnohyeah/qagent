@@ -3,7 +3,7 @@ model_governance:
   policy: ml_policy@0.1.0
   research_candidates_may_use_non_champion_models: true
   shadow_requires_champion_model: true
-  strategy_promotion_gate: research_gate@0.3.0
+  strategy_promotion_gate: research_gate@0.4.0
   human_approval_required: true
   automatic_promotion: false
 strategies:

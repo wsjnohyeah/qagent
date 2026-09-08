@@ -557,12 +557,19 @@ def test_workload_budget_revision_is_immutable_and_does_not_reset_usage(
         "interactive_explanation"
     ]["max_estimated_cost_usd"] == "0.000007"
 
-    changed_policy = policy.model_copy(update={"version": "llm_budget@0.1.1"})
+    changed_policy = policy.model_copy(update={"version": "llm_budget@0.2.1"})
     changed_summary = LLMBudgetManager(ledger.engine, changed_policy).summary()
     assert changed_summary["policy_source"] == "yaml_base"
     assert changed_summary["limits"]["workload_daily"][
         "interactive_explanation"
     ]["max_estimated_cost_usd"] == "5.00"
+    changed_workload_window = next(
+        item
+        for item in changed_summary["windows"]
+        if item["scope"] == "workload:interactive_explanation"
+    )
+    assert changed_workload_window["consumed_tokens"] == 5
+    assert changed_workload_window["consumed_estimated_cost_usd"] == "0.000006"
 
     with pytest.raises(LLMBudgetExceededError, match="interactive_explanation"):
         budget.reserve(

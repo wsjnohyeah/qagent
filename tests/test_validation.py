@@ -13,11 +13,12 @@ from agentic_quant.api import create_app
 from agentic_quant.coordinator_runtime import ResearchCoordinatorHandler
 from agentic_quant.control_plane import SystemObjectStore
 from agentic_quant.data_quality import DataQualityError
-from agentic_quant.database import shadow_trade_plans, validation_reports
-from agentic_quant.domain import BacktestCostModel, StockBar
+from agentic_quant.database import shadow_trade_plans, validation_reports, workflow_jobs
+from agentic_quant.domain import BacktestCostModel, EventEnvelope, StockBar
 from agentic_quant.ids import uuid7
 from agentic_quant.ledger import EventLedger
 from agentic_quant.market_calendar import MarketSessionClock
+from agentic_quant.market_scanner import MARKET_SCAN_EVENT
 from agentic_quant.market_store import MarketDataStore
 from agentic_quant.migrations import upgrade_database
 from agentic_quant.research_store import ResearchStore, _canonical_hash
@@ -112,6 +113,7 @@ def _seed_eligible_report(
     timeframe: str,
     risk_policy: RiskPolicy,
     restrictions: RestrictionRegistry,
+    symbol: str = "AAPL",
 ) -> str:
     report_id = uuid7()
     contract = validation_execution_contract(
@@ -129,7 +131,7 @@ def _seed_eligible_report(
         connection.execute(
             insert(validation_reports).values(
                 validation_report_id=report_id,
-                symbol="AAPL",
+                symbol=symbol,
                 timeframe=timeframe,
                 strategy_types=[str(spec.strategy_type)],
                 validation_subject="static_strategy",
@@ -376,6 +378,149 @@ def test_real_static_validation_can_reach_adoption_and_shadow_start(
     assert adoption["admission_tier"] == "QUALIFIED"
     assert deployment["status"] == "ACTIVE"
 
+    snapshot = PointInTimeFeatureBuilder(store).build(
+        symbol="AAPL",
+        timeframe="1Day",
+        as_of=bars[-1].available_from,
+        bars=bars,
+    )
+    for index in range(2):
+        later_attempt_id = uuid7()
+        store.create_generation_attempt(
+            generation_attempt_id=later_attempt_id,
+            feature_snapshot_id=snapshot.feature_snapshot_id,
+            analysis_id=f"later-research-analysis-{index}",
+            forecast_id=f"later-research-forecast-{index}",
+            provider=None,
+        )
+        store.update_generation_attempt(
+            later_attempt_id,
+            status="ACCEPT",
+            strategy_spec_id=spec.strategy_spec_id,
+        )
+    with pytest.raises(ValueError, match="research search count"):
+        shadow.adoption_preview(
+            strategy_spec_id=spec.strategy_spec_id,
+            validation_report_id=report.validation_report_id,
+        )
+    assert shadow.deployments()[0]["contract_status"] == "CURRENT"
+
+
+def test_scanner_pool_lineage_can_authorize_confirmed_shadow_start(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    store = ResearchStore(ledger.engine)
+    spec = store.record_strategy_spec(
+        default_strategy_spec(
+            "momentum",
+            timeframe="1Day",
+            code_sha256=research_code_sha256(),
+        ).model_copy(
+            update={
+                "strategy_spec_id": uuid7(),
+                "name": "scanner_pool_momentum",
+                "version": "scanner-pool-test@0.1.0",
+            }
+        )
+    )
+    policy = RiskPolicy.from_yaml(settings.risk_policy_path)
+    restrictions = RestrictionRegistry.from_yaml(
+        settings.restricted_securities_path
+    )
+    report_id = _seed_eligible_report(
+        ledger,
+        spec=spec,
+        timeframe="1Day",
+        risk_policy=policy,
+        restrictions=restrictions,
+        symbol="SNDK",
+    )
+    objects = SystemObjectStore(ledger.engine, ledger)
+    objects.ensure_defaults()
+    pool = objects.replace_list_members(
+        slug_or_id="scanner-trading-pool",
+        members=["SNDK"],
+        reason="LLM-reviewed scanner fixture",
+        created_by="market-universe-scanner",
+    )
+    scan_id = uuid7()
+    now = datetime.now(UTC)
+    ledger.append(
+        EventEnvelope(
+            event_id=uuid7(),
+            event_type=MARKET_SCAN_EVENT,
+            event_time=now,
+            emitted_at=now,
+            producer="market-universe-scanner",
+            correlation_id=scan_id,
+            payload={
+                "trading_pool_admission": {
+                    "status": "UPDATED",
+                    "list_revision": pool["current_revision"],
+                    "admitted_symbols": ["SNDK"],
+                    "basis_scan_id": scan_id,
+                    "basis_llm_invocation_id": "llm-scan-fixture",
+                }
+            },
+        )
+    )
+    with ledger.engine.begin() as connection:
+        connection.execute(
+            insert(workflow_jobs).values(
+                workflow_job_id=uuid7(),
+                job_group_id=uuid7(),
+                job_type="coordinator.validate_strategy",
+                partition_key="SNDK:08:validate_strategy",
+                request_sha256="b" * 64,
+                payload_json={
+                    "symbol": "SNDK",
+                    "timeframe": "1Day",
+                    "universe_scan_id": scan_id,
+                },
+                status="COMPLETED",
+                attempt_count=1,
+                max_attempts=5,
+                dependency_job_ids_json=[],
+                lease_owner=None,
+                lease_token=None,
+                lease_expires_at=None,
+                cursor_json={},
+                result_json={"validation_report_id": report_id},
+                error_code=None,
+                created_at=now,
+                started_at=now,
+                updated_at=now,
+                completed_at=now,
+            )
+        )
+    shadow = ShadowRuntime(
+        ledger.engine,
+        store,
+        objects,
+        risk_policy=policy,
+        restrictions=restrictions,
+    )
+    shadow.initialize_virtual_account()
+
+    adoption = shadow.adopt_strategy(
+        strategy_spec_id=spec.strategy_spec_id,
+        validation_report_id=report_id,
+        reason="Reviewed scanner-pool strategy",
+        approved_by="test-admin",
+    )
+    preview = shadow.deployment_preview(
+        strategy_spec_id=spec.strategy_spec_id,
+        symbol="SNDK",
+        initial_cash=Decimal("100000"),
+    )
+
+    assert adoption["status"] == "ADOPTED_FOR_SHADOW"
+    assert preview["universe_admission"]["authority"] == (
+        "SCANNER_LLM_TRADING_POOL"
+    )
+
 
 def test_strictly_rejected_strategy_can_enter_candidate_shadow_only(
     settings,  # type: ignore[no-untyped-def]
@@ -589,12 +734,18 @@ def test_validation_cache_and_adoption_require_current_gate_assessment(
         bars=bars,
     )
     for index in range(5):
+        attempt_id = uuid7()
         store.create_generation_attempt(
-            generation_attempt_id=uuid7(),
+            generation_attempt_id=attempt_id,
             feature_snapshot_id=snapshot.feature_snapshot_id,
             analysis_id=f"trial-analysis-{index}",
             forecast_id=f"trial-forecast-{index}",
             provider=None,
+        )
+        store.update_generation_attempt(
+            attempt_id,
+            status="ACCEPT",
+            strategy_spec_id=spec.strategy_spec_id,
         )
     with pytest.raises(ValueError, match="research search count"):
         shadow.adoption_preview(
@@ -625,6 +776,95 @@ def test_validation_cache_and_adoption_require_current_gate_assessment(
         after_policy = asyncio.run(handler._validate_strategy(context))
     assert after_policy["outcome"] == "COMPLETED"
     assert after_policy["eligible_for_human_review"] is False
+
+
+def test_coordinator_revalidates_an_existing_accepted_spec_without_new_llm(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    market = MarketDataStore(ledger.engine)
+    store = ResearchStore(ledger.engine)
+    bars = _regime_bars(count=120)
+    market.insert_bars(bars, raw_object_id="TEST_RAW")
+    spec = store.record_strategy_spec(
+        default_strategy_spec(
+            "momentum",
+            timeframe="1Day",
+            code_sha256=research_code_sha256(),
+        )
+    )
+    snapshot = PointInTimeFeatureBuilder(store).build(
+        symbol="AAPL",
+        timeframe="1Day",
+        as_of=bars[-1].available_from,
+        bars=bars,
+    )
+    attempt_id = uuid7()
+    store.create_generation_attempt(
+        generation_attempt_id=attempt_id,
+        feature_snapshot_id=snapshot.feature_snapshot_id,
+        analysis_id="accepted-analysis",
+        forecast_id="accepted-forecast",
+        provider="openai",
+    )
+    store.update_generation_attempt(
+        attempt_id,
+        status="ACCEPT",
+        strategy_spec_id=spec.strategy_spec_id,
+    )
+    permissive = DEFAULT_PROMOTION_GATE_POLICY.model_copy(
+        update={
+            "version": "research_gate@9.9.9",
+            "minimum_oos_folds": 4,
+            "minimum_active_oos_folds": 0,
+            "minimum_oos_trades": 0,
+            "minimum_regime_count": 1,
+            "minimum_deflated_sharpe_probability": Decimal("0"),
+            "minimum_positive_active_oos_fold_rate": Decimal("0"),
+            "maximum_allowed_drawdown": Decimal("-1"),
+        }
+    )
+    restrictions = RestrictionRegistry.from_yaml(
+        settings.restricted_securities_path
+    )
+    objects = SystemObjectStore(ledger.engine, ledger)
+    objects.ensure_defaults()
+    shadow = ShadowRuntime(
+        ledger.engine,
+        store,
+        objects,
+        risk_policy=RiskPolicy.from_yaml(settings.risk_policy_path),
+        restrictions=restrictions,
+        promotion_policy=permissive,
+    )
+    shadow.initialize_virtual_account()
+    handler = ResearchCoordinatorHandler.__new__(ResearchCoordinatorHandler)
+    handler.settings = settings
+    handler.ledger = ledger
+    handler.research = store
+    handler.shadow = shadow
+    handler.restrictions = restrictions
+
+    with patch(
+        "agentic_quant.coordinator_runtime.load_promotion_gate_policy",
+        return_value=permissive,
+    ):
+        result = asyncio.run(
+            handler._validate_strategy(
+                {
+                    "symbol": "AAPL",
+                    "timeframe": "1Day",
+                    "as_of": bars[-1].available_from.isoformat(),
+                    "cycle_key": "2026-09-08T20",
+                    "horizon_bars": 1,
+                }
+            )
+        )
+
+    assert result["outcome"] == "COMPLETED"
+    assert result["strategy_spec_id"] == spec.strategy_spec_id
+    assert result["validation_report_id"]
 
 
 def test_shadow_adoption_rejects_unsupported_minute_execution(
@@ -1049,3 +1289,48 @@ def test_sparse_strategy_uses_active_folds_and_can_enter_candidate_shadow() -> N
         "ELIGIBLE_FOR_CANDIDATE_SHADOW_REVIEW"
     )
     assert result["candidate_shadow"]["eligible_for_human_review"] is True
+
+
+def test_candidate_shadow_activity_thresholds_scale_with_holding_horizon() -> None:
+    short = assess_research_gate(
+        policy=DEFAULT_PROMOTION_GATE_POLICY,
+        fold_count=7,
+        active_fold_count=5,
+        oos_trade_count=5,
+        candidate_count=1,
+        regime_count=2,
+        positive_active_fold_rate=Decimal("0.8"),
+        compounded_oos_return=Decimal("0.004"),
+        worst_drawdown=Decimal("-0.01"),
+        probability_of_backtest_overfitting=Decimal("0"),
+        deflated_sharpe_probability=Decimal("0.4"),
+        pbo_applicable=False,
+        validation_subject="static_strategy",
+        holding_period_sessions=1,
+    )
+    quarterly = assess_research_gate(
+        policy=DEFAULT_PROMOTION_GATE_POLICY,
+        fold_count=7,
+        active_fold_count=5,
+        oos_trade_count=5,
+        candidate_count=1,
+        regime_count=2,
+        positive_active_fold_rate=Decimal("0.8"),
+        compounded_oos_return=Decimal("0.004"),
+        worst_drawdown=Decimal("-0.01"),
+        probability_of_backtest_overfitting=Decimal("0"),
+        deflated_sharpe_probability=Decimal("0.4"),
+        pbo_applicable=False,
+        validation_subject="static_strategy",
+        holding_period_sessions=63,
+    )
+
+    assert short["candidate_shadow"]["status"] == "INSUFFICIENT_EVIDENCE"
+    assert quarterly["candidate_shadow"]["status"] == (
+        "ELIGIBLE_FOR_CANDIDATE_SHADOW_REVIEW"
+    )
+    assert quarterly["candidate_shadow"]["activity_thresholds"] == {
+        "minimum_oos_folds": 4,
+        "minimum_active_oos_folds": 2,
+        "minimum_oos_trades": 3,
+    }

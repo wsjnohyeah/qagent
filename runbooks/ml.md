@@ -52,4 +52,4 @@ development-only until production authentication binds the approver identity. Ev
 change is immutable in `model_registry_events`. There is no automatic or LLM promotion path.
 
 Model-champion status is not strategy approval. A strategy consuming a model forecast must
-still pass the separate `research_gate@0.3.0` walk-forward/PBO/DSR process.
+still pass the separate `research_gate@0.4.0` walk-forward/PBO/DSR process.

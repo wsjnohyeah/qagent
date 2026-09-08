@@ -54,7 +54,9 @@ all agree.
    sizing is accepted.
 8. `validate_strategy`: run exact-spec walk-forward validation under the current shared
    account risk contract. Cached admission also requires the current promotion policy and
-   current search-trial count.
+   current horizon-specific search-trial count. If the paid LLM/generation stage cannot
+   produce a new spec in that cycle, rotate through previously accepted immutable specs for
+   the same symbol/timeframe/horizon and revalidate them against current data and policy.
 9. `await_shadow_adoption`: report the strategy/report IDs and available Candidate/Qualified
    admission tiers, then wait for the administrator's separate `strategy.adopt` and
    `shadow.start` confirmations. Candidate is broker-free observation only and cannot enter

@@ -1,0 +1,73 @@
+# Production research correctness review — 2026-09-08
+
+## Outcome
+
+The production system was healthy, but “no eligible strategy” was not explained by one cause.
+Market discovery and daily-bar backfill were operating correctly; current ML forecasts were
+mostly weak, while several workflow and admission interactions also suppressed otherwise
+valid Candidate Shadow evaluation. ADR 0037 records the corrections.
+
+## 1. Stock selection
+
+- The scanner merged 256 source names and retained 40 deterministic review candidates plus a
+  20-symbol deep-research pool.
+- The current pool included speculative and AI-infrastructure names such as CRWV, EOSE, IREN,
+  NBIS, NVDA, RGTI, SMR, TSLA, and WULF. SNDK remains in the reviewed theme catalog and can
+  re-enter when its current activity/liquidity score warrants it.
+- The LLM can only re-rank the deterministic eligible set; it cannot invent a ticker or bypass
+  price, liquidity, restriction, benchmark, or tradability filters.
+- Confirmed defect: the final coordinator accepted scanner-pool authority, but Shadow start
+  still required manual Trading Universe membership. The adoption/start boundary now verifies
+  the exact validation job's scan ID and the current scanner-pool revision.
+
+## 2. Data backfill
+
+- Daily bars cover five years or the provider-observed listing/resumption boundary for all 20
+  current pool symbols. Representative mature issuers contain about 1,255 daily bars.
+- Newly listed names correctly have shorter histories; they do not fabricate pre-listing gaps.
+- Alpaca News and SEC evidence are source-dependent and continue through durable partitions.
+  Foreign issuers and newly listed companies may legitimately have no SEC company-fact rows.
+- Trades, quotes, and option chains remain forward streams/snapshots by design; they are not
+  falsely labeled as five-year datasets.
+- Thousands of current quality reports passed. An older NBIS failure was superseded by the
+  verified post-suspension-boundary correction; no general daily-backfill defect was found.
+
+## 3. ML + LLM strategy construction
+
+- Real production model runs exist for 1, 5, 20, 63, and 126 sessions. Their aggregate
+  holdout AUC values were approximately 0.47–0.50, near random ranking, and only a handful of
+  runs met the existing model-quality gate. This is weak predictive evidence, not a reason to
+  label the pipeline broken or lower the ML gate.
+- The Research LLM reads point-in-time source evidence, model/holdout/calibration/drift data,
+  and prior outcomes. A generator proposes a bounded strategy and a separate critic reviews
+  it. Deterministic exact-spec validation, not either LLM, decides eligibility.
+- The generator accepted most schema-valid proposals. The Research LLM stage was the larger
+  loss point: many provider outputs violated underspecified JSON field types. Prompt version
+  `evidence_bound_analyst@0.3.0` now states exact types and cardinalities while preserving exact
+  citation checks.
+- Search-trial correction now separates holding horizons. Candidate Shadow activity minima are
+  horizon-aware under `research_gate@0.4.0`; strict qualification remains unchanged.
+- Existing accepted specs are now revalidated when a current paid generation stage is blocked,
+  so paid research is not discarded merely because a later cycle reaches its USD ceiling.
+
+## 4. Shadow readiness
+
+- Before this correction, production had zero adoptions, deployments, Shadow plans, positions,
+  or Paper orders. Global new exposure remained paused.
+- A real 63-session HPE report had seven total folds, five active folds, five OOS trades, 80%
+  positive active folds, approximately `+0.4168%` cost-adjusted compounded OOS return, and
+  bounded drawdown. It failed the uniform 10-trade Candidate minimum, which was inappropriate
+  for that horizon. It must be revalidated under policy 0.4 before any operator decision.
+- Candidate Shadow remains broker-free and observation-only. A report becoming eligible does
+  not auto-adopt it, auto-start Shadow, resume new exposure, or enroll Paper.
+- A next-session plan must be durable before that session opens. A strategy approved after the
+  open correctly waits for the next eligible session rather than fabricating a same-day fill.
+
+## Remaining scientific limitation
+
+The implemented strategy family is deliberately bounded to long-only momentum and
+mean-reversion entry rules, even when the position is held for 63–252 sessions. The platform
+can correctly test and operate those horizons, but current production ML evidence does not yet
+demonstrate predictive alpha. Broader factors, cross-sectional models, regime-specific rules,
+and ML-only versus ML+LLM ablations are research improvements—not reasons to weaken safety or
+statistical gates today.

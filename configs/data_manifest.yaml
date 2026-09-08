@@ -24,7 +24,7 @@ research:
     backtest_cash_share_simulation: event_driven
     symbol_change_replay: pending_fail_closed
   backtest_engine:
-    version: event_driven_portfolio@0.4.0
+    version: event_driven_portfolio@0.5.0
     order_timing: next_bar_open
     exit_timing: declared_session_close
     max_volume_participation_default: 0.05
@@ -46,7 +46,7 @@ research:
     selection_failure_diagnostic: selected_oos_below_median_rate
     probability_of_backtest_overfitting: required
     deflated_sharpe: required
-    promotion_policy: research_gate@0.3.0
+    promotion_policy: research_gate@0.4.0
     automatic_promotion: false
     regimes: [up, down, sideways]
   universe_membership:
@@ -61,7 +61,7 @@ intelligence:
   exact_source_quotes_required_for_claims: true
   unknown_citations_fail_closed: true
   insufficient_evidence_abstains_before_llm_call: true
-  budget_policy: llm_budget@0.1.0
+  budget_policy: llm_budget@0.2.0
   llm_has_execution_authority: false
 machine_learning:
   policy: ml_policy@0.1.0
@@ -71,4 +71,4 @@ machine_learning:
   drift_metric: population_stability_index
   registry_states: [CANDIDATE, CHALLENGER, CHAMPION, RETIRED, REJECTED]
   automatic_promotion: false
-  downstream_strategy_gate: research_gate@0.3.0
+  downstream_strategy_gate: research_gate@0.4.0

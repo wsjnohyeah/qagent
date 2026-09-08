@@ -16,6 +16,7 @@ from agentic_quant.config import TradingMode
 from agentic_quant.control_plane import SystemObjectStore
 from agentic_quant.data_quality import DataQualityError, MarketDataQualityService
 from agentic_quant.database import (
+    ledger_events,
     shadow_deployments,
     shadow_events,
     shadow_risk_decisions,
@@ -25,6 +26,7 @@ from agentic_quant.database import (
     strategy_adoptions,
     strategy_specs,
     validation_reports,
+    workflow_jobs,
     runtime_leases,
     virtual_accounts,
 )
@@ -43,6 +45,7 @@ from agentic_quant.domain import (
 )
 from agentic_quant.ids import uuid7
 from agentic_quant.market_calendar import MarketSessionClock
+from agentic_quant.market_scanner import AUTO_TRADING_POOL_SLUG, MARKET_SCAN_EVENT
 from agentic_quant.research import (
     PointInTimeFeatureBuilder,
     strategy_signal_action,
@@ -167,6 +170,8 @@ class ShadowRuntime:
         strategy_spec_id: str,
         validation_report_id: str,
         admission_tier: str = "QUALIFIED",
+        require_current_search_count: bool = True,
+        require_current_universe_authority: bool = True,
     ) -> dict[str, Any]:
         normalized_tier = admission_tier.strip().upper()
         if normalized_tier not in {"CANDIDATE", "QUALIFIED"}:
@@ -252,6 +257,9 @@ class ShadowRuntime:
         current_trial_count = self.research_store.strategy_trial_count(
             symbol=str(report.symbol),
             timeframe=str(report.timeframe),
+            holding_period_sessions=strategy_holding_period_sessions(
+                strategy_spec.data_requirements
+            ),
         )
         assessed_trial_count = int(
             dict(report.robustness_metrics or {}).get(
@@ -259,11 +267,19 @@ class ShadowRuntime:
                 0,
             )
         )
-        if assessed_trial_count != current_trial_count:
+        if require_current_search_count and assessed_trial_count != current_trial_count:
             raise ValueError(
                 "Validation admission assessment is stale under the current "
                 "research search count"
             )
+        universe_admission = (
+            self._universe_admission(
+                symbol=str(report.symbol),
+                validation_report_id=validation_report_id,
+            )
+            if require_current_universe_authority
+            else None
+        )
         return {
             "summary": (
                 f"Adopt {spec.name}@{spec.version} for "
@@ -275,7 +291,91 @@ class ShadowRuntime:
             "gate_assessment": gate,
             "symbol": report.symbol,
             "timeframe": report.timeframe,
+            "universe_admission": universe_admission,
             "live_broker_effect": False,
+        }
+
+    def _universe_admission(
+        self,
+        *,
+        symbol: str,
+        validation_report_id: str,
+    ) -> dict[str, Any]:
+        normalized_symbol = symbol.upper()
+        manual = self.objects.get_list("trading-universe")
+        if manual is not None and normalized_symbol in {
+            str(value).upper() for value in manual["members"]
+        }:
+            return {
+                "authority": "MANUAL_TRADING_UNIVERSE",
+                "list_slug": "trading-universe",
+                "list_revision": int(manual["current_revision"]),
+            }
+        with self.engine.connect() as connection:
+            jobs = connection.execute(
+                select(
+                    workflow_jobs.c.payload_json,
+                    workflow_jobs.c.result_json,
+                )
+                .where(workflow_jobs.c.job_type == "coordinator.validate_strategy")
+                .where(workflow_jobs.c.status == "COMPLETED")
+                .order_by(workflow_jobs.c.updated_at.desc())
+            ).all()
+        scan_id = next(
+            (
+                str(dict(row.payload_json).get("universe_scan_id"))
+                for row in jobs
+                if str(dict(row.result_json or {}).get("validation_report_id"))
+                == validation_report_id
+                and str(dict(row.payload_json).get("symbol", "")).upper()
+                == normalized_symbol
+                and dict(row.payload_json).get("universe_scan_id")
+            ),
+            None,
+        )
+        if scan_id is None:
+            raise ValueError(
+                "Shadow symbol is outside the manual universe and the validation "
+                "has no scanner-pool lineage"
+            )
+        with self.engine.connect() as connection:
+            event = connection.execute(
+                select(ledger_events.c.payload)
+                .where(
+                    ledger_events.c.event_type == MARKET_SCAN_EVENT,
+                    ledger_events.c.correlation_id == scan_id,
+                )
+                .order_by(ledger_events.c.sequence.desc())
+                .limit(1)
+            ).one_or_none()
+        if event is None:
+            raise ValueError("Scanner-pool admission event is missing")
+        admission = dict(dict(event.payload).get("trading_pool_admission") or {})
+        pool = self.objects.get_list(AUTO_TRADING_POOL_SLUG)
+        if (
+            admission.get("status") not in {
+                "UPDATED",
+                "UNCHANGED",
+                "HELD_PREVIOUS_LLM_REVIEW",
+            }
+            or pool is None
+            or int(pool["current_revision"])
+            != int(admission.get("list_revision", -1))
+            or normalized_symbol
+            not in {str(value).upper() for value in admission.get("admitted_symbols", [])}
+            or normalized_symbol
+            not in {str(value).upper() for value in pool["members"]}
+        ):
+            raise ValueError(
+                "Validation scanner-pool admission is no longer current"
+            )
+        return {
+            "authority": "SCANNER_LLM_TRADING_POOL",
+            "list_slug": AUTO_TRADING_POOL_SLUG,
+            "list_revision": int(pool["current_revision"]),
+            "scan_id": scan_id,
+            "basis_scan_id": admission.get("basis_scan_id"),
+            "basis_llm_invocation_id": admission.get("basis_llm_invocation_id"),
         }
 
     def adopt_strategy(
@@ -551,10 +651,7 @@ class ShadowRuntime:
         normalized_symbol = symbol.strip().upper()
         if not normalized_symbol or len(normalized_symbol) > 24:
             raise ValueError("Shadow symbol is invalid")
-        universe = self.objects.get_list("trading-universe")
         restricted = self.objects.get_list("restricted")
-        if universe is None or normalized_symbol not in universe["members"]:
-            raise ValueError("Shadow symbol is outside the governed trading universe")
         if restricted is not None and normalized_symbol in restricted["members"]:
             raise ValueError("Restricted symbols cannot enter shadow deployment")
         with self.engine.connect() as connection:
@@ -584,10 +681,11 @@ class ShadowRuntime:
             ).one_or_none()
         if row is None or row.status != "ADOPTED_FOR_SHADOW":
             raise ValueError("Strategy must be adopted before shadow deployment")
-        self.adoption_preview(
+        adoption_preview = self.adoption_preview(
             strategy_spec_id=strategy_spec_id,
             validation_report_id=str(row.validation_report_id),
             admission_tier=str(row.admission_tier),
+            require_current_search_count=False,
         )
         if str(row.validated_symbol) != normalized_symbol:
             raise ValueError("Shadow symbol does not match the reviewed validation report")
@@ -604,6 +702,7 @@ class ShadowRuntime:
             "admission_tier": str(row.admission_tier),
             "symbol": normalized_symbol,
             "initial_cash": str(initial_cash),
+            "universe_admission": adoption_preview["universe_admission"],
             "live_broker_effect": False,
         }
 
@@ -665,6 +764,7 @@ class ShadowRuntime:
                     strategy_spec_id=str(row.strategy_spec_id),
                     validation_report_id=str(adoption_row.validation_report_id),
                     admission_tier=str(adoption_row.admission_tier),
+                    require_current_search_count=False,
                 )
             connection.execute(
                 update(shadow_deployments)
@@ -785,6 +885,8 @@ class ShadowRuntime:
                     strategy_spec_id=str(value["strategy_spec_id"]),
                     validation_report_id=str(value["validation_report_id"]),
                     admission_tier=str(value["admission_tier"]),
+                    require_current_search_count=False,
+                    require_current_universe_authority=False,
                 )
             except ValueError as exc:
                 value["contract_status"] = "REVALIDATION_REQUIRED"
@@ -1229,6 +1331,8 @@ class ShadowRuntime:
                 self.adoption_preview(
                     strategy_spec_id=str(deployment["strategy_spec_id"]),
                     validation_report_id=str(deployment["validation_report_id"]),
+                    require_current_search_count=False,
+                    require_current_universe_authority=False,
                 )
             except ValueError as exc:
                 self._require_revalidation(
