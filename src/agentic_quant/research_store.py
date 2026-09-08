@@ -616,20 +616,19 @@ class ResearchStore:
             generated_ids = select(
                 strategy_generation_attempts.c.strategy_spec_id
             ).where(strategy_generation_attempts.c.strategy_spec_id.is_not(None))
+            baseline_ids = (
+                select(experiment_runs.c.strategy_spec_id)
+                .where(experiment_runs.c.symbol == symbol.upper())
+                .where(experiment_runs.c.timeframe == timeframe)
+                .where(experiment_runs.c.strategy_spec_id.not_in(generated_ids))
+                .distinct()
+            )
             baseline_rows = connection.execute(
                 select(
                     strategy_specs.c.strategy_spec_id,
                     strategy_specs.c.data_requirements_json,
                 )
-                .join(
-                    experiment_runs,
-                    experiment_runs.c.strategy_spec_id
-                    == strategy_specs.c.strategy_spec_id,
-                )
-                .where(experiment_runs.c.symbol == symbol.upper())
-                .where(experiment_runs.c.timeframe == timeframe)
-                .where(experiment_runs.c.strategy_spec_id.not_in(generated_ids))
-                .distinct()
+                .where(strategy_specs.c.strategy_spec_id.in_(baseline_ids))
             ).all()
             non_generated_specs = sum(
                 1

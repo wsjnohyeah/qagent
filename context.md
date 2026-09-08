@@ -4037,6 +4037,23 @@ lifecycle. No Paper order was used as a build or deployment test.
   revalidation, and present any eligible Candidate for explicit administrator adoption rather
   than auto-starting Shadow.
 
+### C064 — `Fix PostgreSQL horizon trial query`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-08 PDT.
+- User intent: complete the production correctness review with a real database revalidation,
+  not only SQLite tests.
+- Scope: replaced a PostgreSQL-incompatible `DISTINCT` over a JSON column with a distinct
+  strategy-ID subquery followed by the exact strategy metadata lookup.
+- Architecture/decision impact: none; this preserves ADR 0037's horizon-specific trial count.
+- Validation: the defect was reproduced against production PostgreSQL during an HPE 63-session
+  revalidation. The corrected query executed successfully against local Compose PostgreSQL;
+  `make check` passed Flake8, strict mypy and 195 tests; `make doctor`, the secret scan, and
+  PostgreSQL Alembic drift check also passed.
+- Expected global state after commit: horizon-specific trial counting executes on both SQLite
+  and PostgreSQL; production remains exposure-paused while the corrected image is prepared.
+- Corrections/follow-ups: repeat the exact HPE revalidation after the corrected rollout.
+
 ## Template for future commit entries
 
 Copy this section before making a commit:
