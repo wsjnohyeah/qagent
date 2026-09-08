@@ -497,6 +497,44 @@ def test_fundamentals_pipeline_is_idempotent(tmp_path: Path, settings: Any) -> N
     assert len(publisher.events) == 1
 
 
+def test_corporate_facts_are_written_and_resolved_in_bounded_batches(
+    settings: Any,
+) -> None:
+    upgrade_database(settings.database_url)
+    now = datetime(2026, 10, 30, tzinfo=UTC)
+    facts = tuple(
+        CorporateFact(
+            fact_id=f"00000000-0000-7000-8000-{index:012d}",
+            fact_fingerprint=f"{index:064x}",
+            symbol="AAPL",
+            cik="0000320193",
+            issuer_name="Apple Inc.",
+            taxonomy="us-gaap",
+            tag=f"Fact{index}",
+            unit="USD",
+            period_end=now,
+            filed_at=now,
+            form="10-K",
+            numeric_value=Decimal(index),
+            value_text=str(index),
+            available_from=now,
+            raw_object_id="PENDING_ARCHIVE",
+            ingested_at=now,
+        )
+        for index in range(1_001)
+    )
+    store = DocumentStore(EventLedger(settings.database_url).engine)
+
+    inserted = store.insert_facts(facts, "raw-facts")
+    resolved = store.fact_ids_for_fingerprints(
+        tuple(fact.fact_fingerprint for fact in facts)
+    )
+
+    assert len(inserted) == len(facts)
+    assert len(resolved) == len(facts)
+    assert store.insert_facts(facts, "raw-facts") == ()
+
+
 def test_ir_adapter_requires_approved_host_and_social_defaults_off() -> None:
     with pytest.raises(DocumentProviderConfigurationError):
         InvestorRelationsFeedProvider(

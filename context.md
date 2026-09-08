@@ -3547,6 +3547,40 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: record the exact commit/image, migration, source coverage progress,
   generated/validated strategy outcomes, and any pending risk confirmation after rollout.
 
+### C052 — `Batch production SEC fact persistence`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-07 PDT.
+- User intent: run five-year production backfill and the complete ML + LLM strategy funnel,
+  while keeping ticker-level coverage observable and correcting any production-scale issue
+  found before the next market session.
+- Scope:
+  - Deployed C051 as immutable image
+    `356ea1ee200d6f67f86c55a922b905c8d0fee535` and migrated production to Alembic `0033`.
+  - Increased the production-only news partition from 90 to 365 days while retaining a
+    five-year target, 100-page bound, idempotency, and hourly durable checkpoints.
+  - Reproduced a production-scale AAPL SEC company-facts response containing 5,291 normalized
+    facts. Its single multi-row insert exceeded PostgreSQL's bind-parameter ceiling.
+  - Changed corporate-fact persistence to reuse one issuer upsert per identity, insert in
+    bounded 1,000-row batches, and resolve stored fact IDs in bounded queries rather than one
+    connection/query per fact.
+  - Added a 1,001-fact regression covering batch boundaries, bulk ID resolution, and replay
+    idempotency.
+- Architecture/decision impact:
+  - Source-specific coverage semantics are unchanged. This is a scalability/recovery fix for
+    the existing SEC path; no provider, research, risk, or execution authority changes.
+  - The coordinator was intentionally stopped after two failed attempts so it could not burn
+    retries or API quota before the corrected immutable image is available.
+- Validation: focused document tests pass (10 tests); the full release gate passes 180 tests,
+  Flake8, strict mypy across 59 source files, local and Compose doctors, the secret scan,
+  container rebuild, and PostgreSQL schema-drift detection. CI, immutable rollout, and a
+  successful real 5,291-fact retry remain required.
+- Expected global state after commit: source can ingest a large real SEC response within
+  PostgreSQL limits; production remains on C051 with its coordinator stopped until this exact
+  fix passes CI and deployment gates.
+- Corrections/follow-ups: record the production retry, coverage progress, strategy-generation
+  attempts, and final scheduler state in the next entry.
+
 ## Template for future commit entries
 
 Copy this section before making a commit:

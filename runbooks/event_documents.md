@@ -32,7 +32,10 @@ ENABLE_SOCIAL_AGGREGATES=false
 
 In production, the autonomous coordinator resolves ticker-to-CIK mappings from the SEC,
 archives that mapping, and refreshes the configured five-year filing/fact window at most once
-per symbol per day. Manual commands below remain useful for bounded diagnosis and replay.
+per symbol per day. Large XBRL responses are written and ID-resolved in bounded batches so
+PostgreSQL's statement parameter ceiling cannot turn a valid multi-thousand-fact issuer
+response into a retry loop. Manual commands below remain useful for bounded diagnosis and
+replay.
 
 Start and verify the full stack:
 

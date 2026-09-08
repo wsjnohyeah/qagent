@@ -47,6 +47,7 @@ class CatalystWriteResult(BaseModel):
 
 
 _TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
+_FACT_WRITE_BATCH_SIZE = 1_000
 _STOP_WORDS = {
     "a",
     "an",
@@ -232,15 +233,35 @@ class DocumentStore:
         )
 
     def fact_id_for_fingerprint(self, fact_fingerprint: str) -> str:
-        with self.engine.connect() as connection:
-            value = connection.execute(
-                select(corporate_facts.c.fact_id).where(
-                    corporate_facts.c.fact_fingerprint == fact_fingerprint
-                )
-            ).scalar_one_or_none()
+        values = self.fact_ids_for_fingerprints((fact_fingerprint,))
+        value = values.get(fact_fingerprint)
         if value is None:
             raise ValueError("Corporate fact was not persisted")
-        return str(value)
+        return value
+
+    def fact_ids_for_fingerprints(
+        self,
+        fact_fingerprints: tuple[str, ...],
+    ) -> dict[str, str]:
+        """Resolve persisted IDs without one database round trip per SEC fact."""
+        unique = tuple(dict.fromkeys(fact_fingerprints))
+        resolved: dict[str, str] = {}
+        with self.engine.connect() as connection:
+            for offset in range(0, len(unique), _FACT_WRITE_BATCH_SIZE):
+                batch = unique[offset : offset + _FACT_WRITE_BATCH_SIZE]
+                rows = connection.execute(
+                    select(
+                        corporate_facts.c.fact_fingerprint,
+                        corporate_facts.c.fact_id,
+                    ).where(corporate_facts.c.fact_fingerprint.in_(batch))
+                ).all()
+                resolved.update(
+                    {
+                        str(row.fact_fingerprint): str(row.fact_id)
+                        for row in rows
+                    }
+                )
+        return resolved
 
     def resolve_catalyst(
         self,
@@ -353,27 +374,41 @@ class DocumentStore:
         if not facts:
             return ()
         with self.engine.begin() as connection:
-            records: list[dict[str, Any]] = []
+            entity_ids: dict[tuple[str, str], str] = {}
+            latest_entity_facts: dict[tuple[str, str], CorporateFact] = {}
             for fact in facts:
-                entity_id = self._upsert_entity(
+                key = (fact.symbol.upper(), fact.cik)
+                previous = latest_entity_facts.get(key)
+                if previous is None or fact.ingested_at > previous.ingested_at:
+                    latest_entity_facts[key] = fact
+            for key, fact in latest_entity_facts.items():
+                entity_ids[key] = self._upsert_entity(
                     connection,
                     symbol=fact.symbol,
                     canonical_name=fact.issuer_name,
                     cik=fact.cik,
                     observed_at=fact.ingested_at,
                 )
+            records: list[dict[str, Any]] = []
+            for fact in facts:
                 records.append(
                     fact.model_copy(
                         update={"raw_object_id": raw_object_id}
                     ).model_dump()
-                    | {"entity_id": entity_id}
+                    | {"entity_id": entity_ids[(fact.symbol.upper(), fact.cik)]}
                 )
-            statement = self._insert_statement(
-                corporate_facts,
-                records,
-                ["fact_fingerprint"],
-            ).returning(corporate_facts.c.fact_id)
-            return tuple(str(value) for value in connection.execute(statement).scalars().all())
+            inserted_ids: list[str] = []
+            for offset in range(0, len(records), _FACT_WRITE_BATCH_SIZE):
+                statement = self._insert_statement(
+                    corporate_facts,
+                    records[offset : offset + _FACT_WRITE_BATCH_SIZE],
+                    ["fact_fingerprint"],
+                ).returning(corporate_facts.c.fact_id)
+                inserted_ids.extend(
+                    str(value)
+                    for value in connection.execute(statement).scalars().all()
+                )
+            return tuple(inserted_ids)
 
     def search_documents(
         self,

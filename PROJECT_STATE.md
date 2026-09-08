@@ -11,10 +11,10 @@
   intentionally insufficient.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `cb54b27a53ecd8bd020b834f4433bc63399a9f6a` image, PostgreSQL, Redis, API, Shadow worker,
+  `356ea1ee200d6f67f86c55a922b905c8d0fee535` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
-  and Alpaca Paper infrastructure are enabled; new exposure is unpaused. Live money remains
+  and Alpaca Paper infrastructure are enabled; new exposure is paused. Live money remains
   structurally disabled.
 - Local-lite uses Python 3.12, a project-local `uv`, SQLite, and filesystem object storage.
 - The Control API, single-admin object-centric web console, persistent System Steward,
@@ -183,15 +183,18 @@
   stop/target geometry used identically by research and shadow. Candidate/snapshot mismatches
   and future signal/feature timestamps also reject.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; production currently runs the
-  verified immutable functional commit `cb54b27a53ecd8bd020b834f4433bc63399a9f6a`.
+  verified immutable functional commit `356ea1ee200d6f67f86c55a922b905c8d0fee535`.
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases. A verified `main` push publishes an immutable GHCR
   commit-SHA image with matching embedded/OCI source provenance; deployment rejects mismatches.
-- The current end-to-end audit passes 179 tests, strict typing across 59 source files,
+- The source now batches large SEC company-fact writes and resolves their durable IDs in
+  bounded queries after a production AAPL response with 5,291 facts exposed PostgreSQL's
+  per-statement parameter ceiling. The regression suite contains 180 tests.
+- The current end-to-end audit passes 180 tests, strict typing across 59 source files,
   authenticated local and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, fresh schema
   upgrade and PostgreSQL schema-drift checks through `20260907_0033`,
   and the repository secret scan. The current source migration head is `20260907_0033`;
-  production remains on `20260907_0032` until the next immutable rollout.
+  production is on `20260907_0033`.
 - A local real read-only dynamic scan merged 258 source names, retained 40 review candidates
   and 20 deep-research stocks, included SNDK, and excluded sampled leveraged/single-stock
   ETFs. Its budgeted Meta re-rank cost an estimated `$0.008322` and moved SNDK from

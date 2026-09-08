@@ -274,13 +274,14 @@ class FundamentalsIngestionService:
             )
             raw_object_id = self.market_store.register_raw_object(archived)
             inserted_ids = self.document_store.insert_facts(page.facts, raw_object_id)
+            fact_ids = self.document_store.fact_ids_for_fingerprints(
+                tuple(fact.fact_fingerprint for fact in page.facts)
+            )
             events: list[EventEnvelope] = []
             for fact in page.facts:
                 normalized = fact.model_copy(
                     update={
-                        "fact_id": self.document_store.fact_id_for_fingerprint(
-                            fact.fact_fingerprint
-                        ),
+                        "fact_id": fact_ids[fact.fact_fingerprint],
                         "raw_object_id": raw_object_id,
                     }
                 )
