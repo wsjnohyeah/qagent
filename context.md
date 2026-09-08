@@ -11,7 +11,7 @@ until an exact strategy passes deterministic validation and receives the separat
 Shadow-start, and Paper-enrollment confirmations. Off-site backup/alerting and statistical/
 elapsed production evidence remain open
 
-Current documented baseline: C061 — `Repair horizon execution and retain Shadow candidates`
+Current documented baseline: C062 — `Record tiered Shadow production rollout`
 
 ## Purpose and authority
 
@@ -167,8 +167,7 @@ A Git commit cannot contain its own content-derived hash without changing that h
   a separate local-commit approval. Push and deployment remain external actions.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`. A fresh SFO3 VPS runs the
   production stack at `https://qagent.143.110.239.251.sslip.io` behind Caddy TLS on verified
-  immutable functional commit `173809e466698ff32a0dd0409313d74d9e51b9a6`. C061 is the local
-  remediation candidate and must pass CI plus guarded deployment before this line advances.
+  immutable functional commit `663c462a60bac9c612265ac2e242192723bf1a27`.
 - The independent `06b6853` fix verification is mapped item-by-item in
   `docs/REVIEW_REMEDIATION_2026-09-05.md`. The deterministic F01–F11 counterexamples are
   followed by the corrections from the `56bb979` review in
@@ -3934,6 +3933,40 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: inspect the first production reports under policy 0.3.0 before any
   adoption; production new exposure remains paused until an administrator confirms an exact
   candidate and its Shadow deployment.
+
+### C062 — `Record tiered Shadow production rollout`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-08 PDT.
+- User intent: deploy the horizon and one-session rejection fixes, then verify production
+  rather than assuming local tests represent the remote system.
+- Scope:
+  - Recorded successful CI/image publication and guarded rollout of functional commit
+    `663c462a60bac9c612265ac2e242192723bf1a27`.
+  - Recorded migration 0035, safety flags, service/TLS/authentication health, zero-execution
+    state, and the first post-rollout 63-session coordinator cycle.
+- Architecture/decision impact: none beyond C061/ADR 0036. This entry reconciles source with
+  observed production state.
+- Validation:
+  - GitHub Actions run `34209851409` completed `verify` and `publish-image` successfully.
+  - Backup `20260908T092941Z` passed checksums/catalog validation and restored into an isolated
+    disposable PostgreSQL instance at pre-migration schema `20260908_0034`.
+  - The guarded deploy reported `ready_paused`; Alembic advanced to `20260908_0035` with no
+    drift; Git, image, and all three application services use the exact functional SHA.
+  - API, Shadow worker, Paper worker, and coordinator immediate health gates passed; all five
+    containers became healthy. Public readiness is 200 and anonymous system access is 401.
+  - Effective runtime remains `APP_ENV=production`, `TRADING_MODE=paper`,
+    `LIVE_TRADING_ENABLED=false`, and `GLOBAL_NEW_EXPOSURE_PAUSED=true`. PostgreSQL still has
+    zero strategy adoptions, Shadow deployments, and Paper orders.
+  - A new 180-job coordinator group carries `horizon_bars=63` on every stage and is advancing
+    normally through evidence/features. New ML/strategy/validation records are not claimed
+    until those stages complete.
+- Global state after commit: production executes the corrected horizon context and policy
+  0.3.0, exposes Candidate versus Qualified Shadow in the Control Center, and keeps Candidate
+  deployments outside Paper. Research continues autonomously while all new exposure remains
+  paused.
+- Corrections/follow-ups: inspect the first completed horizon-63 training/spec/report records;
+  then review, but do not auto-adopt, any exact candidate eligibility surfaced by the system.
 
 ## Template for future commit entries
 

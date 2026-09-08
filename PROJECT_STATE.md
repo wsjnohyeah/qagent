@@ -11,7 +11,7 @@
   gate and no adopted strategy has accumulated forward observation time.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `173809e466698ff32a0dd0409313d74d9e51b9a6` image, PostgreSQL, Redis, API, Shadow worker,
+  `663c462a60bac9c612265ac2e242192723bf1a27` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled; new exposure is paused. Live money remains
@@ -327,8 +327,8 @@
 1. Replace the temporary `sslip.io` hostname with the operator's permanent domain, select an
    off-site backup target and external alert destination, then automate both retention and
    notification checks.
-2. Deploy schema 0035 and `research_gate@0.3.0`, let new horizon-correct cycles revalidate
-   exact strategies, and review any Candidate/Qualified Shadow eligibility without
+2. Let new horizon-correct cycles revalidate exact strategies under `research_gate@0.3.0`,
+   and review any Candidate/Qualified Shadow eligibility without
    manufacturing a pass. Candidate deployments may gather broker-free forward evidence;
    only a Qualified one-session deployment may be separately enrolled in Paper.
 3. Continue production-scale history/evidence coverage and collect Phase 5 statistical plus
