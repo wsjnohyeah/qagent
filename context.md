@@ -4074,6 +4074,26 @@ lifecycle. No Paper order was used as a build or deployment test.
   deployed; new exposure remains paused.
 - Corrections/follow-ups: deploy and repeat production evidence checks.
 
+### C066 — `Classify sparse ML history as waiting`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-08 PDT.
+- User intent: continue reviewing the live coordinator after rollout and repair any remaining
+  correctness problems.
+- Scope: catch deterministic ML training precondition failures after chronological
+  label-availability purging and persist `WAITING_ML_TRAINING_REQUIREMENTS` with the exact
+  reason/sample count instead of consuming infrastructure retry attempts.
+- Architecture/decision impact: newly listed symbols and long horizons remain in the research
+  pool, but insufficient independent OOS partitions are represented as a normal business wait,
+  not an operational failure or a fabricated model.
+- Validation: reproduced on production CRWV at 63 sessions; the focused ML suite passed, then
+  `make check` passed Flake8, strict mypy across 59 source files, and all 195 tests;
+  `make doctor` and the repository secret scan also passed.
+- Expected global state after commit: the coordinator continues other symbols while CRWV waits
+  for enough 63-session labeled history. Production new exposure remains paused.
+- Corrections/follow-ups: deploy, allow the failed job's bounded retry to complete as WAITING,
+  and verify no current coordinator infrastructure failures remain.
+
 ## Template for future commit entries
 
 Copy this section before making a commit:

@@ -89,6 +89,10 @@ class MLTrainingResult(FrozenModel):
     models: tuple[MLModelVersion, ...]
 
 
+class MLTrainingRequirementsError(ValueError):
+    """The dataset is valid but cannot satisfy chronological training partitions."""
+
+
 def load_ml_policy(path: Path) -> MLPolicy:
     with path.open("r", encoding="utf-8") as handle:
         return MLPolicy.model_validate(yaml.safe_load(handle))
@@ -1185,7 +1189,7 @@ class WalkForwardMLTrainer:
         ) // fold_count
         test_size = min(requested_test_size, maximum_test_size)
         if test_size < 5:
-            raise ValueError(
+            raise MLTrainingRequirementsError(
                 "ML training requires enough samples for 24 training rows and "
                 f"{fold_count} embargoed test folds"
             )
@@ -1210,7 +1214,9 @@ class WalkForwardMLTrainer:
         count, so multi-bar horizons cannot leak across either boundary.
         """
         if len(examples) < 9:
-            raise ValueError("ML OOS evaluation requires at least nine predictions")
+            raise MLTrainingRequirementsError(
+                "ML OOS evaluation requires at least nine predictions"
+            )
         first_boundary = max(1, len(examples) // 3)
         second_boundary = max(first_boundary + 1, (2 * len(examples)) // 3)
         selection_start = first_boundary
@@ -1230,11 +1236,11 @@ class WalkForwardMLTrainer:
         ):
             selection_end -= 1
         if calibration_end < 2 or selection_end - selection_start < 2:
-            raise ValueError(
+            raise MLTrainingRequirementsError(
                 "ML OOS partitions are too small after label-availability purging"
             )
         if len(examples) - evaluation_start < 2:
-            raise ValueError("ML final holdout is too small")
+            raise MLTrainingRequirementsError("ML final holdout is too small")
         return calibration_end, selection_start, selection_end, evaluation_start
 
     def _promotion_assessment(
@@ -1334,6 +1340,7 @@ __all__ = [
     "MLPredictor",
     "MLStore",
     "MLTrainingExample",
+    "MLTrainingRequirementsError",
     "MLTrainingResult",
     "WalkForwardMLTrainer",
     "load_ml_policy",

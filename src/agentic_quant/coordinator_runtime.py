@@ -42,6 +42,7 @@ from agentic_quant.ml import (
     MLPredictor,
     MLPolicy,
     MLStore,
+    MLTrainingRequirementsError,
     WalkForwardMLTrainer,
     ml_dataset_sha256,
     ml_training_contract_sha256,
@@ -965,17 +966,24 @@ class ResearchCoordinatorHandler:
                 "model_id": str(existing["selected_model_id"]),
                 "sample_count": len(examples),
             }
-        result = WalkForwardMLTrainer(
-            self.ml,
-            self.ml_policy,
-            code_git_sha=self.settings.source_git_sha or "UNAVAILABLE",
-        ).train(
-            examples,
-            symbol=snapshot.symbol,
-            timeframe=snapshot.timeframe,
-            horizon_bars=horizon_bars,
-            feature_set_version=FEATURE_SET_VERSION,
-        )
+        try:
+            result = WalkForwardMLTrainer(
+                self.ml,
+                self.ml_policy,
+                code_git_sha=self.settings.source_git_sha or "UNAVAILABLE",
+            ).train(
+                examples,
+                symbol=snapshot.symbol,
+                timeframe=snapshot.timeframe,
+                horizon_bars=horizon_bars,
+                feature_set_version=FEATURE_SET_VERSION,
+            )
+        except MLTrainingRequirementsError as exc:
+            return {
+                "outcome": "WAITING_ML_TRAINING_REQUIREMENTS",
+                "detail": str(exc),
+                "sample_count": len(examples),
+            }
         return {
             "outcome": "COMPLETED",
             "training_run_id": result.run.training_run_id,

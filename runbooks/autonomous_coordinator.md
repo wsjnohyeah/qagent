@@ -97,6 +97,11 @@ credentials, paid research disabled, no accepted strategy proposal, insufficient
 evidence, or pending human confirmation. Do not convert these into silent success or bypass
 their gate.
 
+`WAITING_ML_TRAINING_REQUIREMENTS` means the nominal sample count was large enough to attempt
+training but chronological embargo/label-availability purging left too little independent OOS
+data. This is expected for some newly listed names and long horizons; it must not consume the
+infrastructure retry budget.
+
 `WAITING_MARKET_HISTORY` means the provider returned no daily history for the requested
 symbol. A provider-observed boundary is not an IPO-date fact; inspect its cited ingestion runs
 before using it for broader historical-universe claims. Increasing the coordinator lookback

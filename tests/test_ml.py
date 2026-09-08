@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -37,6 +38,7 @@ from agentic_quant.ml import (
     MLDatasetBuilder,
     MLPredictor,
     MLStore,
+    MLTrainingRequirementsError,
     WalkForwardMLTrainer,
     load_ml_policy,
 )
@@ -345,6 +347,28 @@ def test_coordinator_retrains_when_ml_policy_contract_changes(
     assert runs[0]["training_contract_sha256"] != runs[1][
         "training_contract_sha256"
     ]
+
+    handler.ml_policy = handler.ml_policy.model_copy(
+        update={"version": "ml_policy@0.3.0"}
+    )
+    with patch(
+        "agentic_quant.coordinator_runtime.WalkForwardMLTrainer.train",
+        side_effect=MLTrainingRequirementsError(
+            "ML OOS partitions are too small after label-availability purging"
+        ),
+    ):
+        waiting = asyncio.run(handler._train_ml(context))
+    assert waiting["outcome"] == "WAITING_ML_TRAINING_REQUIREMENTS"
+    assert waiting["sample_count"] > 0
+
+    handler.ml_policy = handler.ml_policy.model_copy(
+        update={"version": "ml_policy@0.4.0"}
+    )
+    with patch(
+        "agentic_quant.coordinator_runtime.WalkForwardMLTrainer.train",
+        side_effect=ValueError("unexpected model implementation defect"),
+    ), pytest.raises(ValueError, match="unexpected model implementation defect"):
+        asyncio.run(handler._train_ml(context))
 
 
 def test_ml_labels_follow_executable_bars_and_ignore_sparse_snapshot_spacing(
