@@ -4229,7 +4229,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C072 — `Recognize zero-volume ticker-reuse boundaries`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `bd25348891559b1000d5c286ec679ef7c78dacd0`.
 - Date: 2026-09-08 PDT.
 - User intent: complete the SPCX production history repair while keeping ordinary provider gaps
   fail-closed.
@@ -4243,7 +4243,31 @@ lifecycle. No Paper order was used as a build or deployment test.
   and the repository secret scan passed.
 - Expected global state after commit: SPCX can establish the correct current traded segment and
   all downstream features, ML, and validation will share that verified boundary.
-- Corrections/follow-ups: deploy the exact verified image and repeat SPCX collection.
+- Production evidence: GitHub Actions run `34286896022` passed and the exact image deployed
+  healthy. The replay showed that a legacy cached boundary plus a now-complete stored window
+  returned early before running the new detector, addressed by C073.
+- Corrections/follow-ups: version the boundary policy and re-evaluate cached complete histories.
+
+### C073 — `Revalidate cached history boundaries`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-08 PDT.
+- User intent: finish the production SPCX identity-boundary repair found during the six-year
+  backfill review.
+- Scope: version provider-observed history-boundary evidence, ignore pre-policy cached
+  boundaries, run suspension detection even when every expected session already has a stored
+  row, and issue a new stable event ID per boundary-policy version.
+- Architecture/decision impact: a parser/backfill improvement cannot leave an obsolete
+  boundary authoritative forever. Re-evaluation remains append-only and pure missing-data gaps
+  still fail closed.
+- Validation: regression preloads a complete all-placeholder history plus a legacy boundary,
+  verifies no provider call is needed, records the current post-suspension boundary, and reuses
+  it idempotently. Focused tests passed, then `make check` passed Flake8, strict mypy across 59
+  source files, and all 198 tests; `make doctor` and the repository secret scan passed.
+- Expected global state after commit: SPCX research starts at its current positive-volume
+  segment rather than combining the former security's history with the current issuer.
+- Corrections/follow-ups: deploy exact verified image, repeat SPCX collection, and verify the
+  new boundary event and quality report before downstream research.
 
 ## Template for future commit entries
 

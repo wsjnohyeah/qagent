@@ -74,6 +74,7 @@ from agentic_quant.validation import (
 
 
 MARKET_HISTORY_BOUNDARY_EVENT = "market.history.boundary.observed.v1"
+MARKET_HISTORY_BOUNDARY_POLICY_VERSION = "market_history_boundary@0.2.0"
 DOCUMENT_HISTORY_COVERAGE_EVENT = "document.history.coverage.v1"
 SEC_REFERENCE_REFRESH_EVENT = "sec.reference.refresh.v1"
 MINIMUM_SUSPENSION_SESSIONS = 20
@@ -268,6 +269,8 @@ class ResearchCoordinatorHandler:
             if (
                 payload.get("source") != "alpaca"
                 or payload.get("feed") != self.settings.alpaca_stock_feed
+                or payload.get("policy_version")
+                != MARKET_HISTORY_BOUNDARY_POLICY_VERSION
             ):
                 continue
             probed_start = datetime.fromisoformat(str(payload["probed_start"]))
@@ -289,6 +292,7 @@ class ResearchCoordinatorHandler:
     ) -> str:
         event_id = stable_uuid(
             "market-history-boundary",
+            MARKET_HISTORY_BOUNDARY_POLICY_VERSION,
             self.settings.deployment_environment_id,
             symbol.upper(),
             timeframe,
@@ -310,6 +314,7 @@ class ResearchCoordinatorHandler:
                     timeframe,
                 ),
                 payload={
+                    "policy_version": MARKET_HISTORY_BOUNDARY_POLICY_VERSION,
                     "symbol": symbol.upper(),
                     "timeframe": timeframe,
                     "source": "alpaca",
@@ -410,60 +415,37 @@ class ResearchCoordinatorHandler:
             existing_event_times=tuple(item.event_time for item in stored),
             calendar_name=self.settings.market_calendar,
         )
-        if not windows:
-            latest = stored[-1].event_time if stored else None
-            quality = MarketDataQualityService(
-                self.market.engine,
-                self.ledger,
-                calendar_name=self.settings.market_calendar,
-            ).require_bars(
-                stored,
-                symbol=symbol,
-                timeframe="1Day",
-                code_git_sha=self.settings.source_git_sha or "UNAVAILABLE",
-                expected_start=coverage_start,
-                expected_end=as_of,
-            )
-            return {
-                "outcome": "UP_TO_DATE",
-                "latest_bar_event_time": latest.isoformat() if latest else None,
-                "requested_window_start": desired_start.isoformat(),
-                "verified_window_start": coverage_start.isoformat(),
-                "history_boundary_event_id": (
-                    known_boundary[0] if known_boundary else None
-                ),
-                "data_quality_report_id": quality.data_quality_report_id,
-            }
-        provider = AlpacaMarketDataProvider(
-            api_key=self.settings.alpaca_api_key.get_secret_value(),
-            api_secret=self.settings.alpaca_api_secret.get_secret_value(),
-            base_url=self.settings.alpaca_data_base_url,
-            calendar_name=self.settings.market_calendar,
-        )
         summaries = []
-        async with provider:
-            service = MarketDataIngestionService(
-                provider=provider,
-                archive=self.archive,
-                store=self.market,
-                ledger=self.ledger,
-                publisher=self.publisher,
+        if windows:
+            provider = AlpacaMarketDataProvider(
+                api_key=self.settings.alpaca_api_key.get_secret_value(),
+                api_secret=self.settings.alpaca_api_secret.get_secret_value(),
+                base_url=self.settings.alpaca_data_base_url,
                 calendar_name=self.settings.market_calendar,
-                code_git_sha=self.settings.source_git_sha or "UNAVAILABLE",
             )
-            for window_start, window_end in windows:
-                summary = await service.ingest_stock_bars(
-                    StockBarsRequest(
-                        symbol=symbol,
-                        start=window_start,
-                        end=window_end,
-                        timeframe="1Day",
-                        feed=self.settings.alpaca_stock_feed,
-                        adjustment="raw",
-                    ),
-                    validate_quality=False,
+            async with provider:
+                service = MarketDataIngestionService(
+                    provider=provider,
+                    archive=self.archive,
+                    store=self.market,
+                    ledger=self.ledger,
+                    publisher=self.publisher,
+                    calendar_name=self.settings.market_calendar,
+                    code_git_sha=self.settings.source_git_sha or "UNAVAILABLE",
                 )
-                summaries.append(summary.model_dump(mode="json"))
+                for window_start, window_end in windows:
+                    summary = await service.ingest_stock_bars(
+                        StockBarsRequest(
+                            symbol=symbol,
+                            start=window_start,
+                            end=window_end,
+                            timeframe="1Day",
+                            feed=self.settings.alpaca_stock_feed,
+                            adjustment="raw",
+                        ),
+                        validate_quality=False,
+                    )
+                    summaries.append(summary.model_dump(mode="json"))
         repaired = self.market.bars_between(
             symbol=symbol,
             timeframe="1Day",
@@ -530,8 +512,14 @@ class ResearchCoordinatorHandler:
                 ],
                 interpretation=boundary_interpretation,
             )
+        latest = repaired[-1].event_time
         return {
-            "outcome": "COMPLETED",
+            "outcome": (
+                "COMPLETED"
+                if windows or boundary_interpretation is not None
+                else "UP_TO_DATE"
+            ),
+            "latest_bar_event_time": latest.isoformat(),
             "gap_windows_repaired": len(windows),
             "ingestions": summaries,
             "data_quality_report_id": quality.data_quality_report_id,

@@ -24,6 +24,8 @@ from agentic_quant.coordinator import AutonomousCoordinator, COORDINATOR_STAGES
 from agentic_quant.control_plane import SystemObjectStore
 from agentic_quant.coordinator_runtime import (
     DOCUMENT_HISTORY_COVERAGE_EVENT,
+    MARKET_HISTORY_BOUNDARY_EVENT,
+    MARKET_HISTORY_BOUNDARY_POLICY_VERSION,
     ResearchCoordinatorHandler,
     daily_bar_gap_windows,
     resumed_daily_history_start,
@@ -923,6 +925,114 @@ def test_suspension_boundary_accepts_missing_then_zero_volume_order() -> None:
         resumed[0].event_time.date(),
         datetime.min.time(),
         tzinfo=UTC,
+    )
+
+
+def test_coordinator_rechecks_legacy_boundary_with_complete_placeholder_rows(
+    settings,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    complete = _daily_bars_for_gap_test(100)
+    as_of = complete[-1].available_from + timedelta(seconds=1)
+    lookback_days = (as_of.date() - complete[0].event_time.date()).days
+    runtime_settings = settings.model_copy(
+        update={
+            "alpaca_api_key": SecretStr("mock-key"),
+            "alpaca_api_secret": SecretStr("mock-secret"),
+            "coordinator_initial_lookback_days": lookback_days,
+            "development_max_backfill_days": lookback_days,
+            "deployment_environment_id": "ticker-reuse-test",
+        }
+    )
+    upgrade_database(runtime_settings.database_url)
+    ledger = EventLedger(runtime_settings.database_url)
+    market = MarketDataStore(ledger.engine)
+    source = tuple(
+        item.model_copy(
+            update={
+                "symbol": "SPCX",
+                "source": "alpaca",
+                "feed": runtime_settings.alpaca_stock_feed,
+                "volume": 0 if 10 <= index < 60 else item.volume,
+                "trade_count": 0 if 10 <= index < 60 else item.trade_count,
+                "vwap": None if 10 <= index < 60 else item.vwap,
+            }
+        )
+        for index, item in enumerate(complete)
+    )
+    market.insert_bars(source, raw_object_id="TICKER_REUSE_FIXTURE")
+    legacy_boundary_id = uuid7()
+    ledger.append(
+        EventEnvelope(
+            event_id=legacy_boundary_id,
+            event_type=MARKET_HISTORY_BOUNDARY_EVENT,
+            event_time=as_of,
+            emitted_at=as_of,
+            producer="legacy-test",
+            correlation_id=uuid7(),
+            payload={
+                "symbol": "SPCX",
+                "timeframe": "1Day",
+                "source": "alpaca",
+                "feed": runtime_settings.alpaca_stock_feed,
+                "probed_start": complete[0].event_time.isoformat(),
+                "observed_start": complete[0].event_time.isoformat(),
+            },
+        )
+    )
+
+    class Publisher:
+        def publish(self, **_payload):  # type: ignore[no-untyped-def]
+            return "published"
+
+        def health(self) -> bool:
+            return True
+
+    class UnexpectedProvider:
+        async def __aenter__(self):  # type: ignore[no-untyped-def]
+            raise AssertionError("complete history should not call the provider")
+
+        async def __aexit__(self, *_args):  # type: ignore[no-untyped-def]
+            return None
+
+    handler = ResearchCoordinatorHandler.__new__(ResearchCoordinatorHandler)
+    handler.settings = runtime_settings
+    handler.ledger = ledger
+    handler.market = market
+    handler.archive = FileRawArchive(tmp_path / "ticker-reuse-raw")
+    handler.publisher = Publisher()
+    context = {
+        "symbol": "SPCX",
+        "timeframe": "1Day",
+        "as_of": as_of.isoformat(),
+    }
+    with patch(
+        "agentic_quant.coordinator_runtime.AlpacaMarketDataProvider",
+        return_value=UnexpectedProvider(),
+    ):
+        first = asyncio.run(handler._collect_market_data(context))
+        second = asyncio.run(handler._collect_market_data(context))
+
+    expected_start = datetime.combine(
+        complete[60].event_time.date(),
+        datetime.min.time(),
+        tzinfo=UTC,
+    )
+    assert first["outcome"] == "COMPLETED"
+    assert first["verified_window_start"] == expected_start.isoformat()
+    assert first["history_boundary_event_id"] != legacy_boundary_id
+    assert second["outcome"] == "UP_TO_DATE"
+    assert second["history_boundary_event_id"] == first["history_boundary_event_id"]
+    boundary = next(
+        event
+        for event in ledger.recent(limit=500)
+        if event["event_id"] == first["history_boundary_event_id"]
+    )
+    assert boundary["payload"]["policy_version"] == (
+        MARKET_HISTORY_BOUNDARY_POLICY_VERSION
+    )
+    assert boundary["payload"]["interpretation"] == (
+        "PROVIDER_OBSERVED_POST_SUSPENSION_START"
     )
 
 
