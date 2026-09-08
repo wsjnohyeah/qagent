@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 from agentic_quant.archive import FileRawArchive
+from agentic_quant.control_plane import SystemObjectStore
 from agentic_quant.document_ingestion import (
     DocumentIngestionService,
     FundamentalsIngestionService,
@@ -148,6 +149,22 @@ def test_pipeline_versions_documents_and_deduplicates_one_catalyst(
         "catalysts": 1,
         "corporate_facts": 0,
     }
+    explorer = SystemObjectStore(service.ledger.engine)
+    catalog = explorer.symbol_catalog()
+    apple = next(item for item in catalog["symbols"] if item["symbol"] == "AAPL")
+    news = next(
+        item for item in apple["datasets"] if item["key"] == "documents:news"
+    )
+    assert news["record_count"] == 1
+    assert news["event_earliest"] < news["ingested_earliest"]
+    page = explorer.symbol_data_page(
+        symbol="AAPL",
+        dataset="documents:news",
+        limit=25,
+        offset=0,
+    )
+    assert page["total"] == 1
+    assert page["items"][0]["title"].startswith("Apple reports")
     catalyst = store.recent_catalysts()[0]
     assert catalyst["source_count"] == 2
     assert catalyst["primary_source_document_id"] is not None
@@ -358,6 +375,83 @@ def test_sec_adapters_normalize_primary_filings_and_company_facts() -> None:
     assert facts.facts[0].tag == "RevenueFromContractWithCustomerExcludingAssessedTax"
     assert facts.facts[0].numeric_value == Decimal("100000000000")
     assert facts.facts[0].available_from == facts.provider_received_at
+
+
+def test_sec_adapter_resolves_tickers_and_pages_historical_submissions() -> None:
+    historical_name = "CIK0000320193-submissions-001.json"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/files/company_tickers.json":
+            return httpx.Response(
+                200,
+                json={"0": {"cik_str": 320193, "ticker": "AAPL", "title": "Apple"}},
+            )
+        if request.url.path.endswith(historical_name):
+            return httpx.Response(
+                200,
+                json={
+                    "accessionNumber": ["0000320193-22-000001"],
+                    "form": ["10-K"],
+                    "primaryDocument": ["aapl-20220924.htm"],
+                    "acceptanceDateTime": ["20221027163000"],
+                    "filingDate": ["2022-10-27"],
+                    "reportDate": ["2022-09-24"],
+                    "primaryDocDescription": ["Annual report"],
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "cik": "320193",
+                "name": "Apple Inc.",
+                "filings": {
+                    "recent": {
+                        "accessionNumber": [],
+                        "form": [],
+                        "primaryDocument": [],
+                    },
+                    "files": [
+                        {
+                            "name": historical_name,
+                            "filingFrom": "2021-01-01",
+                            "filingTo": "2025-01-01",
+                        }
+                    ],
+                },
+            },
+        )
+
+    async def scenario() -> tuple[str, DocumentPage]:
+        client = httpx.AsyncClient(
+            base_url="https://data.sec.gov",
+            transport=httpx.MockTransport(handler),
+        )
+        provider = SecEdgarProvider(
+            user_agent="Agentic Quant research@example.com",
+            client=client,
+        )
+        tickers = await provider.fetch_company_ticker_map()
+        request = DocumentFetchRequest(
+            symbols=("AAPL",),
+            cik="320193",
+            forms=("10-K",),
+            start=datetime(2021, 1, 1, tzinfo=UTC),
+            end=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+        first = await provider.fetch_documents_page(request)
+        second = await provider.fetch_documents_page(
+            request,
+            page_token=first.next_page_token,
+        )
+        await client.aclose()
+        return tickers.cik_by_symbol["AAPL"], second
+
+    cik, historical = asyncio.run(scenario())
+    assert cik == "0000320193"
+    assert historical.documents[0].title == "Apple Inc. 10-K filing"
+    assert historical.documents[0].published_at == datetime(
+        2022, 10, 27, 16, 30, tzinfo=UTC
+    )
 
 
 def test_fundamentals_pipeline_is_idempotent(tmp_path: Path, settings: Any) -> None:

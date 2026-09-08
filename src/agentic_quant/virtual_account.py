@@ -51,6 +51,8 @@ class VirtualAccountStore:
             "reserved_risk_usd": _ZERO,
             "base_policy_version": risk_policy.version,
             "risk_revision": 1,
+            "baseline_stop_fraction": risk_policy.baseline_stop_fraction,
+            "baseline_target_r_multiple": risk_policy.baseline_target_r_multiple,
             "initial_risk_fraction": risk_policy.initial_risk_fraction,
             "maximum_trade_risk_usd": risk_policy.maximum_trade_risk_usd,
             "maximum_concurrent_risk_usd": (
@@ -84,6 +86,8 @@ class VirtualAccountStore:
                 ),
                 "virtual_account_id": MAIN_VIRTUAL_ACCOUNT_ID,
                 "revision_number": 1,
+                "baseline_stop_fraction": row.baseline_stop_fraction,
+                "baseline_target_r_multiple": row.baseline_target_r_multiple,
                 "initial_risk_fraction": row.initial_risk_fraction,
                 "maximum_trade_risk_usd": row.maximum_trade_risk_usd,
                 "maximum_concurrent_risk_usd": (
@@ -147,6 +151,12 @@ class VirtualAccountStore:
         return base_policy.model_copy(
             update={
                 "version": version,
+                "baseline_stop_fraction": Decimal(
+                    str(account["baseline_stop_fraction"])
+                ),
+                "baseline_target_r_multiple": Decimal(
+                    str(account["baseline_target_r_multiple"])
+                ),
                 "initial_risk_fraction": Decimal(
                     str(account["initial_risk_fraction"])
                 ),
@@ -222,6 +232,8 @@ class VirtualAccountStore:
                 "Close or cancel open trade plans before revising account risk"
             )
         fields = (
+            "baseline_stop_fraction",
+            "baseline_target_r_multiple",
             "initial_risk_fraction",
             "maximum_trade_risk_usd",
             "maximum_concurrent_risk_usd",
@@ -232,11 +244,15 @@ class VirtualAccountStore:
             field: Decimal(str(raw_limits.get(field, current[field])))
             for field in fields
         }
+        if not 0 < proposed["baseline_stop_fraction"] < 1:
+            raise ValueError("Baseline stop fraction must be in (0, 1)")
+        if proposed["baseline_target_r_multiple"] <= 0:
+            raise ValueError("Baseline target R multiple must be positive")
         if proposed["initial_risk_fraction"] <= 0 or proposed[
             "initial_risk_fraction"
         ] > 1:
             raise ValueError("Initial risk fraction must be in (0, 1]")
-        for field in fields[1:]:
+        for field in fields[3:]:
             if proposed[field] <= 0:
                 raise ValueError(f"{field} must be positive")
         if (

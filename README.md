@@ -1,6 +1,17 @@
 # Agentic Quant Trading System
 
-A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and paper-trading platform. The repository contains implemented and locally verified foundations through the **Phase 7 broker boundary**: safety controls, read-only market data, event/document ingestion, point-in-time research, evidence-bound LLM analysis, ML/registry and constrained strategy generation, an authenticated System Steward, a persistent broker-free shadow runtime, a shared account/coordinator, and a fail-closed Alpaca Paper adapter with durable reconciliation. The adapter is not yet authorized for an external order because its separately validated execution profile and automatic position-exit lifecycle remain open. Implementation completeness is not the same as passing statistical or production-operational exit criteria; see `docs/REVIEW_REMEDIATION_C6A8020_2026-09-06.md`.
+A safety-first foundation for a cloud-hosted quantitative research, shadow-trading, and
+paper-trading platform. The repository contains implemented and locally verified foundations
+through the **Phase 7 broker boundary**: safety controls, read-only market data,
+event/document ingestion, point-in-time research, evidence-bound LLM analysis, ML/registry
+and constrained strategy generation, an authenticated System Steward, a persistent
+broker-free shadow runtime, a shared account/coordinator, and a fail-closed Alpaca Paper
+adapter with durable reconciliation. The unified execution profile and automatic
+position-exit lifecycle are implemented, but no Paper order is eligible until an exact
+strategy passes validation and receives the separate adoption, Shadow-start, and
+Paper-enrollment confirmations. Implementation completeness is not the same as passing
+statistical or production-operational exit criteria; see
+`docs/REVIEW_REMEDIATION_C6A8020_2026-09-06.md`.
 
 > Live-money execution is not implemented. `live` is not a valid mode, and setting `LIVE_TRADING_ENABLED=true` makes startup fail.
 
@@ -126,10 +137,13 @@ All shadow strategy/symbol deployments are sleeves of one shared virtual master 
 Open plans atomically reserve account cash and concurrent risk, and completion releases the
 reservation and settles P&L once. The default `$130` per-trade and `$780` concurrent risk are
 an editable, versioned starting policy—not hard-coded claims about optimal sizing. A confirmed
-risk revision invalidates prior execution certificates until exact validation is rerun.
+risk revision can change both stop/target geometry and account-dollar limits, and invalidates
+prior execution certificates until exact validation is rerun. Stop distance is not the same
+as dollar risk: quantity is sized from the smaller of the equity-fraction cap, per-trade USD
+cap, and remaining concurrent-risk capacity.
 
 The autonomous coordinator persists an hourly, per-symbol nine-stage DAG from full-window,
-gap-repaired market data and refreshed Alpaca News through feature/ML/LLM research,
+gap-repaired market data and source-specific document history through feature/ML/LLM research,
 constrained generation, exact validation, and human-gated shadow readiness. It resumes
 retryable groups without repeating completed parents, and rechecks incomplete cycles every
 minute rather than leaving an expired worker lease until the next hourly cycle. Exhausted
@@ -207,8 +221,9 @@ SHADOW_POLL_SECONDS=30
 PAPER_TRADING_ENABLED=false
 PAPER_POLL_SECONDS=30
 ALPACA_PAPER_BASE_URL=https://paper-api.alpaca.markets
-COORDINATOR_DOCUMENT_LOOKBACK_DAYS=90
-COORDINATOR_DOCUMENT_MAX_PAGES=10
+COORDINATOR_DOCUMENT_LOOKBACK_DAYS=1826
+COORDINATOR_DOCUMENT_PARTITION_DAYS=90
+COORDINATOR_DOCUMENT_MAX_PAGES=100
 MARKET_SCANNER_ENABLED=false
 MARKET_SCANNER_LLM_ENABLED=false
 MARKET_SCANNER_AUTO_TRADING_POOL_ENABLED=false
@@ -442,7 +457,10 @@ The constrained strategy generator can combine one point-in-time feature snapsho
 ML forecast, and a completed evidence-bound LLM analysis. A separate adversarial critique is
 mandatory. Accepted output is compiled into an immutable, research-only momentum or mean-
 reversion specification; the model cannot emit executable code, position sizing, adoption,
-or an order. The exact candidate must still be backtested, validated, and human-adopted.
+or an order. A citation-valid Research LLM abstention remains advisory and can feed an
+explicitly exploratory proposal; malformed/rejected output still blocks. The exact candidate
+must still be backtested, validated, and human-adopted. Trade win rate alone is never an
+admission rule.
 
 ## Phase 6: authenticated System Steward and shadow operations
 
@@ -456,8 +474,10 @@ The web application is organized around system objects rather than a fixed dashb
   activity/liquidity metrics, deterministic reasons, optional LLM thesis/risks, and immutable
   source payloads. It also shows the Scanner Trading Pool revision, additions, removals, and
   exact scan/LLM evidence that authorized autonomous membership.
-- **Data explorer** exposes clickable dataset types, date groups, pagination, normalized rows,
-  documents/facts, and collapsed bounded raw payloads with provenance.
+- **Data explorer** starts from a ticker, then exposes that ticker's populated and missing
+  price, news, filing, fact, action, option, stream, feature, ML, and LLM datasets. Counts and
+  ranges use source event time; ingestion time and collapsed raw payloads remain separate
+  lineage. Each dataset has date grouping and pagination.
 - **Strategies** identifies deterministic baselines versus ML + LLM candidates and presents
   the complete creation chain: point-in-time inputs, ML forecast/model, cited Research LLM
   comment, generator proposal, independent critique, exact spec, validation, replay trades,

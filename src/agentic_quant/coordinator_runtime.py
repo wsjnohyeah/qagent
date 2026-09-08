@@ -5,13 +5,16 @@ from decimal import Decimal
 from typing import Any, Callable
 
 import exchange_calendars as exchange_calendars  # type: ignore[import-untyped]
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from agentic_quant.archive import RawArchive
 from agentic_quant.config import AppEnvironment, Settings
 from agentic_quant.control_plane import SystemObjectStore
 from agentic_quant.data_quality import MarketDataQualityService
-from agentic_quant.document_ingestion import DocumentIngestionService
+from agentic_quant.document_ingestion import (
+    DocumentIngestionService,
+    FundamentalsIngestionService,
+)
 from agentic_quant.document_store import DocumentStore
 from agentic_quant.database import ledger_events
 from agentic_quant.domain import (
@@ -44,11 +47,12 @@ from agentic_quant.ml import (
 )
 from agentic_quant.providers.alpaca import AlpacaMarketDataProvider
 from agentic_quant.providers.base import (
+    CorporateFactsRequest,
     DocumentFetchRequest,
     EventPublisher,
     StockBarsRequest,
 )
-from agentic_quant.providers.documents import AlpacaNewsProvider
+from agentic_quant.providers.documents import AlpacaNewsProvider, SecEdgarProvider
 from agentic_quant.research import FEATURE_SET_VERSION, PointInTimeFeatureBuilder
 from agentic_quant.research_store import ResearchStore
 from agentic_quant.risk import RestrictionRegistry
@@ -64,6 +68,8 @@ from agentic_quant.validation import (
 
 
 MARKET_HISTORY_BOUNDARY_EVENT = "market.history.boundary.observed.v1"
+DOCUMENT_HISTORY_COVERAGE_EVENT = "document.history.coverage.v1"
+SEC_REFERENCE_REFRESH_EVENT = "sec.reference.refresh.v1"
 MINIMUM_SUSPENSION_SESSIONS = 20
 
 
@@ -220,6 +226,7 @@ class ResearchCoordinatorHandler:
         self.publisher = publisher
         self.pipeline_enabled = pipeline_enabled
         self.features = PointInTimeFeatureBuilder(research)
+        self._sec_ticker_map: dict[str, str] | None = None
 
     def _known_history_boundary(
         self,
@@ -524,24 +531,224 @@ class ResearchCoordinatorHandler:
             symbol=symbol,
             provider="alpaca_news",
         )
-        earliest = as_of - timedelta(
-            days=self.settings.coordinator_document_lookback_days
+        observed_earliest = self.documents.earliest_document_published_at(
+            symbol=symbol,
+            provider="alpaca_news",
         )
+        lookback_days = self.settings.coordinator_document_lookback_days
+        if self.settings.app_env == AppEnvironment.DEVELOPMENT:
+            lookback_days = min(
+                lookback_days,
+                self.settings.development_max_backfill_days,
+            )
+        desired_start = as_of - timedelta(days=lookback_days)
+        recorded_start = self._document_coverage_start(symbol=symbol)
+        known_start = min(
+            value
+            for value in (observed_earliest, recorded_start)
+            if value is not None
+        ) if observed_earliest is not None or recorded_start is not None else None
+        partition = timedelta(days=self.settings.coordinator_document_partition_days)
+        requests: list[tuple[str, datetime, datetime]] = []
+        if known_start is None:
+            requests.append(("INITIAL_RECENT", max(desired_start, as_of - partition), as_of))
+        elif known_start > desired_start:
+            requests.append(
+                (
+                    "HISTORICAL_LEADING",
+                    max(desired_start, known_start - partition),
+                    min(as_of, known_start + timedelta(seconds=1)),
+                )
+            )
         # Re-read one day to catch provider corrections while persistence remains
-        # idempotent by provider document ID and content hash.
-        start = max(earliest, latest - timedelta(days=1)) if latest else earliest
-        if start >= as_of:
+        # idempotent by provider document ID and content hash. Backfill and refresh
+        # may run together so building history never leaves current evidence stale.
+        if latest is not None:
+            refresh_start = max(desired_start, latest - timedelta(days=1))
+            if refresh_start < as_of and not any(
+                start <= refresh_start and end >= as_of for _, start, end in requests
+            ):
+                requests.append(("INCREMENTAL_REFRESH", refresh_start, as_of))
+        if not requests:
+            sec_summary = await self._collect_sec_evidence(
+                symbol=symbol,
+                start=desired_start,
+                as_of=as_of,
+            )
             return {
                 "outcome": "UP_TO_DATE",
+                "target_window_start": desired_start.isoformat(),
+                "verified_coverage_start": known_start.isoformat() if known_start else None,
                 "latest_document_published_at": latest.isoformat() if latest else None,
+                "sec_evidence": sec_summary,
             }
         provider = AlpacaNewsProvider(
             api_key=self.settings.alpaca_api_key.get_secret_value(),
             api_secret=self.settings.alpaca_api_secret.get_secret_value(),
             base_url=self.settings.alpaca_data_base_url,
         )
+        summaries: list[dict[str, Any]] = []
+        historical_truncated = False
         async with provider:
-            summary = await DocumentIngestionService(
+            service = DocumentIngestionService(
+                provider=provider,
+                archive=self.archive,
+                market_store=self.market,
+                document_store=self.documents,
+                ledger=self.ledger,
+                publisher=self.publisher,
+            )
+            for request_kind, start, end in requests:
+                summary = await service.ingest_documents(
+                    DocumentFetchRequest(
+                        symbols=(symbol,),
+                        start=start,
+                        end=end,
+                        limit=50,
+                        max_pages=self.settings.coordinator_document_max_pages,
+                    )
+                )
+                summaries.append(
+                    {
+                        "request_kind": request_kind,
+                        "start": start.isoformat(),
+                        "end": end.isoformat(),
+                        **summary.model_dump(mode="json"),
+                    }
+                )
+                if request_kind != "INCREMENTAL_REFRESH":
+                    historical_truncated = summary.truncated
+                    if not summary.truncated:
+                        self._record_document_coverage(
+                            symbol=symbol,
+                            covered_start=start,
+                            covered_end=end,
+                            observed_at=as_of,
+                            ingestion_run_id=summary.ingestion_run_id,
+                        )
+        verified_start = self._document_coverage_start(symbol=symbol)
+        sec_summary = await self._collect_sec_evidence(
+            symbol=symbol,
+            start=desired_start,
+            as_of=as_of,
+        )
+        return {
+            "outcome": (
+                "WAITING_DOCUMENT_PAGE_BOUND"
+                if historical_truncated
+                else "COMPLETED_BACKFILL_PROGRESS"
+                if verified_start is not None and verified_start > desired_start
+                else "COMPLETED"
+            ),
+            "target_window_start": desired_start.isoformat(),
+            "verified_coverage_start": (
+                verified_start.isoformat() if verified_start is not None else None
+            ),
+            "document_ingestions": summaries,
+            "sec_evidence": sec_summary,
+        }
+
+    def _document_coverage_start(self, *, symbol: str) -> datetime | None:
+        with self.ledger.engine.connect() as connection:
+            rows = connection.execute(
+                select(ledger_events.c.payload)
+                .where(
+                    ledger_events.c.event_type == DOCUMENT_HISTORY_COVERAGE_EVENT,
+                    ledger_events.c.payload["symbol"].as_string() == symbol.upper(),
+                    ledger_events.c.payload["provider"].as_string() == "alpaca_news",
+                )
+                .order_by(ledger_events.c.sequence.desc())
+                .limit(500)
+            ).all()
+        starts = [
+            datetime.fromisoformat(str(dict(row.payload)["covered_start"]))
+            for row in rows
+        ]
+        return min(starts) if starts else None
+
+    def _record_document_coverage(
+        self,
+        *,
+        symbol: str,
+        covered_start: datetime,
+        covered_end: datetime,
+        observed_at: datetime,
+        ingestion_run_id: str,
+    ) -> str:
+        event_id = stable_uuid(
+            "document-history-coverage",
+            self.settings.deployment_environment_id,
+            symbol.upper(),
+            "alpaca_news",
+            covered_start.isoformat(),
+            covered_end.isoformat(),
+        )
+        self.ledger.append(
+            EventEnvelope(
+                event_id=event_id,
+                event_type=DOCUMENT_HISTORY_COVERAGE_EVENT,
+                event_time=observed_at,
+                emitted_at=datetime.now(UTC),
+                producer="research-coordinator",
+                correlation_id=stable_uuid(
+                    "document-history-coverage",
+                    self.settings.deployment_environment_id,
+                    symbol.upper(),
+                    "alpaca_news",
+                ),
+                payload={
+                    "symbol": symbol.upper(),
+                    "provider": "alpaca_news",
+                    "covered_start": covered_start.isoformat(),
+                    "covered_end": covered_end.isoformat(),
+                    "observed_at": observed_at.isoformat(),
+                    "evidence_ingestion_run_id": ingestion_run_id,
+                    "interpretation": "PROVIDER_QUERY_COMPLETED_WITHOUT_PAGE_TRUNCATION",
+                },
+            )
+        )
+        return event_id
+
+    async def _collect_sec_evidence(
+        self,
+        *,
+        symbol: str,
+        start: datetime,
+        as_of: datetime,
+    ) -> dict[str, Any]:
+        if not self.settings.sec_user_agent:
+            return {"status": "DISABLED_MISSING_SEC_USER_AGENT"}
+        existing = self._latest_sec_refresh(symbol=symbol)
+        if existing is not None and existing >= datetime.now(UTC) - timedelta(hours=24):
+            return {"status": "UP_TO_DATE", "last_refreshed_at": existing.isoformat()}
+        async with SecEdgarProvider(user_agent=self.settings.sec_user_agent) as provider:
+            ticker_map = getattr(self, "_sec_ticker_map", None)
+            ticker_map_raw_object_id: str | None = None
+            if ticker_map is None:
+                ticker_page = await provider.fetch_company_ticker_map()
+                archived = self.archive.store_json(
+                    provider=ticker_page.provider,
+                    data_type=ticker_page.data_type,
+                    payload=ticker_page.raw_payload,
+                    request_metadata=ticker_page.request_metadata,
+                    provider_received_at=ticker_page.provider_received_at,
+                )
+                ticker_map_raw_object_id = self.market.register_raw_object(archived)
+                ticker_map = ticker_page.cik_by_symbol
+                self._sec_ticker_map = ticker_map
+            cik = ticker_map.get(symbol.upper())
+            if cik is None:
+                self._record_sec_refresh(
+                    symbol=symbol,
+                    start=start,
+                    as_of=as_of,
+                    status="NOT_APPLICABLE_NO_CIK",
+                    cik=None,
+                    ingestion_run_ids=[],
+                    ticker_map_raw_object_id=ticker_map_raw_object_id,
+                )
+                return {"status": "NOT_APPLICABLE_NO_CIK"}
+            document_summary = await DocumentIngestionService(
                 provider=provider,
                 archive=self.archive,
                 market_store=self.market,
@@ -550,17 +757,103 @@ class ResearchCoordinatorHandler:
                 publisher=self.publisher,
             ).ingest_documents(
                 DocumentFetchRequest(
-                    symbols=(symbol,),
+                    symbols=(symbol.upper(),),
                     start=start,
                     end=as_of,
-                    limit=50,
+                    cik=cik,
+                    forms=("8-K", "10-K", "10-Q", "6-K", "20-F", "40-F"),
+                    limit=1_000,
                     max_pages=self.settings.coordinator_document_max_pages,
                 )
             )
+            facts_page = await provider.fetch_company_facts(
+                CorporateFactsRequest(
+                    symbol=symbol.upper(),
+                    cik=cik,
+                    max_facts=20_000,
+                    start=start,
+                    end=as_of,
+                )
+            )
+        facts_summary = FundamentalsIngestionService(
+            archive=self.archive,
+            market_store=self.market,
+            document_store=self.documents,
+            ledger=self.ledger,
+            publisher=self.publisher,
+        ).ingest_page(facts_page)
+        ingestion_run_ids = [
+            document_summary.ingestion_run_id,
+            facts_summary.ingestion_run_id,
+        ]
+        self._record_sec_refresh(
+            symbol=symbol,
+            start=start,
+            as_of=as_of,
+            status="COMPLETED",
+            cik=cik,
+            ingestion_run_ids=ingestion_run_ids,
+            ticker_map_raw_object_id=ticker_map_raw_object_id,
+        )
         return {
-            "outcome": "COMPLETED",
-            "document_ingestion": summary.model_dump(mode="json"),
+            "status": "COMPLETED",
+            "cik": cik,
+            "filings": document_summary.model_dump(mode="json"),
+            "company_facts": facts_summary.model_dump(mode="json"),
         }
+
+    def _latest_sec_refresh(self, *, symbol: str) -> datetime | None:
+        with self.ledger.engine.connect() as connection:
+            value = connection.execute(
+                select(func.max(ledger_events.c.event_time)).where(
+                    ledger_events.c.event_type == SEC_REFERENCE_REFRESH_EVENT,
+                    ledger_events.c.payload["symbol"].as_string() == symbol.upper(),
+                )
+            ).scalar_one()
+        if not isinstance(value, datetime):
+            return None
+        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+    def _record_sec_refresh(
+        self,
+        *,
+        symbol: str,
+        start: datetime,
+        as_of: datetime,
+        status: str,
+        cik: str | None,
+        ingestion_run_ids: list[str],
+        ticker_map_raw_object_id: str | None,
+    ) -> None:
+        observed_at = datetime.now(UTC)
+        self.ledger.append(
+            EventEnvelope(
+                event_id=stable_uuid(
+                    "sec-reference-refresh",
+                    self.settings.deployment_environment_id,
+                    symbol.upper(),
+                    observed_at.date().isoformat(),
+                ),
+                event_type=SEC_REFERENCE_REFRESH_EVENT,
+                event_time=observed_at,
+                emitted_at=observed_at,
+                producer="research-coordinator",
+                correlation_id=stable_uuid(
+                    "sec-reference-refresh",
+                    self.settings.deployment_environment_id,
+                    symbol.upper(),
+                ),
+                payload={
+                    "symbol": symbol.upper(),
+                    "cik": cik,
+                    "status": status,
+                    "requested_start": start.isoformat(),
+                    "as_of": as_of.isoformat(),
+                    "ingestion_run_ids": ingestion_run_ids,
+                    "ticker_map_raw_object_id": ticker_map_raw_object_id,
+                },
+            )
+        )
 
     async def _materialize_features(self, context: dict[str, Any]) -> dict[str, Any]:
         as_of = datetime.fromisoformat(str(context["as_of"]))
@@ -584,11 +877,30 @@ class ResearchCoordinatorHandler:
             )
         if latest is None:
             return {"outcome": "WAITING_COMPLETED_BAR", "bar_count": len(bars)}
+        # The price features remain based only on completed bars, while the decision
+        # snapshot advances to the actual research time. This lets a pre-open/holiday
+        # cycle use documents that became available after the prior session close
+        # without pretending those documents were known by an older historical bar.
+        observed_now = datetime.now(UTC)
+        decision_as_of = (
+            observed_now
+            if abs(observed_now - as_of) <= timedelta(hours=1)
+            else as_of
+        )
+        if latest.as_of < decision_as_of:
+            latest = self.features.build(
+                symbol=str(context["symbol"]),
+                timeframe=str(context["timeframe"]),
+                as_of=decision_as_of,
+                bars=bars,
+            )
         return {
             "outcome": "COMPLETED",
             "bar_count": len(bars),
             "feature_snapshot_id": latest.feature_snapshot_id,
             "feature_as_of": latest.as_of.isoformat(),
+            "as_of": latest.as_of.isoformat(),
+            "latest_completed_bar_available_from": bars[-1].available_from.isoformat(),
         }
 
     async def _train_ml(self, context: dict[str, Any]) -> dict[str, Any]:
@@ -705,14 +1017,17 @@ class ResearchCoordinatorHandler:
             None,
         )
         if prior is not None:
+            prior_status = str(prior["status"])
             return {
                 "outcome": (
                     "REUSED"
-                    if prior["status"] == ResearchAnalysisStatus.COMPLETED.value
-                    else f"WAITING_ANALYSIS_{prior['status']}"
+                    if prior_status == ResearchAnalysisStatus.COMPLETED.value
+                    else "COMPLETED_ADVISORY_ABSTAINED"
+                    if prior_status == ResearchAnalysisStatus.ABSTAINED.value
+                    else f"WAITING_ANALYSIS_{prior_status}"
                 ),
                 "analysis_id": str(prior["analysis_id"]),
-                "analysis_status": str(prior["status"]),
+                "analysis_status": prior_status,
             }
         try:
             # Keep the qualitative judgment on the same forecast horizon. A
@@ -727,6 +1042,8 @@ class ResearchCoordinatorHandler:
             "outcome": (
                 "COMPLETED"
                 if analysis.status == ResearchAnalysisStatus.COMPLETED
+                else "COMPLETED_ADVISORY_ABSTAINED"
+                if analysis.status == ResearchAnalysisStatus.ABSTAINED
                 else f"WAITING_ANALYSIS_{analysis.status.value}"
             ),
             "analysis_id": analysis.analysis_id,
@@ -734,8 +1051,11 @@ class ResearchCoordinatorHandler:
         }
 
     async def _generate_strategy(self, context: dict[str, Any]) -> dict[str, Any]:
-        if context.get("analysis_status") != ResearchAnalysisStatus.COMPLETED.value:
-            return {"outcome": "WAITING_COMPLETED_ANALYSIS"}
+        if context.get("analysis_status") not in {
+            ResearchAnalysisStatus.COMPLETED.value,
+            ResearchAnalysisStatus.ABSTAINED.value,
+        }:
+            return {"outcome": "WAITING_VALID_ANALYSIS"}
         prior = next(
             (
                 item

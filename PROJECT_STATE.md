@@ -53,7 +53,7 @@
 - Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
   experiment runs, backtest trades, corporate actions, historical universe membership,
   feature parity checks, and walk-forward reports are stored through Alembic revision
-  `20260907_0032`, including exact validation and ML-training contracts, normalized Paper
+  `20260907_0033`, including exact validation and ML-training contracts, normalized Paper
   order legs, shadow risk lineage, fenced workflow
   attempts, generation-attempt audit, runtime leases, and the event outbox.
 - The Phase 3 runner provides buy-and-hold, long/cash momentum, and long/cash
@@ -110,8 +110,11 @@
   shadow-adopted.
 - All shadow deployments are attribution sleeves of one shared virtual master account. Open
   plans atomically reserve its cash and concurrent risk; fills/cancellations settle once.
-  Account risk is an administrator-confirmed immutable revision, and changing it invalidates
-  older exact validation contracts.
+  Account stop distance, target R multiple, per-trade dollars, equity fraction, concurrent
+  risk, daily loss stop, and account floor are an administrator-confirmed immutable revision,
+  and changing any of them invalidates older exact validation contracts. The UI explicitly
+  separates price-stop distance from account-dollar loss and notes that the current profile
+  still closes remaining exposure in the same session.
 - Active deployments recheck the exact execution contract on every tick. Engine, cost, risk,
   feature, or restriction changes move stale deployments to `REVALIDATION_REQUIRED` and
   cancel reserved plans without resetting account history.
@@ -134,7 +137,8 @@
   containing the complete current profile and parameters can enroll. Paper remains off by
   default, account-pinned, single-lifecycle-per-symbol, and hard-pinned to the simulated host;
   the live host remains impossible.
-- A persistent hourly coordinator owns the gap-repaired market-data → refreshed Alpaca News →
+- A persistent hourly coordinator owns the gap-repaired market-data → source-specific
+  document history →
   feature → ML → forecast → Research LLM → constrained strategy → exact-validation →
   shadow-readiness DAG. It checks the full configured XNYS window instead of trusting only the
   latest bar, recovers older incomplete hourly groups, records `WAITING_*` business gates,
@@ -145,6 +149,11 @@
   and current research-search count. ML reuse is bound to dataset plus full training contract.
   Exhausted jobs do not starve later groups and require one confirmation-gated retry. Every
   stage honors its persisted subsystem pause control.
+- Production daily bars and Alpaca News/SEC evidence target 1,826 days. News advances backward
+  in bounded 90-day partitions while its current edge is refreshed; SEC filing metadata and
+  company facts refresh once per symbol per day. Trades, quotes, and option chains are
+  truthfully labeled forward-only, while corporate actions and historical universe
+  membership still require reviewed reference data rather than fabricated backfill.
 - When enabled, the dynamic scanner runs before that DAG and binds each coordinator job to
   its immutable scan ID. Deterministic price, dollar-volume, restriction, and benchmark
   gates precede a four-hour, USD-budgeted LLM re-rank of at most 40 supplied names. When the
@@ -178,10 +187,11 @@
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases. A verified `main` push publishes an immutable GHCR
   commit-SHA image with matching embedded/OCI source provenance; deployment rejects mismatches.
-- The current end-to-end audit passes 175 tests, strict typing across 59 source files,
+- The current end-to-end audit passes 179 tests, strict typing across 59 source files,
   authenticated local and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, fresh schema
-  upgrade/downgrade/re-upgrade checks through `20260907_0032`, zero PostgreSQL schema drift,
-  and the repository secret scan.
+  upgrade and PostgreSQL schema-drift checks through `20260907_0033`,
+  and the repository secret scan. The current source migration head is `20260907_0033`;
+  production remains on `20260907_0032` until the next immutable rollout.
 - A local real read-only dynamic scan merged 258 source names, retained 40 review candidates
   and 20 deep-research stocks, included SNDK, and excluded sampled leveraged/single-stock
   ETFs. Its budgeted Meta re-rank cost an estimated `$0.008322` and moved SNDK from
@@ -231,7 +241,9 @@
 - A constrained generator combines a matching feature snapshot, linked ML forecast, and
   evidence-bound analysis, then requires adversarial LLM critique before compiling an
   immutable research-only strategy DSL. It cannot emit code, size exposure, adopt a strategy,
-  or place an order.
+  or place an order. A valid cited `ABSTAINED` analyst judgment is advisory and may still feed
+  an explicitly exploratory proposal; malformed/rejected output remains blocking, and exact
+  deterministic validation remains the empirical gate.
 - Bounded local ML evidence remains `CANDIDATE`; no model or strategy has been promoted.
 - `.env` explicitly selects `APP_ENV=development`; development daily/news backfills are
   capped at 120 days and one-minute backfills at 7 days by default. The active scope is
@@ -243,8 +255,10 @@
   coordinator workers with SQL heartbeats. Workflow jobs have dependency-aware leases and ownership checks; ledger
   events have a retryable SQL outbox with stable event IDs, payload-redacted dead-letter
   visibility, and confirmation-gated single-event requeue.
-- Phase 6.1 data pages support dataset-specific drill-down, date grouping, pagination,
-  normalized-object views, and collapsed raw payloads. Strategy pages now explicitly
+- Phase 6.1 data pages are ticker-first and show populated plus missing price, news, filing,
+  fact, action, option, stream, feature, ML, and LLM datasets with true event-time coverage,
+  separate ingestion time, date grouping, pagination, readable records, and collapsed raw
+  payloads. Strategy pages now explicitly
   distinguish deterministic baselines from hybrid candidates and show the full point-in-time
   data → ML → Research LLM → generator → critic → exact spec → validation → shadow chain in
   readable cards; JSON is relegated to Advanced diagnostics. Pipeline jobs and quality
@@ -347,3 +361,6 @@
   retain immutable probe evidence and never weaken completeness after the observed boundary.
 - ADR 0033: use one deployable DAY-limit/bracket/MOC profile across validation, Shadow, and
   Paper; persist every broker leg and recover deterministic emergency exits.
+- ADR 0034: organize data by ticker and true event time, converge source-specific historical
+  coverage, permit advisory LLM abstention to reach falsifiable generation, and govern price
+  geometry separately from account-dollar risk.

@@ -70,6 +70,10 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert system_status["market_scanner_enabled"] is False
         assert system_status["market_scanner_llm_enabled"] is False
         assert system_status["market_scanner_auto_trading_pool_enabled"] is False
+        assert system_status["coordinator_market_lookback_days"] == 1826
+        assert system_status["coordinator_document_lookback_days"] == 1826
+        assert system_status["coordinator_document_partition_days"] == 90
+        assert system_status["sec_configured"] is False
         scanner = client.get("/v1/market-scanner/status").json()
         assert scanner["policy_version"] == "market_scanner@0.2.0"
         assert scanner["latest_run"] is None
@@ -107,6 +111,38 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert bar_page["total"] == 1
         assert len(bar_page["items"]) == 1
         assert bar_page["date_groups"][0]["count"] == 1
+        symbol_catalog = client.get("/v1/explorer/symbols").json()
+        assert symbol_catalog["backfill_policy"] == {
+            "daily_bars_target_days": 120,
+            "news_and_sec_target_days": 120,
+            "partition_days": 90,
+            "forward_only": [
+                "option_snapshots",
+                "market_trades",
+                "market_quotes",
+            ],
+            "reviewed_reference_import": [
+                "corporate_actions",
+                "universe_memberships",
+            ],
+        }
+        demo_symbol = next(
+            item for item in symbol_catalog["symbols"] if item["symbol"] == "DEMO"
+        )
+        demo_bars = next(
+            item
+            for item in demo_symbol["datasets"]
+            if item["key"] == "market_bars:1Min"
+        )
+        assert demo_bars["record_count"] == 1
+        assert demo_bars["history_kind"] == "HISTORICAL_BACKFILL"
+        symbol_page = client.get(
+            "/v1/explorer/symbols/DEMO?dataset=market_bars%3A1Min&limit=1"
+        ).json()
+        assert symbol_page["symbol"] == "DEMO"
+        assert symbol_page["total"] == 1
+        assert symbol_page["items"][0]["close"] == "100.50000000"
+        assert symbol_page["date_groups"][0]["count"] == 1
         data_health = client.get("/v1/data-health").json()
         assert data_health["market_bars"] == 1
         assert data_health["source_documents"] == 0

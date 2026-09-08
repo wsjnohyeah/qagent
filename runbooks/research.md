@@ -175,8 +175,9 @@ curl -fsS \
 
 ## Current limitations
 
-- Corporate-action provider ingestion and point-in-time universe data acquisition are not
-  yet connected; the immutable schema/store contracts and bounded fixtures are implemented.
+- SEC filing/company-fact ingestion is connected to the production coordinator. Corporate-
+  action provider ingestion and point-in-time universe data acquisition are not yet
+  connected; the immutable schema/store contracts and bounded fixtures are implemented.
 - Split and gross cash-dividend accounting are implemented. Symbol changes still fail closed
   until cross-symbol market-data replay is supported; late split metadata is rejected because
   it would contaminate the feature path.

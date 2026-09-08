@@ -13,7 +13,10 @@ from agentic_quant.database import (
     backtest_trades,
     catalysts,
     code_change_sessions,
+    corporate_actions,
+    corporate_facts,
     data_quality_reports,
+    document_symbols,
     experiment_runs,
     feature_snapshots,
     ingestion_runs,
@@ -27,13 +30,13 @@ from agentic_quant.database import (
     ml_models,
     ml_training_runs,
     object_threads,
+    option_snapshots,
     raw_objects,
     research_analyses,
     shadow_deployments,
     shadow_events,
     source_document_versions,
     source_documents,
-    corporate_facts,
     strategy_adoptions,
     strategy_generation_attempts,
     strategy_specs,
@@ -42,6 +45,7 @@ from agentic_quant.database import (
     system_list_revisions,
     system_lists,
     thread_posts,
+    universe_memberships,
     validation_reports,
     workflow_jobs,
 )
@@ -455,6 +459,554 @@ class SystemObjectStore:
         return {
             "raw_datasets": [dict(row._mapping) for row in raw],
             "market_bar_coverage": [dict(row._mapping) for row in coverage],
+        }
+
+    def symbol_catalog(self) -> dict[str, Any]:
+        """Return event-time coverage grouped by ticker instead of archive receipt time."""
+        symbols: dict[str, list[dict[str, Any]]] = {}
+        document_coverage_starts: dict[str, datetime] = {}
+
+        def add(
+            rows: Any,
+            *,
+            key: str,
+            label: str,
+            history_kind: str,
+            timeframe_key: str | None = None,
+        ) -> None:
+            for row in rows:
+                value = dict(row._mapping)
+                symbol = str(value.pop("symbol")).upper()
+                suffix = str(value.pop(timeframe_key)) if timeframe_key else None
+                symbols.setdefault(symbol, []).append(
+                    {
+                        "key": f"{key}:{suffix}" if suffix else key,
+                        "label": f"{label} · {suffix}" if suffix else label,
+                        "history_kind": history_kind,
+                        **value,
+                    }
+                )
+
+        with self.engine.connect() as connection:
+            add(
+                connection.execute(
+                    select(
+                        market_bars.c.symbol,
+                        market_bars.c.timeframe,
+                        func.count().label("record_count"),
+                        func.min(market_bars.c.event_time).label("event_earliest"),
+                        func.max(market_bars.c.event_time).label("event_latest"),
+                        func.min(market_bars.c.ingested_at).label("ingested_earliest"),
+                        func.max(market_bars.c.ingested_at).label("ingested_latest"),
+                    ).group_by(market_bars.c.symbol, market_bars.c.timeframe)
+                ),
+                key="market_bars",
+                label="Market bars",
+                history_kind="HISTORICAL_BACKFILL",
+                timeframe_key="timeframe",
+            )
+            add(
+                connection.execute(
+                    select(
+                        document_symbols.c.symbol,
+                        source_documents.c.source_kind,
+                        func.count(source_document_versions.c.version_id).label(
+                            "record_count"
+                        ),
+                        func.min(source_documents.c.published_at).label("event_earliest"),
+                        func.max(source_documents.c.published_at).label("event_latest"),
+                        func.min(source_document_versions.c.ingested_at).label(
+                            "ingested_earliest"
+                        ),
+                        func.max(source_document_versions.c.ingested_at).label(
+                            "ingested_latest"
+                        ),
+                    )
+                    .select_from(
+                        document_symbols.join(
+                            source_documents,
+                            source_documents.c.document_id
+                            == document_symbols.c.document_id,
+                        ).join(
+                            source_document_versions,
+                            source_document_versions.c.document_id
+                            == source_documents.c.document_id,
+                        )
+                    )
+                    .group_by(document_symbols.c.symbol, source_documents.c.source_kind)
+                ),
+                key="documents",
+                label="Documents",
+                history_kind="BOUNDED_PROVIDER_HISTORY",
+                timeframe_key="source_kind",
+            )
+            for table, key, label, event_column, ingested_column, history_kind in (
+                (
+                    corporate_facts,
+                    "corporate_facts",
+                    "Company facts",
+                    corporate_facts.c.period_end,
+                    corporate_facts.c.ingested_at,
+                    "HISTORICAL_BACKFILL",
+                ),
+                (
+                    corporate_actions,
+                    "corporate_actions",
+                    "Corporate actions",
+                    corporate_actions.c.effective_at,
+                    corporate_actions.c.ingested_at,
+                    "REVIEWED_REFERENCE_IMPORT",
+                ),
+                (
+                    option_snapshots,
+                    "option_snapshots",
+                    "Option snapshots",
+                    option_snapshots.c.as_of,
+                    option_snapshots.c.ingested_at,
+                    "FORWARD_SNAPSHOT",
+                ),
+                (
+                    market_trades,
+                    "market_trades",
+                    "Market trades",
+                    market_trades.c.event_time,
+                    market_trades.c.ingested_at,
+                    "FORWARD_STREAM",
+                ),
+                (
+                    market_quotes,
+                    "market_quotes",
+                    "Market quotes",
+                    market_quotes.c.event_time,
+                    market_quotes.c.ingested_at,
+                    "FORWARD_STREAM",
+                ),
+            ):
+                symbol_column = (
+                    table.c.underlying_symbol
+                    if table is option_snapshots
+                    else table.c.symbol
+                )
+                add(
+                    connection.execute(
+                        select(
+                            symbol_column.label("symbol"),
+                            func.count().label("record_count"),
+                            func.min(event_column).label("event_earliest"),
+                            func.max(event_column).label("event_latest"),
+                            func.min(ingested_column).label("ingested_earliest"),
+                            func.max(ingested_column).label("ingested_latest"),
+                        ).group_by(symbol_column)
+                    ),
+                    key=key,
+                    label=label,
+                    history_kind=history_kind,
+                )
+            add(
+                connection.execute(
+                    select(
+                        universe_memberships.c.symbol,
+                        func.count().label("record_count"),
+                        func.min(universe_memberships.c.effective_from).label(
+                            "event_earliest"
+                        ),
+                        func.max(universe_memberships.c.effective_from).label(
+                            "event_latest"
+                        ),
+                        func.min(universe_memberships.c.created_at).label(
+                            "ingested_earliest"
+                        ),
+                        func.max(universe_memberships.c.created_at).label(
+                            "ingested_latest"
+                        ),
+                    ).group_by(universe_memberships.c.symbol)
+                ),
+                key="universe_memberships",
+                label="Universe memberships",
+                history_kind="REVIEWED_REFERENCE_IMPORT",
+            )
+            for table, key, label, event_column in (
+                (
+                    feature_snapshots,
+                    "feature_snapshots",
+                    "Feature snapshots",
+                    feature_snapshots.c.as_of,
+                ),
+                (ml_forecasts, "ml_forecasts", "ML forecasts", ml_forecasts.c.as_of),
+                (
+                    research_analyses,
+                    "research_analyses",
+                    "Research LLM analyses",
+                    research_analyses.c.as_of,
+                ),
+            ):
+                add(
+                    connection.execute(
+                        select(
+                            table.c.symbol,
+                            func.count().label("record_count"),
+                            func.min(event_column).label("event_earliest"),
+                            func.max(event_column).label("event_latest"),
+                            func.min(table.c.created_at).label("ingested_earliest"),
+                            func.max(table.c.created_at).label("ingested_latest"),
+                        ).group_by(table.c.symbol)
+                    ),
+                    key=key,
+                    label=label,
+                    history_kind="DERIVED_POINT_IN_TIME",
+                )
+            governed_members = connection.execute(
+                select(system_list_revisions.c.members_json)
+                .join(
+                    system_lists,
+                    system_lists.c.list_id == system_list_revisions.c.list_id,
+                )
+                .where(
+                    system_lists.c.slug.in_(
+                        (
+                            "trading-universe",
+                            "focus-watchlist",
+                            "candidate-list",
+                            "scanner-trading-pool",
+                            "shadow-active",
+                        )
+                    ),
+                    system_list_revisions.c.revision_number
+                    == system_lists.c.current_revision,
+                )
+            ).scalars()
+            for members in governed_members:
+                for symbol in members or ():
+                    symbols.setdefault(str(symbol).upper(), [])
+            for payload in connection.execute(
+                select(ledger_events.c.payload).where(
+                    ledger_events.c.event_type == "document.history.coverage.v1"
+                )
+            ).scalars():
+                value = dict(payload or {})
+                if value.get("provider") != "alpaca_news" or not value.get("symbol"):
+                    continue
+                covered_start = datetime.fromisoformat(str(value["covered_start"]))
+                normalized_symbol = str(value["symbol"]).upper()
+                symbols.setdefault(normalized_symbol, [])
+                current = document_coverage_starts.get(normalized_symbol)
+                if current is None or covered_start < current:
+                    document_coverage_starts[normalized_symbol] = covered_start
+
+        expected = (
+            ("market_bars:1Day", "Market bars · 1Day", "HISTORICAL_BACKFILL"),
+            ("documents:news", "Documents · news", "BOUNDED_PROVIDER_HISTORY"),
+            (
+                "documents:sec_filing",
+                "Documents · sec_filing",
+                "HISTORICAL_BACKFILL",
+            ),
+            ("corporate_facts", "Company facts", "HISTORICAL_BACKFILL"),
+            (
+                "corporate_actions",
+                "Corporate actions",
+                "REVIEWED_REFERENCE_IMPORT",
+            ),
+            ("option_snapshots", "Option snapshots", "FORWARD_SNAPSHOT"),
+            ("market_trades", "Market trades", "FORWARD_STREAM"),
+            ("market_quotes", "Market quotes", "FORWARD_STREAM"),
+            (
+                "universe_memberships",
+                "Universe memberships",
+                "REVIEWED_REFERENCE_IMPORT",
+            ),
+            (
+                "feature_snapshots",
+                "Feature snapshots",
+                "DERIVED_POINT_IN_TIME",
+            ),
+            ("ml_forecasts", "ML forecasts", "DERIVED_POINT_IN_TIME"),
+            (
+                "research_analyses",
+                "Research LLM analyses",
+                "DERIVED_POINT_IN_TIME",
+            ),
+        )
+        values = []
+        for symbol, datasets in sorted(symbols.items()):
+            present = {str(item["key"]) for item in datasets}
+            datasets.extend(
+                {
+                    "key": key,
+                    "label": label,
+                    "history_kind": history_kind,
+                    "record_count": 0,
+                    "event_earliest": None,
+                    "event_latest": None,
+                    "ingested_earliest": None,
+                    "ingested_latest": None,
+                }
+                for key, label, history_kind in expected
+                if key not in present
+            )
+            for dataset in datasets:
+                if dataset["key"] == "documents:news":
+                    dataset["verified_window_start"] = document_coverage_starts.get(
+                        symbol
+                    )
+            event_starts = [
+                item["event_earliest"]
+                for item in datasets
+                if item["event_earliest"] is not None
+            ]
+            event_ends = [
+                item["event_latest"]
+                for item in datasets
+                if item["event_latest"] is not None
+            ]
+            values.append(
+                {
+                    "symbol": symbol,
+                    "dataset_count": len(datasets),
+                    "available_dataset_count": sum(
+                        int(item["record_count"] > 0) for item in datasets
+                    ),
+                    "record_count": sum(int(item["record_count"]) for item in datasets),
+                    "event_earliest": min(event_starts) if event_starts else None,
+                    "event_latest": max(event_ends) if event_ends else None,
+                    "datasets": sorted(datasets, key=lambda item: str(item["key"])),
+                }
+            )
+        return {"symbols": values}
+
+    def symbol_data_page(
+        self,
+        *,
+        symbol: str,
+        dataset: str | None,
+        limit: int,
+        offset: int,
+        day: date | None = None,
+    ) -> dict[str, Any]:
+        normalized = symbol.upper()
+        catalog = next(
+            (
+                item
+                for item in self.symbol_catalog()["symbols"]
+                if item["symbol"] == normalized
+            ),
+            None,
+        )
+        if catalog is None:
+            return {
+                "symbol": normalized,
+                "datasets": [],
+                "selected_dataset": dataset,
+                "total": 0,
+                "limit": limit,
+                "offset": offset,
+                "date_groups": [],
+                "items": [],
+            }
+        if not dataset:
+            return {
+                "symbol": normalized,
+                "datasets": catalog["datasets"],
+                "selected_dataset": None,
+                "total": catalog["record_count"],
+                "limit": limit,
+                "offset": offset,
+                "date_groups": [],
+                "items": [],
+            }
+
+        base: Any
+        if dataset.startswith("market_bars:"):
+            timeframe = dataset.split(":", 1)[1]
+            base = select(
+                market_bars.c.bar_id.label("record_id"),
+                market_bars.c.event_time.label("event_at"),
+                market_bars.c.available_from,
+                market_bars.c.open,
+                market_bars.c.high,
+                market_bars.c.low,
+                market_bars.c.close,
+                market_bars.c.volume,
+                market_bars.c.trade_count,
+                market_bars.c.vwap,
+                market_bars.c.source,
+                market_bars.c.feed,
+                market_bars.c.raw_object_id,
+                market_bars.c.ingested_at,
+            ).where(
+                market_bars.c.symbol == normalized,
+                market_bars.c.timeframe == timeframe,
+            )
+        elif dataset.startswith("documents:"):
+            source_kind = dataset.split(":", 1)[1]
+            base = (
+                select(
+                    source_document_versions.c.version_id.label("record_id"),
+                    source_documents.c.published_at.label("event_at"),
+                    source_documents.c.source_kind,
+                    source_documents.c.source_tier,
+                    source_documents.c.publisher,
+                    source_document_versions.c.title,
+                    source_document_versions.c.summary,
+                    source_documents.c.canonical_url,
+                    source_document_versions.c.raw_object_id,
+                    source_document_versions.c.ingested_at,
+                )
+                .select_from(
+                    document_symbols.join(
+                        source_documents,
+                        source_documents.c.document_id == document_symbols.c.document_id,
+                    ).join(
+                        source_document_versions,
+                        source_document_versions.c.document_id
+                        == source_documents.c.document_id,
+                    )
+                )
+                .where(
+                    document_symbols.c.symbol == normalized,
+                    source_documents.c.source_kind == source_kind,
+                )
+            )
+        elif dataset == "corporate_facts":
+            base = select(
+                corporate_facts.c.fact_id.label("record_id"),
+                corporate_facts.c.period_end.label("event_at"),
+                corporate_facts.c.available_from,
+                corporate_facts.c.tag,
+                corporate_facts.c.form,
+                corporate_facts.c.fiscal_year,
+                corporate_facts.c.fiscal_period,
+                corporate_facts.c.unit,
+                corporate_facts.c.value_text,
+                corporate_facts.c.accession_number,
+                corporate_facts.c.raw_object_id,
+                corporate_facts.c.ingested_at,
+            ).where(corporate_facts.c.symbol == normalized)
+        elif dataset == "corporate_actions":
+            base = select(
+                corporate_actions.c.corporate_action_id.label("record_id"),
+                corporate_actions.c.effective_at.label("event_at"),
+                corporate_actions.c.available_from,
+                corporate_actions.c.action_type,
+                corporate_actions.c.split_ratio,
+                corporate_actions.c.cash_amount,
+                corporate_actions.c.currency,
+                corporate_actions.c.new_symbol,
+                corporate_actions.c.source,
+                corporate_actions.c.raw_object_id,
+                corporate_actions.c.ingested_at,
+            ).where(corporate_actions.c.symbol == normalized)
+        elif dataset == "option_snapshots":
+            base = select(
+                option_snapshots.c.option_snapshot_id.label("record_id"),
+                option_snapshots.c.as_of.label("event_at"),
+                option_snapshots.c.available_from,
+                option_snapshots.c.contract_symbol,
+                option_snapshots.c.bid_price,
+                option_snapshots.c.ask_price,
+                option_snapshots.c.last_trade_price,
+                option_snapshots.c.implied_volatility,
+                option_snapshots.c.delta,
+                option_snapshots.c.raw_object_id,
+                option_snapshots.c.ingested_at,
+            ).where(option_snapshots.c.underlying_symbol == normalized)
+        elif dataset in {"market_trades", "market_quotes"}:
+            table = market_trades if dataset == "market_trades" else market_quotes
+            base = select(table).where(table.c.symbol == normalized)
+            base = base.add_columns(table.c.event_time.label("event_at"))
+        elif dataset == "universe_memberships":
+            base = select(
+                universe_memberships.c.membership_id.label("record_id"),
+                universe_memberships.c.effective_from.label("event_at"),
+                universe_memberships.c.effective_to,
+                universe_memberships.c.available_from,
+                universe_memberships.c.universe,
+                universe_memberships.c.source,
+                universe_memberships.c.source_version,
+                universe_memberships.c.created_at.label("ingested_at"),
+            ).where(universe_memberships.c.symbol == normalized)
+        elif dataset == "feature_snapshots":
+            base = select(
+                feature_snapshots.c.feature_snapshot_id.label("record_id"),
+                feature_snapshots.c.as_of.label("event_at"),
+                feature_snapshots.c.feature_set_version,
+                feature_snapshots.c.feature_values,
+                feature_snapshots.c.source_max_available_from,
+                feature_snapshots.c.data_hash,
+                feature_snapshots.c.created_at.label("ingested_at"),
+            ).where(feature_snapshots.c.symbol == normalized)
+        elif dataset == "ml_forecasts":
+            base = select(
+                ml_forecasts.c.forecast_id.label("record_id"),
+                ml_forecasts.c.as_of.label("event_at"),
+                ml_forecasts.c.horizon,
+                ml_forecasts.c.expected_return,
+                ml_forecasts.c.probability_up,
+                ml_forecasts.c.uncertainty,
+                ml_forecasts.c.model_version,
+                ml_forecasts.c.training_data_cutoff,
+                ml_forecasts.c.created_at.label("ingested_at"),
+            ).where(ml_forecasts.c.symbol == normalized)
+        elif dataset == "research_analyses":
+            base = select(
+                research_analyses.c.analysis_id.label("record_id"),
+                research_analyses.c.as_of.label("event_at"),
+                research_analyses.c.status,
+                research_analyses.c.schema_version,
+                research_analyses.c.analysis_json,
+                research_analyses.c.rejection_reason,
+                research_analyses.c.llm_invocation_id,
+                research_analyses.c.created_at.label("ingested_at"),
+            ).where(research_analyses.c.symbol == normalized)
+        else:
+            raise ValueError("Unknown symbol dataset")
+
+        rows = base.subquery()
+        filters: list[Any] = []
+        if day is not None:
+            start = datetime.combine(day, datetime.min.time(), tzinfo=UTC)
+            filters.extend((rows.c.event_at >= start, rows.c.event_at < start + timedelta(days=1)))
+        with self.engine.connect() as connection:
+            total = int(
+                connection.execute(
+                    select(func.count()).select_from(rows).where(*filters)
+                ).scalar_one()
+            )
+            items = [
+                dict(row._mapping)
+                for row in connection.execute(
+                    select(rows)
+                    .where(*filters)
+                    .order_by(rows.c.event_at.desc())
+                    .offset(offset)
+                    .limit(limit)
+                )
+            ]
+            date_groups = [
+                {
+                    "date": str(row._mapping["day"]),
+                    "count": int(row._mapping["count"]),
+                }
+                for row in connection.execute(
+                    select(
+                        func.date(rows.c.event_at).label("day"),
+                        func.count().label("count"),
+                    )
+                    .group_by(func.date(rows.c.event_at))
+                    .order_by(func.date(rows.c.event_at).desc())
+                    .limit(90)
+                )
+            ]
+        return {
+            "symbol": normalized,
+            "datasets": catalog["datasets"],
+            "selected_dataset": dataset,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "selected_date": day,
+            "date_groups": date_groups,
+            "items": items,
         }
 
     def raw_object_list(self, *, limit: int = 100) -> list[dict[str, Any]]:

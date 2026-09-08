@@ -17,6 +17,7 @@ import httpx
 from agentic_quant.domain import CorporateFact, SourceDocument, SourceTier
 from agentic_quant.ids import uuid7
 from agentic_quant.providers.base import (
+    CompanyTickerMapPage,
     CorporateFactsPage,
     CorporateFactsRequest,
     DocumentFetchRequest,
@@ -157,6 +158,8 @@ class AlpacaNewsProvider(_HttpJsonProvider):
             },
             client=client,
         )
+        self._submission_files: tuple[str, ...] = ()
+        self._submission_context: dict[str, str] = {}
 
     async def fetch_documents_page(
         self,
@@ -247,22 +250,61 @@ class SecEdgarProvider(_HttpJsonProvider):
             client=client,
         )
 
+    async def fetch_company_ticker_map(self) -> CompanyTickerMapPage:
+        endpoint = "https://www.sec.gov/files/company_tickers.json"
+        response = await self._get(endpoint)
+        received_at = datetime.now(UTC)
+        payload = response.json()
+        cik_by_symbol = {
+            str(item["ticker"]).upper(): str(item["cik_str"]).zfill(10)
+            for item in payload.values()
+            if item.get("ticker") and item.get("cik_str") is not None
+        }
+        return CompanyTickerMapPage(
+            provider=self.name,
+            data_type="company_tickers",
+            provider_received_at=received_at,
+            request_metadata={"endpoint": endpoint},
+            raw_payload=payload,
+            cik_by_symbol=cik_by_symbol,
+        )
+
     async def fetch_documents_page(
         self,
         request: DocumentFetchRequest,
         *,
         page_token: str | None = None,
     ) -> DocumentPage:
-        if page_token is not None:
-            raise ValueError("SEC submissions adapter does not paginate inline")
         if not request.cik:
             raise ValueError("SEC document requests require a CIK")
         cik = request.cik.zfill(10)
-        endpoint = f"/submissions/CIK{cik}.json"
+        endpoint = (
+            f"/submissions/{page_token}"
+            if page_token is not None
+            else f"/submissions/CIK{cik}.json"
+        )
         response = await self._get(endpoint)
         received_at = datetime.now(UTC)
         payload = response.json()
+        if page_token is None:
+            self._submission_context = {
+                "name": str(payload.get("name") or request.symbols[0].upper()),
+                "cik": str(payload.get("cik") or cik).zfill(10),
+            }
+            self._submission_files = tuple(
+                str(item["name"])
+                for item in payload.get("filings", {}).get("files", ())
+                if item.get("name")
+                and self._submission_file_overlaps(item, request)
+            )
         documents = self._normalize_filings(payload, request, received_at)
+        next_page_token: str | None = None
+        if page_token is None and self._submission_files:
+            next_page_token = self._submission_files[0]
+        elif page_token in self._submission_files:
+            index = self._submission_files.index(page_token)
+            if index + 1 < len(self._submission_files):
+                next_page_token = self._submission_files[index + 1]
         return DocumentPage(
             provider=self.name,
             data_type="sec_filings",
@@ -274,7 +316,31 @@ class SecEdgarProvider(_HttpJsonProvider):
             },
             raw_payload=payload,
             documents=documents,
+            next_page_token=next_page_token,
         )
+
+    @staticmethod
+    def _submission_file_overlaps(
+        item: dict[str, Any],
+        request: DocumentFetchRequest,
+    ) -> bool:
+        file_start = (
+            _utc_timestamp(str(item["filingFrom"]))
+            if item.get("filingFrom")
+            else None
+        )
+        file_end = (
+            _utc_timestamp(str(item["filingTo"]))
+            if item.get("filingTo")
+            else None
+        )
+        if request.start is not None and file_end is not None:
+            if file_end < request.start.astimezone(UTC):
+                return False
+        if request.end is not None and file_start is not None:
+            if file_start > request.end.astimezone(UTC):
+                return False
+        return True
 
     def _normalize_filings(
         self,
@@ -282,11 +348,19 @@ class SecEdgarProvider(_HttpJsonProvider):
         request: DocumentFetchRequest,
         received_at: datetime,
     ) -> tuple[SourceDocument, ...]:
-        recent = payload.get("filings", {}).get("recent", {})
+        recent = payload.get("filings", {}).get("recent") or payload
         accessions = recent.get("accessionNumber", ())
         allowed_forms = {value.upper() for value in request.forms}
-        issuer_name = str(payload.get("name") or request.symbols[0].upper())
-        cik = str(payload.get("cik") or request.cik).zfill(10)
+        issuer_name = str(
+            payload.get("name")
+            or self._submission_context.get("name")
+            or request.symbols[0].upper()
+        )
+        cik = str(
+            payload.get("cik")
+            or self._submission_context.get("cik")
+            or request.cik
+        ).zfill(10)
         cik_path = str(int(cik))
         documents: list[SourceDocument] = []
         for index, accession in enumerate(accessions):
@@ -361,6 +435,8 @@ class SecEdgarProvider(_HttpJsonProvider):
                 "symbol": request.symbol.upper(),
                 "taxonomies": request.taxonomies,
                 "max_facts": request.max_facts,
+                "start": request.start.isoformat() if request.start else None,
+                "end": request.end.isoformat() if request.end else None,
             },
             raw_payload=payload,
             facts=facts,
@@ -384,6 +460,11 @@ class SecEdgarProvider(_HttpJsonProvider):
                         filed = item.get("filed")
                         form = item.get("form")
                         if not end or not filed or not form:
+                            continue
+                        period_end = _utc_timestamp(str(end))
+                        if request.start and period_end < request.start.astimezone(UTC):
+                            continue
+                        if request.end and period_end > request.end.astimezone(UTC):
                             continue
                         value_text = str(item.get("val"))
                         fingerprint_material = json.dumps(
@@ -440,7 +521,7 @@ class SecEdgarProvider(_HttpJsonProvider):
                                     if item.get("start")
                                     else None
                                 ),
-                                period_end=_utc_timestamp(str(end)),
+                                period_end=period_end,
                                 filed_at=filed_at,
                                 accepted_at=accepted_at,
                                 fiscal_year=(int(item["fy"]) if item.get("fy") else None),

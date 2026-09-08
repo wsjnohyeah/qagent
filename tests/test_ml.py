@@ -372,6 +372,26 @@ def test_ml_labels_follow_executable_bars_and_ignore_sparse_snapshot_spacing(
     )
     assert dense[0].label_available_from == bars[1].available_from
 
+    decision_time = snapshots[-1].as_of + timedelta(hours=12)
+    research.record_feature_snapshot(
+        snapshots[-1].model_copy(
+            update={
+                "feature_snapshot_id": uuid7(),
+                "as_of": decision_time,
+                "data_hash": hashlib.sha256(b"decision-time-snapshot").hexdigest(),
+                "created_at": decision_time,
+            }
+        )
+    )
+    with_decision_snapshot = MLDatasetBuilder(research).build(
+        symbol="AAPL",
+        timeframe="1Day",
+        as_of_end=decision_time,
+        horizon_bars=1,
+        policy=policy,
+    )
+    assert with_decision_snapshot == dense
+
     class SparseSnapshotStore:
         engine = research.engine
 

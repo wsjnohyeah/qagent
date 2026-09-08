@@ -3493,6 +3493,60 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: a permanent domain, off-site backup destination, and external alert
   channel still require operator choices; statistical evidence still requires elapsed time.
 
+### C051 — `Make research history and strategy funnel observable`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-07 PDT.
+- User intent: make production data coverage genuinely multi-year where the source supports
+  it, organize Data Explorer by ticker, let ML and LLM produce testable strategy candidates,
+  explain and widen risk controls coherently, and prepare the next market-open Shadow path.
+- Scope:
+  - Replaced archive-first navigation with a ticker-first catalog covering price, news, SEC
+    filings/facts, actions, options, streams, features, forecasts, and Research LLM analyses.
+    It exposes missing datasets, source event-time range, separate ingestion range, date
+    grouping, pagination, readable records, and raw lineage.
+  - Changed the production document target to 1,826 days. Alpaca News advances backward in
+    completed 90-day partitions while the newest day is refreshed; development remains
+    bounded. Added daily SEC ticker resolution, historical filing pagination, and bounded
+    five-year company-fact normalization when `SEC_USER_AGENT` is configured.
+  - Added current decision-time feature snapshots so pre-open/weekend evidence can be used
+    without changing the completed daily price inputs. Such snapshots are deliberately
+    excluded from ML label construction.
+  - Made citation-valid Research LLM abstention advisory rather than a pre-generator veto.
+    Exploratory hypotheses still require strict schema, a second LLM critique, exact
+    walk-forward validation, and separate human adoption before Shadow.
+  - Added visible generator/critic attempts and per-ticker ML/LLM records. The System Steward
+    can receive compact ticker coverage in relevant conversations.
+  - Added administrator-confirmed stop-distance and target-R fields to virtual-account risk
+    revisions and Alembic revision `20260907_0033`; the UI now distinguishes price geometry,
+    dollar risk, and the current same-session holding contract.
+- Architecture/decision impact:
+  - ADR 0034 records source-specific backfill semantics and restores the intended LLM role as
+    an idea/interpretation input rather than a risk or research authority.
+  - Daily bars, news, and SEC evidence can target five years; live trades/quotes and option
+    snapshots remain forward-only, while corporate actions and historical universe data
+    remain reviewed-reference gaps. The application reports these distinctions explicitly.
+  - A trade win rate above 50% remains insufficient by itself. Existing fold, regime,
+    drawdown, positive-OOS, Deflated Sharpe, exact-contract, and human confirmation gates are
+    unchanged.
+- Validation:
+  - `make check` passes 179 tests, Flake8, and strict mypy across 59 source files.
+  - Focused tests cover ticker-first coverage/pagination, backward empty-news partitions,
+    SEC ticker resolution and historical submissions, advisory abstention generation,
+    decision-time ML exclusion, and confirmed stop-geometry revision.
+  - Node 24 parses the complete browser script through the Docker image. `make release-check`
+    passes the authenticated local/PostgreSQL/Redis/MinIO doctors, secret scan, rebuilt image,
+    and zero PostgreSQL schema drift. A fresh SQLite `0033 → 0032 → 0033` migration round trip
+    also passes. CI image publication, backup, immutable rollout, production backfill, and
+    runtime evidence remain required.
+- Expected global state after commit:
+  - Local source has the corrected data/research/risk-control workflow. Production remains on
+    `cb54b27a53ecd8bd020b834f4433bc63399a9f6a` until the new commit passes CI and deployment.
+  - Production risk remains unchanged until the administrator confirms a reviewed revision;
+    no strategy, Shadow deployment, Paper enrollment, position, or order is fabricated.
+- Corrections/follow-ups: record the exact commit/image, migration, source coverage progress,
+  generated/validated strategy outcomes, and any pending risk confirmation after rollout.
+
 ## Template for future commit entries
 
 Copy this section before making a commit:

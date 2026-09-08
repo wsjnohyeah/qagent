@@ -30,6 +30,10 @@ ENABLE_SOCIAL_AGGREGATES=false
 
 ## Operations
 
+In production, the autonomous coordinator resolves ticker-to-CIK mappings from the SEC,
+archives that mapping, and refreshes the configured five-year filing/fact window at most once
+per symbol per day. Manual commands below remain useful for bounded diagnosis and replay.
+
 Start and verify the full stack:
 
 ```sh

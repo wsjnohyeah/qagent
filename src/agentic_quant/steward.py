@@ -555,6 +555,28 @@ class SystemSteward:
                 f"DATASET:{dataset['provider']}:{dataset['data_type']}"
             )
             citations.add(dataset["citation_id"])
+        symbol_coverage = []
+        for item in self.objects.symbol_catalog()["symbols"][:40]:
+            compact = {
+                "symbol": item["symbol"],
+                "citation_id": f"SYMBOL:{item['symbol']}",
+                "datasets": [
+                    {
+                        key: dataset.get(key)
+                        for key in (
+                            "key",
+                            "record_count",
+                            "event_earliest",
+                            "event_latest",
+                            "history_kind",
+                        )
+                    }
+                    for dataset in item["datasets"]
+                    if int(dataset["record_count"]) > 0
+                ],
+            }
+            symbol_coverage.append(compact)
+            citations.add(str(compact["citation_id"]))
         system_status = self.system_status()
         market_scanner = dict(self.market_scanner_status())
         latest_scan = market_scanner.get("latest_run")
@@ -615,6 +637,7 @@ class SystemSteward:
                 "counts": self.objects.object_summary(),
                 "lists": lists,
                 "data_catalog": catalog,
+                "symbol_coverage": symbol_coverage,
                 "market_scanner": market_scanner,
                 "strategies": strategies,
                 "shadow_deployments": deployments,
@@ -678,6 +701,17 @@ class SystemSteward:
                 "候选",
             ),
             "data_catalog": ("data", "news", "filing", "raw", "数据", "新闻"),
+            "symbol_coverage": (
+                "data",
+                "coverage",
+                "ticker",
+                "symbol",
+                "news",
+                "filing",
+                "数据",
+                "覆盖",
+                "股票",
+            ),
             "recent_ingestions": ("pipeline", "ingest", "data", "采集", "管线"),
             "recent_data_quality": ("quality", "data", "质量", "数据"),
             "recent_workflow_jobs": ("job", "workflow", "pipeline", "任务", "管线"),
@@ -693,8 +727,34 @@ class SystemSteward:
         context_sections = {
             "list": {"lists"},
             "market_scanner": {"market_scanner", "lists"},
-            "raw_object": {"data_catalog", "recent_ingestions", "recent_data_quality"},
-            "dataset": {"data_catalog", "recent_ingestions", "recent_data_quality"},
+            "raw_object": {
+                "data_catalog",
+                "symbol_coverage",
+                "recent_ingestions",
+                "recent_data_quality",
+            },
+            "dataset": {
+                "data_catalog",
+                "symbol_coverage",
+                "recent_ingestions",
+                "recent_data_quality",
+            },
+            "symbol": {
+                "symbol_coverage",
+                "recent_ingestions",
+                "recent_data_quality",
+                "recent_research_analyses",
+                "recent_ml_models",
+                "strategies",
+            },
+            "symbol_dataset": {
+                "symbol_coverage",
+                "recent_ingestions",
+                "recent_data_quality",
+                "recent_research_analyses",
+                "recent_ml_models",
+                "strategies",
+            },
             "strategy": {"strategies", "recent_validations"},
             "validation": {"strategies", "recent_validations"},
             "shadow": {"shadow_deployments"},

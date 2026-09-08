@@ -92,7 +92,11 @@ from agentic_quant.providers.documents import (
 )
 from agentic_quant.providers.synthetic import SyntheticMarketDataProvider
 from agentic_quant.reference_data import ReferenceDataStore
-from agentic_quant.risk import RestrictionRegistry, RiskPolicy
+from agentic_quant.risk import (
+    BASELINE_EXECUTION_PROFILE_VERSION,
+    RestrictionRegistry,
+    RiskPolicy,
+)
 from agentic_quant.research_store import ResearchStore
 from agentic_quant.shadow import ShadowRuntime
 from agentic_quant.steward import SystemSteward
@@ -1019,6 +1023,15 @@ def create_app(
             "coordinator_paid_research_enabled": (
                 app_settings.coordinator_paid_research_enabled
             ),
+            "coordinator_market_lookback_days": (
+                app_settings.coordinator_initial_lookback_days
+            ),
+            "coordinator_document_lookback_days": (
+                app_settings.coordinator_document_lookback_days
+            ),
+            "coordinator_document_partition_days": (
+                app_settings.coordinator_document_partition_days
+            ),
             "market_scanner_enabled": app_settings.market_scanner_enabled,
             "market_scanner_llm_enabled": app_settings.market_scanner_llm_enabled,
             "market_scanner_auto_trading_pool_enabled": (
@@ -1033,6 +1046,7 @@ def create_app(
             "alpaca_configured": bool(
                 app_settings.alpaca_api_key and app_settings.alpaca_api_secret
             ),
+            "sec_configured": bool(app_settings.sec_user_agent),
         }
 
     @application.get("/v1/data-health")
@@ -1120,6 +1134,102 @@ def create_app(
     def data_catalog() -> dict[str, Any]:
         return objects.data_catalog()
 
+    @application.get("/v1/explorer/symbols")
+    def symbol_catalog() -> dict[str, Any]:
+        catalog = objects.symbol_catalog()
+        lookback_days = app_settings.coordinator_initial_lookback_days
+        document_days = app_settings.coordinator_document_lookback_days
+        if app_settings.app_env == AppEnvironment.DEVELOPMENT:
+            lookback_days = min(
+                lookback_days,
+                app_settings.development_max_backfill_days,
+            )
+            document_days = min(
+                document_days,
+                app_settings.development_max_backfill_days,
+            )
+        now = datetime.now(UTC)
+        for item in catalog["symbols"]:
+            for dataset in item["datasets"]:
+                key = str(dataset["key"])
+                target_days = (
+                    lookback_days
+                    if key == "market_bars:1Day"
+                    else document_days
+                    if key
+                    in {
+                        "documents:news",
+                        "documents:sec_filing",
+                        "corporate_facts",
+                    }
+                    else None
+                )
+                dataset["target_lookback_days"] = target_days
+                if int(dataset["record_count"]) == 0:
+                    dataset["coverage_status"] = "NOT_COLLECTED"
+                elif target_days is None:
+                    dataset["coverage_status"] = "COLLECTING_FORWARD"
+                else:
+                    earliest = dataset.get("verified_window_start") or dataset[
+                        "event_earliest"
+                    ]
+                    tolerance_days = (
+                        10
+                        if key in {"market_bars:1Day", "documents:news"}
+                        else 180
+                    )
+                    target = now - timedelta(days=target_days - tolerance_days)
+                    dataset["coverage_status"] = (
+                        "TARGET_REACHED"
+                        if earliest is not None and earliest <= target
+                        else "PARTIAL_OR_PROVIDER_BOUNDARY"
+                    )
+        catalog["backfill_policy"] = {
+            "daily_bars_target_days": lookback_days,
+            "news_and_sec_target_days": document_days,
+            "partition_days": app_settings.coordinator_document_partition_days,
+            "forward_only": [
+                "option_snapshots",
+                "market_trades",
+                "market_quotes",
+            ],
+            "reviewed_reference_import": [
+                "corporate_actions",
+                "universe_memberships",
+            ],
+        }
+        return catalog
+
+    @application.get("/v1/explorer/symbols/{symbol}")
+    def symbol_data_page(
+        symbol: str,
+        dataset: str | None = None,
+        limit: int = Query(default=25, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+        day: date | None = None,
+    ) -> dict[str, Any]:
+        try:
+            result = objects.symbol_data_page(
+                symbol=symbol,
+                dataset=dataset,
+                limit=limit,
+                offset=offset,
+                day=day,
+            )
+            annotated = next(
+                (
+                    item
+                    for item in symbol_catalog()["symbols"]
+                    if item["symbol"] == symbol.upper()
+                ),
+                None,
+            )
+            if annotated is not None:
+                result["datasets"] = annotated["datasets"]
+            return result
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     @application.get("/v1/explorer/raw")
     def raw_object_list(
         limit: int = Query(default=100, ge=1, le=1_000),
@@ -1201,7 +1311,26 @@ def create_app(
 
     @application.get("/v1/shadow/account")
     def shadow_virtual_account() -> dict[str, Any]:
-        return shadow.virtual_account()
+        value = shadow.virtual_account()
+        effective = shadow.effective_risk_policy()
+        value["effective_risk_policy"] = effective.model_dump(mode="json")
+        value["risk_explanation"] = {
+            "stop_distance": (
+                "The stop fraction is the price distance from entry; it is not the "
+                "maximum dollar loss."
+            ),
+            "dollar_risk": (
+                "Quantity is sized so entry-to-stop loss plus slippage stays within "
+                "the smaller of equity fraction, per-trade USD cap, and remaining "
+                "concurrent-risk capacity."
+            ),
+            "holding_period": (
+                "The current deployable profile exits any remaining position at the "
+                "same session close; a wider stop does not create a multi-day holding."
+            ),
+            "execution_profile": BASELINE_EXECUTION_PROFILE_VERSION,
+        }
+        return value
 
     @application.get("/v1/shadow/deployments/{deployment_id}")
     def shadow_deployment(deployment_id: str) -> dict[str, Any]:

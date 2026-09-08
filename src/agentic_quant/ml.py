@@ -240,9 +240,11 @@ class MLDatasetBuilder:
         for snapshot in snapshots:
             decision_index = decision_index_by_as_of.get(snapshot.as_of)
             if decision_index is None:
-                raise ValueError(
-                    "Feature snapshot does not map to an exact completed market bar"
-                )
+                # Current research may materialize a decision-time snapshot after
+                # the latest close so newly available documents can be analyzed
+                # before the next session. It is valid for forecasting but has no
+                # realized next-bar label yet, so it must not enter training.
+                continue
             entry_index = decision_index + 1
             exit_index = decision_index + horizon_bars
             if entry_index >= len(bars) or exit_index >= len(bars):

@@ -68,6 +68,9 @@ def test_admin_session_is_required_and_csrf_protects_writes(
         assert "No live-money execution" in page.text
         assert "Source revision" in page.text
         assert "Dead-letter recovery" in page.text
+        assert "Ticker → data type → dated records" in page.text
+        assert "advisory; no longer a hard veto" in page.text
+        assert "Price stop distance" in page.text
         assert client.get("/health/live").status_code == 200
         assert client.get("/v1/system/status").status_code == 401
         assert client.post(
@@ -322,13 +325,17 @@ def test_shared_account_risk_update_requires_confirmation(settings: Settings) ->
                 "target_type": "virtual_account",
                 "target_id": before["virtual_account_id"],
                 "parameters": {
-                    "limits": {"maximum_trade_risk_usd": "180"}
+                    "limits": {
+                        "baseline_stop_fraction": "0.125",
+                        "maximum_trade_risk_usd": "180",
+                    }
                 },
                 "reason": "Increase bounded shared shadow risk for testing",
             },
         ).json()
         unchanged = client.get("/v1/shadow/account").json()
         assert unchanged["maximum_trade_risk_usd"] == "130.00000000"
+        assert unchanged["effective_risk_policy"]["baseline_stop_fraction"] == "0.02"
         confirmed = client.post(
             f"/v1/actions/{proposal['action_request_id']}/confirm",
             json={"confirmation_phrase": proposal["confirmation_phrase"]},
@@ -337,6 +344,12 @@ def test_shared_account_risk_update_requires_confirmation(settings: Settings) ->
         changed = client.get("/v1/shadow/account").json()
         assert changed["maximum_trade_risk_usd"] == "180.00000000"
         assert changed["risk_revision"] == 2
+        assert changed["effective_risk_policy"]["baseline_stop_fraction"] == (
+            "0.12500000"
+        )
+        assert changed["risk_explanation"]["execution_profile"] == (
+            "next_session_day_limit_bracket_moc@0.1.0"
+        )
 
 
 def test_concrete_coordinator_fails_closed_without_data_credentials(

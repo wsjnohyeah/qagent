@@ -141,7 +141,11 @@ curl -fsS -X POST http://127.0.0.1:8000/v1/intelligence/analyze \
 The output must validate against the current `research_analysis` schema. Factual claims may
 cite only exact IDs and must reproduce exact source quotations. Unknown citations,
 unsupported claims, or malformed JSON produce a durable `REJECTED` record; insufficient
-independent evidence produces `ABSTAINED` without an LLM call.
+independent evidence produces `ABSTAINED` without an LLM call. A schema-valid, citation-valid
+`ABSTAINED` judgment is advisory rather than a veto: the constrained generator may still
+propose an explicitly exploratory hypothesis from the linked feature snapshot and ML
+forecast. The critic and deterministic validation remain separate, and no LLM status grants
+promotion or execution authority.
 
 Inspect recent records and provenance:
 

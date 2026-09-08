@@ -37,8 +37,17 @@ from agentic_quant.strategy_generation import (
 )
 
 
+@pytest.mark.parametrize(
+    ("analysis_status", "recommendation"),
+    (
+        (ResearchAnalysisStatus.COMPLETED, ResearchRecommendation.RESEARCH_LONG),
+        (ResearchAnalysisStatus.ABSTAINED, ResearchRecommendation.ABSTAIN),
+    ),
+)
 def test_hybrid_generator_compiles_only_a_bounded_research_spec(
     settings,  # type: ignore[no-untyped-def]
+    analysis_status: ResearchAnalysisStatus,
+    recommendation: ResearchRecommendation,
 ) -> None:
     upgrade_database(settings.database_url)
     ledger = EventLedger(settings.database_url)
@@ -108,7 +117,7 @@ def test_hybrid_generator_compiles_only_a_bounded_research_spec(
         analysis_id=uuid7(),
         symbol="AAPL",
         as_of=as_of,
-        status=ResearchAnalysisStatus.COMPLETED,
+        status=analysis_status,
         schema_version="research_analysis@0.2.0",
         prompt_version="fixture@1",
         evidence_bundle=ResearchEvidenceBundle(
@@ -126,7 +135,7 @@ def test_hybrid_generator_compiles_only_a_bounded_research_spec(
             symbol="AAPL",
             as_of=as_of,
             horizon="1 bar",
-            recommendation=ResearchRecommendation.RESEARCH_LONG,
+            recommendation=recommendation,
             confidence=Decimal("0.6"),
             thesis="Evidence and ML agree directionally.",
             claims=(
@@ -143,6 +152,11 @@ def test_hybrid_generator_compiles_only_a_bounded_research_spec(
             ),
             risk_factors=("Bounded fixture",),
             ml_assessment="Probability up is above one half.",
+            abstain_reason=(
+                "Qualitative evidence is insufficient for a directional recommendation."
+                if recommendation == ResearchRecommendation.ABSTAIN
+                else None
+            ),
         ),
         llm_invocation_id=None,
         citation_validation={"valid": True},
@@ -220,6 +234,10 @@ def test_hybrid_generator_compiles_only_a_bounded_research_spec(
     }
     assert spec["data_requirements"]["origin"] == (
         "hybrid_ml_llm_constrained_dsl"
+    )
+    assert spec["data_requirements"]["research_llm_status"] == analysis_status.value
+    assert spec["data_requirements"]["research_llm_role"] == (
+        "advisory_not_promotion_gate"
     )
     assert retry["strategy_spec"]["strategy_spec_id"] == spec["strategy_spec_id"]
     assert "generation_invocation_id" not in spec["data_requirements"]

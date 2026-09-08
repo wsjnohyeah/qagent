@@ -56,8 +56,9 @@ ALPACA_PAPER_BASE_URL=https://paper-api.alpaca.markets
 AUTONOMOUS_COORDINATOR_ENABLED=true
 COORDINATOR_POLL_SECONDS=3600
 COORDINATOR_INITIAL_LOOKBACK_DAYS=1826
-COORDINATOR_DOCUMENT_LOOKBACK_DAYS=90
-COORDINATOR_DOCUMENT_MAX_PAGES=10
+COORDINATOR_DOCUMENT_LOOKBACK_DAYS=1826
+COORDINATOR_DOCUMENT_PARTITION_DAYS=90
+COORDINATOR_DOCUMENT_MAX_PAGES=100
 # Leave false until routes and USD budgets are reviewed after bootstrap.
 COORDINATOR_PAID_RESEARCH_ENABLED=false
 # Enable only after the Alpaca screener/snapshot probe and policy review pass.
@@ -150,9 +151,12 @@ heartbeat. Production Compose therefore checks worker and coordinator health eve
 with a 20-second timeout. Do not reduce that timeout below measured cold-import latency; the
 deploy script still performs its own immediate, blocking heartbeat gates during each release.
 
-The coordinator validates the complete configured daily window on each cycle and repairs
-internal as well as trailing XNYS-session gaps. It then refreshes bounded Alpaca News before
-feature/ML/LLM work. Its normal scan cadence remains hourly, but an incomplete current or
+The coordinator validates the complete configured five-year daily window on each cycle and
+repairs internal as well as trailing XNYS-session gaps. It advances Alpaca News backward in
+bounded 90-day partitions toward the five-year target, refreshes the newest day, and—when
+`SEC_USER_AGENT` is configured—refreshes five-year SEC filing/fact evidence once per symbol
+per day before feature/ML/LLM work. Trades, quotes, and option chains remain forward-only
+streams/snapshots. Its normal scan cadence remains hourly, but an incomplete current or
 backlog cycle is rechecked every minute so an expired worker lease is promptly reclaimed.
 Paid LLM research remains a separate switch.
 

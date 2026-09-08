@@ -33,8 +33,11 @@ confirmations still apply, and neither candidate nor pool membership can submit 
    observed bar forward. A post-suspension boundary additionally requires at least 20 missing
    sessions, 20 immediately preceding explicit zero-volume bars, a positive-volume resumption,
    and a fully valid resumed segment. Other internal or trailing gaps still fail.
-2. `collect_research_evidence`: refresh bounded Alpaca News with a one-day overlap so
-   provider corrections are captured idempotently.
+2. `collect_research_evidence`: advance Alpaca News backward toward the five-year production
+   target in bounded 90-day partitions while also refreshing the newest day, so provider
+   corrections are captured idempotently. With `SEC_USER_AGENT` configured, the same stage
+   refreshes five-year SEC filing metadata and company facts once per symbol per day. A
+   completed empty partition is recorded as coverage rather than retried forever.
 3. `materialize_features`: create idempotent point-in-time snapshots for completed bars.
 4. `train_ml`: train chronological candidates after the configured minimum sample count;
    reuse requires the exact dataset and complete versioned training contract.
@@ -55,6 +58,8 @@ confirmations still apply, and neither candidate nor pool membership can submit 
 AUTONOMOUS_COORDINATOR_ENABLED=true
 COORDINATOR_POLL_SECONDS=3600
 COORDINATOR_INITIAL_LOOKBACK_DAYS=1826
+COORDINATOR_DOCUMENT_LOOKBACK_DAYS=1826
+COORDINATOR_DOCUMENT_PARTITION_DAYS=90
 COORDINATOR_PAID_RESEARCH_ENABLED=false
 MARKET_SCANNER_ENABLED=false
 MARKET_SCANNER_LLM_ENABLED=false

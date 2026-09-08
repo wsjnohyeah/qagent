@@ -121,6 +121,17 @@ class CorporateFactsRequest(FrozenModel):
     cik: str = Field(pattern=r"^\d{1,10}$")
     max_facts: int = Field(default=1_000, ge=1, le=20_000)
     taxonomies: tuple[str, ...] = ("us-gaap",)
+    start: datetime | None = None
+    end: datetime | None = None
+
+    @model_validator(mode="after")
+    def timestamps_are_bounded_and_timezone_aware(self) -> Self:
+        for value in (self.start, self.end):
+            if value is not None and value.tzinfo is None:
+                raise ValueError("Corporate-fact bounds must be timezone-aware")
+        if self.start is not None and self.end is not None and self.start >= self.end:
+            raise ValueError("Corporate-fact start must be before end")
+        return self
 
 
 class CorporateFactsPage(FrozenModel):
@@ -130,6 +141,15 @@ class CorporateFactsPage(FrozenModel):
     request_metadata: dict[str, Any]
     raw_payload: dict[str, Any]
     facts: tuple[CorporateFact, ...]
+
+
+class CompanyTickerMapPage(FrozenModel):
+    provider: str
+    data_type: str
+    provider_received_at: datetime
+    request_metadata: dict[str, Any]
+    raw_payload: dict[str, Any]
+    cik_by_symbol: dict[str, str]
 
 
 class EquityMarketDataProvider(Protocol):

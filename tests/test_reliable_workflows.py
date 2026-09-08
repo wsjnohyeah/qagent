@@ -21,12 +21,15 @@ from agentic_quant.data_quality import (
     inspect_market_bars,
 )
 from agentic_quant.coordinator import AutonomousCoordinator, COORDINATOR_STAGES
+from agentic_quant.control_plane import SystemObjectStore
 from agentic_quant.coordinator_runtime import (
+    DOCUMENT_HISTORY_COVERAGE_EVENT,
     ResearchCoordinatorHandler,
     daily_bar_gap_windows,
     resumed_daily_history_start,
 )
 from agentic_quant.database import event_outbox, workflow_jobs
+from agentic_quant.document_store import DocumentStore
 from agentic_quant.domain import (
     BacktestCostModel,
     DataQualityStatus,
@@ -40,7 +43,12 @@ from agentic_quant.market_ingestion import IngestionSummary
 from agentic_quant.market_calendar import MarketSessionClock
 from agentic_quant.market_store import MarketDataStore
 from agentic_quant.migrations import upgrade_database
-from agentic_quant.providers.base import StockBarsPage, StockBarsRequest
+from agentic_quant.providers.base import (
+    DocumentFetchRequest,
+    DocumentPage,
+    StockBarsPage,
+    StockBarsRequest,
+)
 from agentic_quant.reference_data import (
     GovernedReferenceImporter,
     ReferenceDataStore,
@@ -347,6 +355,128 @@ def test_daily_gap_planner_repairs_internal_and_trailing_sessions() -> None:
             datetime(2026, 9, 5, tzinfo=UTC),
         ),
     )
+
+
+def test_document_backfill_advances_backward_in_bounded_partitions(
+    settings,  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+) -> None:
+    runtime_settings = settings.model_copy(
+        update={
+            "alpaca_api_key": SecretStr("mock-key"),
+            "alpaca_api_secret": SecretStr("mock-secret"),
+            "coordinator_document_lookback_days": 365,
+            "coordinator_document_partition_days": 90,
+            "development_max_backfill_days": 365,
+            "deployment_environment_id": "document-backfill-test",
+        }
+    )
+    upgrade_database(runtime_settings.database_url)
+    ledger = EventLedger(runtime_settings.database_url)
+    requests: list[DocumentFetchRequest] = []
+    as_of = datetime(2026, 9, 7, 20, tzinfo=UTC)
+
+    class Publisher:
+        def publish(self, **_payload):  # type: ignore[no-untyped-def]
+            return "published"
+
+        def health(self) -> bool:
+            return True
+
+    class EmptyNewsProvider:
+        name = "alpaca_news"
+
+        async def __aenter__(self):  # type: ignore[no-untyped-def]
+            return self
+
+        async def __aexit__(self, *_args):  # type: ignore[no-untyped-def]
+            return None
+
+        async def fetch_documents_page(
+            self,
+            request: DocumentFetchRequest,
+            *,
+            page_token: str | None = None,
+        ) -> DocumentPage:
+            assert page_token is None
+            requests.append(request)
+            return DocumentPage(
+                provider=self.name,
+                data_type="news",
+                provider_received_at=as_of,
+                request_metadata=request.model_dump(mode="json"),
+                raw_payload={"news": []},
+                documents=(),
+            )
+
+    handler = ResearchCoordinatorHandler.__new__(ResearchCoordinatorHandler)
+    handler.settings = runtime_settings
+    handler.ledger = ledger
+    handler.market = MarketDataStore(ledger.engine)
+    handler.documents = DocumentStore(ledger.engine)
+    handler.archive = FileRawArchive(tmp_path / "document-backfill-raw")
+    handler.publisher = Publisher()
+    context = {
+        "symbol": "AAPL",
+        "timeframe": "1Day",
+        "as_of": as_of.isoformat(),
+    }
+    with patch(
+        "agentic_quant.coordinator_runtime.AlpacaNewsProvider",
+        return_value=EmptyNewsProvider(),
+    ):
+        first = asyncio.run(handler._collect_research_evidence(context))
+        second = asyncio.run(handler._collect_research_evidence(context))
+
+    assert first["outcome"] == "COMPLETED_BACKFILL_PROGRESS"
+    assert second["outcome"] == "COMPLETED_BACKFILL_PROGRESS"
+    assert len(requests) == 2
+    assert requests[0].start == as_of - timedelta(days=90)
+    assert requests[1].start == as_of - timedelta(days=180)
+    coverage = [
+        event
+        for event in ledger.recent(limit=20)
+        if event["event_type"] == DOCUMENT_HISTORY_COVERAGE_EVENT
+    ]
+    assert len(coverage) == 2
+    catalog = SystemObjectStore(ledger.engine).symbol_catalog()
+    apple = next(item for item in catalog["symbols"] if item["symbol"] == "AAPL")
+    news = next(
+        item for item in apple["datasets"] if item["key"] == "documents:news"
+    )
+    assert news["record_count"] == 0
+    assert news["verified_window_start"] == as_of - timedelta(days=180)
+
+
+def test_coordinator_treats_llm_abstention_as_advice_not_a_generation_veto() -> None:
+    class Research:
+        def generation_attempts(self, *, limit: int):  # type: ignore[no-untyped-def]
+            assert limit == 500
+            return []
+
+    class Generator:
+        async def generate(self, **payload):  # type: ignore[no-untyped-def]
+            assert payload["analysis_id"] == "analysis-abstained"
+            return {
+                "generation_attempt_id": "attempt-1",
+                "strategy_spec": {"strategy_spec_id": "strategy-1"},
+            }
+
+    handler = ResearchCoordinatorHandler.__new__(ResearchCoordinatorHandler)
+    handler.research = Research()
+    handler.generator = Generator()
+    result = asyncio.run(
+        handler._generate_strategy(
+            {
+                "feature_snapshot_id": "feature-1",
+                "analysis_id": "analysis-abstained",
+                "analysis_status": "ABSTAINED",
+                "forecast_id": "forecast-1",
+            }
+        )
+    )
+    assert result["outcome"] == "COMPLETED"
+    assert result["strategy_spec_id"] == "strategy-1"
 
 
 def test_coordinator_retry_repairs_the_original_historical_gap(

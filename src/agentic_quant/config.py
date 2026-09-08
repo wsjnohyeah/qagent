@@ -47,8 +47,9 @@ class Settings(BaseSettings):
     coordinator_paid_research_enabled: bool = False
     coordinator_poll_seconds: int = Field(default=3_600, ge=60, le=86_400)
     coordinator_initial_lookback_days: int = Field(default=1_826, ge=30, le=3_650)
-    coordinator_document_lookback_days: int = Field(default=90, ge=1, le=365)
-    coordinator_document_max_pages: int = Field(default=10, ge=1, le=100)
+    coordinator_document_lookback_days: int = Field(default=1_826, ge=1, le=3_650)
+    coordinator_document_partition_days: int = Field(default=90, ge=1, le=365)
+    coordinator_document_max_pages: int = Field(default=100, ge=1, le=100)
     market_scanner_enabled: bool = False
     market_scanner_llm_enabled: bool = False
     market_scanner_auto_trading_pool_enabled: bool = False

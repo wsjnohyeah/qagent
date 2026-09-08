@@ -481,7 +481,16 @@ class ResearchStore:
 
     def generation_attempts(self, *, limit: int = 100) -> list[dict[str, Any]]:
         statement = (
-            select(strategy_generation_attempts)
+            select(
+                strategy_generation_attempts,
+                feature_snapshots.c.symbol,
+                feature_snapshots.c.as_of.label("feature_as_of"),
+            )
+            .join(
+                feature_snapshots,
+                feature_snapshots.c.feature_snapshot_id
+                == strategy_generation_attempts.c.feature_snapshot_id,
+            )
             .order_by(strategy_generation_attempts.c.created_at.desc())
             .limit(limit)
         )

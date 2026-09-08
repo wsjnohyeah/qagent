@@ -61,13 +61,17 @@ def test_risk_revision_changes_effective_contract(settings) -> None:  # type: ig
     )
     updated = store.update_risk(
         str(account["virtual_account_id"]),
-        {"maximum_trade_risk_usd": "200"},
+        {
+            "baseline_stop_fraction": "0.125",
+            "maximum_trade_risk_usd": "200",
+        },
         reason="Increase bounded shadow experiment capacity",
         created_by="test-admin",
     )
     effective = store.effective_risk_policy(base)
     assert updated["risk_revision"] == 2
     assert effective.maximum_trade_risk_usd == Decimal("200.00000000")
+    assert effective.baseline_stop_fraction == Decimal("0.12500000")
     assert effective.version == "risk_policy@0.3.0+account-r2"
 
 

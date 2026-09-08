@@ -46,6 +46,12 @@ threads. List changes append a numbered revision; restriction-list edits remain 
 changes and cannot be made in the UI. Raw previews are size-bounded and may read only the
 configured archive root/bucket.
 
+Data Explorer starts with a ticker and then shows all expected source and derived data types,
+including missing ones. Coverage dates come from market/document/fact event time, never raw
+object receipt time. Each populated type has event-date grouping, pagination, a readable
+normalized view, and a link to its immutable raw lineage. Archive-level grouping remains a
+secondary audit view.
+
 The Strategy page is intentionally narrative-first. It labels deterministic baseline specs
 as having no LLM participation. For a hybrid candidate it shows the point-in-time feature
 snapshot, ML model/forecast, the Research LLM thesis and cited claims, generator proposal,
@@ -89,9 +95,11 @@ handler is retained as `FAILED` with a bounded error code. Strategy deletion mea
 not record removal.
 
 Shared-account risk changes use `account.risk.update` and the same two-step confirmation.
-They are blocked while any trade plan has reserved account capacity. A successful revision
-changes the exact execution contract, so affected strategies must be revalidated before a
-new adoption.
+The editor distinguishes price stop distance and target R multiple from account-dollar risk,
+concurrent risk, and daily loss limits. They are blocked while any trade plan has reserved
+account capacity. A successful revision changes the exact execution contract, so affected
+strategies must be revalidated before a new adoption. The current profile still exits at the
+same session close; widening the protective stop does not silently create a swing strategy.
 
 The Pipelines page also shows the autonomous coordinator and its durable stage jobs. Use
 `GET /v1/coordinator/status` for the complete recent cycle view; `WAITING_*` outcomes explain
