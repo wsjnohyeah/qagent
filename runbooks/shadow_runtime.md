@@ -16,7 +16,7 @@ portfolio events.
    - `QUALIFIED`: the strict report gate has `eligible_for_human_review=true`.
    - `CANDIDATE`: the candidate gate has `eligible_for_human_review=true`; this is
      observation-only and never Paper-eligible.
-   Candidate activity minima are horizon-aware because a five-year history can contain many
+   Candidate activity minima are horizon-aware because a multi-year history can contain many
    independent one-session windows but only one annual window. Positive modeled net return
    and the drawdown ceiling remain mandatory at every horizon.
 3. The administrator confirms `strategy.adopt` with the explicit admission tier.

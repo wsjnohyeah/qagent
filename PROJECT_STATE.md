@@ -7,27 +7,27 @@
   Phase 1B open-session checks, corrected point-in-time research/ML contracts, constrained
   ML + LLM strategy generation, and the authenticated Control Center/System Steward/shadow
   decision lineage. Phase 5 statistical promotion and Phase 6 continuous-operation exit
-  criteria have not passed because no production candidate has passed the exact statistical
-  gate and no adopted strategy has accumulated forward observation time.
+  criteria have not passed because current reports are Candidate-Shadow-only rather than
+  strictly Qualified and no adopted strategy has accumulated forward observation time.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `663c462a60bac9c612265ac2e242192723bf1a27` image, PostgreSQL, Redis, API, Shadow worker,
+  `ddaba5152f59e4ae278ef1e221d02494dbfbf502` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled; new exposure is paused. Live money remains
   structurally disabled.
-- The current local remediation candidate adds `research_gate@0.4.0`, horizon-specific
+- The deployed remediation adds `research_gate@0.4.0`, horizon-specific
   Candidate Shadow activity minima, horizon-specific research-trial accounting, budget-
   independent revalidation of accepted specs, scanner-pool authorization at Shadow start,
   a stricter Research LLM output prompt, and `llm_budget@0.2.0` with a `$40` critical/daily
-  ceiling that preserves same-day spend across policy versions. It is not production state
-  until its exact commit passes CI and guarded deployment.
+  ceiling that preserves same-day spend across policy versions, single-attempt invalid LLM
+  output handling, and leakage-safe annual ML under a six-year daily-bar target.
 - Local-lite uses Python 3.12, a project-local `uv`, SQLite, and filesystem object storage.
 - The Control API, single-admin object-centric web console, persistent System Steward,
   append-only event ledger, deterministic risk engine, and shadow runtime exist.
 - `live` is not a valid trading mode; `LIVE_TRADING_ENABLED=true` fails configuration validation.
   Paper submission is separately disabled by default and hard-pinned to Alpaca's Paper host.
-- Local lint, strict type checking, the full test suite, API readiness, the authenticated HTTP
+- Local lint, strict type checking, all 196 tests, API readiness, the authenticated HTTP
   vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
 - The full Compose stack is healthy: PostgreSQL 17, Redis 8, MinIO, and the API all passed direct checks; the PostgreSQL-backed shadow slice recorded six lineage events.
@@ -248,8 +248,8 @@
   or order. Total settled project LLM spend at verification was `$1.218124` against the `$20`
   daily cap; one deploy-interrupted `$0.118510` reservation was expired and reserved spend
   returned to zero without altering settled spend.
-- The current production research campaign has 23 symbols with complete five-year daily bars
-  or an evidenced listing/resumption boundary, 119,952 SEC facts across the active 20-symbol
+- The production campaign initially established five-year daily bars or an evidenced
+  listing/resumption boundary for 23 symbols, 119,952 SEC facts across the active 20-symbol
   research set, and explicit Alpaca News coverage certificates for every one of those 20
   symbols. News history is still converging backward by durable 180-day partitions and must
   not be described as fully backfilled yet. The hybrid funnel has compiled 12 exact strategy
@@ -259,8 +259,13 @@
   old positive-fold denominator; several strategies had actual trade win rates above 50%.
   `research_gate@0.4.0` separates total/active/no-trade folds and OOS trade count, scales
   Candidate activity minima to the holding horizon, and retains positive exact specs for
-  broker-free forward observation. No production adoption, Shadow deployment, Paper enrollment, position, or
-  order has yet been created; new exposure remains paused pending rollout and review.
+  broker-free forward observation. Eight 63-session reports are now Candidate-Shadow eligible;
+  six (EOSE, IREN, LITE, NVDA, SMR, TSLA) belong to the current Scanner Trading Pool. A real
+  AAPL 252-session production probe repaired the extra year to 1,507 bars, trained on 1,235
+  labels under the 252-session embargo, completed ML + Research LLM + generation + exact
+  validation, and correctly rejected the negative-net-return strategy. No production adoption,
+  Shadow deployment, Paper enrollment, position, or order has yet been created; new exposure
+  remains paused pending exact administrator review.
 - The production NBIS retry established an evidenced post-suspension boundary at `2024-10-21`.
   Its 470-bar resumed segment passed strict quality with zero missing intervals; the older raw
   and normalized history remains available for audit but is excluded from current research.

@@ -87,3 +87,20 @@ can correctly test and operate those horizons, but current production ML evidenc
 demonstrate predictive alpha. Broader factors, cross-sectional models, regime-specific rules,
 and ML-only versus ML+LLM ablations are research improvements—not reasons to weaken safety or
 statistical gates today.
+
+## Post-remediation production evidence
+
+- GitHub CI and immutable-image publication passed for functional SHA
+  `ddaba5152f59e4ae278ef1e221d02494dbfbf502`; API, worker, coordinator, PostgreSQL, and Redis
+  are healthy on that exact image. Live trading is disabled and new exposure is paused.
+- A real AAPL 252-session probe repaired 251 leading bars, producing 1,507 daily bars from
+  2020-09-08 through 2026-09-08. ML trained on 1,235 point-in-time labels with a 252-session
+  embargo, 21 calibration rows, 21 model-selection rows, and 272 untouched final-holdout rows.
+- The annual model's final ROC AUC was about 0.552, but its calibration error failed the ML
+  promotion gate. The Research LLM and generator still produced an exploratory exact strategy;
+  deterministic validation rejected it for negative modeled net return. This demonstrates the
+  entire long-horizon workflow without claiming alpha.
+- Current 63-session research produced eight Candidate-Shadow-reviewable reports. Six belong
+  to the current Scanner Trading Pool: EOSE, IREN, LITE, NVDA, SMR, and TSLA. None is strictly
+  Qualified, adopted, deployed, or enrolled in Paper. Exact administrator confirmation and the
+  global exposure control remain intentionally separate.

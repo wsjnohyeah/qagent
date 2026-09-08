@@ -4100,7 +4100,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C067 — `Stop retries for invalid strategy output`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `7386405b2b9f43bf67ed01e40651b3a0f60ff1ac`.
 - Date: 2026-09-08 PDT.
 - User intent: complete the production research-funnel correctness review and repair remaining
   causes that made healthy research look like repeated strategy failure.
@@ -4118,8 +4118,12 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Expected global state after commit: malformed LLM strategy output costs one attempt per fresh
   evidence cycle rather than five repeated calls; valid proposals continue through the same
   independent critique and deterministic validation.
-- Corrections/follow-ups: deploy after exact-sha CI, authorize one bounded retry of an affected
-  production job, and verify its terminal result without adopting or trading.
+- Production evidence: GitHub Actions run `34280931291` passed and published the immutable
+  image. New prompt-0.3 proposals for IREN, KEEL, and LITE passed schema on their first attempt;
+  an audited bounded retry of the formerly exhausted BNC job also completed with an accepted
+  proposal. No adoption or trade occurred.
+- Corrections/follow-ups: the post-deploy inventory exposed the separate 252-session ML
+  history/split incompatibility recorded in D050/C068.
 
 ### D050 — Annual ML needs more history, not weaker leakage controls
 
@@ -4135,7 +4139,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C068 — `Enable leakage-safe annual ML research`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `ddaba5152f59e4ae278ef1e221d02494dbfbf502`.
 - Date: 2026-09-08 PDT.
 - User intent: verify that one-day through long-horizon strategy research genuinely runs and
   repair systematic false rejection or unreachable stages.
@@ -4154,8 +4158,36 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Expected global state after commit: the next production cycle repairs the extra leading year
   of daily bars, retrains under `walk_forward_ml_trainer@0.3.0`, and permits mature-symbol
   annual hypotheses to proceed to LLM generation and deterministic validation.
-- Corrections/follow-ups: deploy exact verified image, update the production lookback, then
-  verify a mature-symbol 252-session training run and retain all adoption/exposure gates.
+- Production evidence: GitHub Actions run `34282835780` passed and published the immutable
+  image. Production is healthy on the exact SHA with daily-bar lookback 2,192, live disabled,
+  and new exposure paused. A bounded AAPL 252-session probe repaired 251 leading bars and
+  verified 1,507 daily bars; ML completed with 1,235 labeled samples, 252-session embargo,
+  21 calibration, 21 selection, and 272 untouched final-holdout rows. The model remained a
+  non-promoted Candidate because calibration error failed policy. Research LLM, prompt-0.3
+  strategy generation, and exact validation all completed; the strategy was correctly rejected
+  for negative cost-adjusted OOS return.
+- Global state after rollout: 63-session research has eight Candidate-Shadow-reviewable exact
+  reports, of which EOSE, IREN, LITE, NVDA, SMR, and TSLA are in the current scanner pool.
+  There are still zero adoptions, Shadow deployments, and Paper orders. Starting any candidate
+  and resuming new exposure remain explicit administrator decisions.
+- Corrections/follow-ups: obtain exact administrator confirmation for any selected Candidate
+  Shadow deployment; do not treat Candidate evidence as strict qualification.
+
+### C069 — `Record production research remediation`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-08 PDT.
+- User intent: preserve the final end-to-end correctness review and production evidence for
+  future agents and operators.
+- Scope: refresh current production SHA/state, annual ML probe evidence, Candidate Shadow
+  inventory, and the distinction between six-year market bars and five-year documents.
+- Architecture/decision impact: none; documentation records C066–C068 and ADRs 0037–0038.
+- Validation: documentation diff check plus the already-recorded 196-test/source/doctor/secret,
+  exact-sha CI, deployment health, authentication, and production probe evidence.
+- Expected global state after commit: GitHub main contains the durable audit record while the
+  production functional image remains `ddaba5152f59e4ae278ef1e221d02494dbfbf502`.
+- Corrections/follow-ups: exact Candidate adoption/start and exposure resume require the
+  administrator's next instruction.
 
 ## Template for future commit entries
 
