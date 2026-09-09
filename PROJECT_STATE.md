@@ -28,7 +28,7 @@
   append-only event ledger, deterministic risk engine, and shadow runtime exist.
 - `live` is not a valid trading mode; `LIVE_TRADING_ENABLED=true` fails configuration validation.
   Paper submission is separately disabled by default and hard-pinned to Alpaca's Paper host.
-- Local lint, strict type checking, all 199 tests, API readiness, the authenticated HTTP
+- Local lint, strict type checking, all 200 tests, API readiness, the authenticated HTTP
   vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
 - The full Compose stack is healthy: PostgreSQL 17, Redis 8, MinIO, and the API all passed direct checks; the PostgreSQL-backed shadow slice recorded six lineage events.
@@ -164,7 +164,7 @@
   containing the complete current profile and parameters can enroll. Paper remains off by
   default, account-pinned, single-lifecycle-per-symbol, and hard-pinned to the simulated host;
   the live host remains impossible.
-- A persistent hourly coordinator rotates through 1, 5, 20, 63, 126, and 252-session
+- A persistent hourly coordinator rotates through 5, 20, 63, 126, and 252-session
   research horizons and owns the gap-repaired market-data → source-specific
   document history →
   feature → ML → forecast → Research LLM → constrained strategy → exact-validation →
@@ -186,6 +186,8 @@
   calibration and model selection, while the final holdout retains its separate 60-row
   promotion minimum. This makes 252-session training achievable for mature issuers without
   overlapping-label leakage; short-history issuers wait explicitly.
+  One-session daily-bar research remains available only as an explicit/manual experiment and
+  is not presented as true intraday research, which requires a separate minute-data contract.
 - Production daily bars target 2,192 days, while Alpaca News/SEC evidence target 1,826 days.
   News advances backward
   in bounded partitions (90-day default; current production override 180 days) while its

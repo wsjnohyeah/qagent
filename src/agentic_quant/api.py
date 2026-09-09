@@ -28,7 +28,7 @@ from agentic_quant.code_changes import CodeChangeStore
 from agentic_quant.config import AppEnvironment, Settings, TradingMode
 from agentic_quant.control_plane import SystemObjectStore
 from agentic_quant.coordinator import (
-    COORDINATOR_RESEARCH_HORIZONS,
+    AUTONOMOUS_RESEARCH_HORIZONS,
     AutonomousCoordinator,
 )
 from agentic_quant.coordinator_runtime import ResearchCoordinatorHandler
@@ -779,8 +779,8 @@ def create_app(
                                 ),
                             )
                             cycle_as_of = datetime.now(UTC)
-                            research_horizon = COORDINATOR_RESEARCH_HORIZONS[
-                                cycle_as_of.hour % len(COORDINATOR_RESEARCH_HORIZONS)
+                            research_horizon = AUTONOMOUS_RESEARCH_HORIZONS[
+                                cycle_as_of.hour % len(AUTONOMOUS_RESEARCH_HORIZONS)
                             ]
                             result = await coordinator.run_once(
                                 symbols=symbols,

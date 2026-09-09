@@ -96,8 +96,10 @@ A Git commit cannot contain its own content-derived hash without changing that h
   allowlisted momentum/mean-reversion parameters into an immutable research-only spec and
   has no code, sizing, adoption, risk, or order authority. Every accepted, rejected, or failed
   generation attempt is separately audited; unsupported DSL fields fail instead of disappearing.
-- The constrained generator and coordinator now support 1, 5, 20, 63, 126, and 252-session
-  horizons. ML labels, forecasts, LLM analyses, proposals, immutable specs, replays, and exact
+- The constrained generator and coordinator support 1, 5, 20, 63, 126, and 252-session
+  horizons. Autonomous production research prioritizes 5, 20, 63, 126, and 252 sessions;
+  one-session daily-bar research remains explicit/manual until a true minute-data intraday
+  contract exists. ML labels, forecasts, LLM analyses, proposals, immutable specs, replays, and exact
   validation contracts must agree on the horizon. One-session strategies retain the original
   MOC profile; multi-session strategies use a separate timed-exit profile and a deterministic
   12.5% price stop without increasing shared account-dollar risk limits.
@@ -4343,7 +4345,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C077 — `Reconcile completed annual candidate activation`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `fddfb72dfbf8305be8fddcc9f1267a1e5a60bcd6`.
 - Date: 2026-09-08 PDT.
 - User intent: leave the durable handoff synchronized with the fully completed 252-session
   production cycle.
@@ -4357,6 +4359,28 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Expected global state after commit: twelve 126-session and five 252-session Candidate Shadow
   sleeves await their first unseen post-deployment daily bar under the shared risk account.
 - Corrections/follow-ups: none.
+
+### C078 — `Prioritize multi-session autonomous research`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-08 PDT.
+- User intent: disable the misleading daily-bar one-session strategy from autonomous operation
+  and prioritize 5- and 20-session swing research.
+- Scope: retain 1 session as a supported explicit research horizon, remove it from the
+  autonomous production rotation, add a regression for the split, and document ADR 0039.
+- Architecture/decision impact: autonomous research now rotates over 5/20/63/126/252 sessions.
+  A future true intraday strategy requires its own minute-data pipeline and is not represented
+  by the retained daily-bar one-session contract.
+- Validation: production diagnosis found the prior 5- and 20-session cycles had successful ML
+  stages but reached the former `$18` OpenAI daily cap before analysis/generation; their zero
+  strategy count was not a blanket performance rejection. `make check` passed Flake8, strict
+  mypy across 59 source files, and all 200 tests; `make doctor` and the secret scan passed.
+- Expected global state after commit: no new one-session autonomous job groups are scheduled;
+  existing one-session lineage remains immutable, and production budget is directed to the
+  multi-session research funnel.
+- Corrections/follow-ups: observe fresh 5- and 20-session cycles under the current `$40` cap and
+  evaluate their exact cost-adjusted validation results without lowering the positive-return
+  requirement.
 
 ## Template for future commit entries
 

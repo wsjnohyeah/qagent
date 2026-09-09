@@ -141,3 +141,9 @@ statistical gates today.
 - The active daily LLM limits are project/OpenAI/critical-research `$40`. At the final audit,
   settled project spend was approximately `$24.70` with a small in-flight reservation. The
   budget is reconstructed from the reservation ledger across policy changes and did not reset.
+- The previous 5- and 20-session cycles did not produce exact strategy specifications because
+  most symbols reached `WAITING_LLM_BUDGET` under the former `$18` OpenAI daily ceiling after
+  ML had completed. That is not evidence that their strategies failed backtesting. Following
+  operator review, autonomous one-session daily-bar research is disabled so the current `$40`
+  budget prioritizes 5/20/63/126/252-session research. One-session remains available for
+  explicit comparison but is not described as minute-data intraday trading.

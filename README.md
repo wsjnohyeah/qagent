@@ -140,8 +140,10 @@ can create new exposure. It contains no broker client or order-submission path. 
 local data validates the workflow; production can run the same partitionable contracts over
 longer history.
 
-Strategy generation supports explicit 1, 5, 20, 63, 126, and 252-session horizons. The ML
-label, forecast, Research LLM analysis, generated spec, backtest, validation certificate, and
+Strategy generation supports explicit 1, 5, 20, 63, 126, and 252-session horizons. Autonomous
+production research currently rotates through 5, 20, 63, 126, and 252 sessions; one-session
+research is retained only for explicit experiments until a distinct minute-data intraday
+contract exists. The ML label, forecast, Research LLM analysis, generated spec, backtest, validation certificate, and
 Forward Shadow exit all bind to that same horizon. Multi-session Shadow positions persist
 across worker restarts and close on their stop, target, or maximum holding session. Their
 initial 12.5% price stop widens price tolerance but does not raise the account-dollar loss

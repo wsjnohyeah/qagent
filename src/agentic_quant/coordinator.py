@@ -24,6 +24,10 @@ COORDINATOR_STAGES = (
     "await_shadow_adoption",
 )
 COORDINATOR_RESEARCH_HORIZONS = (1, 5, 20, 63, 126, 252)
+# One-session strategies remain available for explicit research and historical
+# comparison, but production automation prioritizes multi-session horizons until
+# a separate minute-data intraday pipeline exists.
+AUTONOMOUS_RESEARCH_HORIZONS = (5, 20, 63, 126, 252)
 
 CoordinatorHandler = Callable[
     [WorkflowJob, tuple[WorkflowJob, ...]], Awaitable[dict[str, Any]]

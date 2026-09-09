@@ -20,7 +20,12 @@ from agentic_quant.data_quality import (
     MarketDataQualityService,
     inspect_market_bars,
 )
-from agentic_quant.coordinator import AutonomousCoordinator, COORDINATOR_STAGES
+from agentic_quant.coordinator import (
+    AUTONOMOUS_RESEARCH_HORIZONS,
+    AutonomousCoordinator,
+    COORDINATOR_RESEARCH_HORIZONS,
+    COORDINATOR_STAGES,
+)
 from agentic_quant.control_plane import SystemObjectStore
 from agentic_quant.coordinator_runtime import (
     DOCUMENT_HISTORY_COVERAGE_EVENT,
@@ -1087,6 +1092,11 @@ def test_autonomous_coordinator_partitions_cycles_by_research_horizon(
     assert {job.payload["horizon_bars"] for job in annual_jobs} == {252}
     with pytest.raises(ValueError, match="horizon is not approved"):
         coordinator.plan(symbols=("AAPL",), as_of=cutoff, horizon_bars=2)
+
+
+def test_autonomous_rotation_excludes_one_session_research() -> None:
+    assert COORDINATOR_RESEARCH_HORIZONS == (1, 5, 20, 63, 126, 252)
+    assert AUTONOMOUS_RESEARCH_HORIZONS == (5, 20, 63, 126, 252)
 
 
 def test_research_handler_propagates_planned_horizon_into_stage_context() -> None:
