@@ -4549,7 +4549,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C085 — `Isolate unsupported Robinhood watchlists`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `5ef7919d8f9fdc5dc86f14ace691ed271a6e5498`.
 - Date: 2026-09-09 PDT.
 - User intent: verify from the VPS that Robinhood balances and watchlists are actually readable
   after OAuth authorization.
@@ -4571,6 +4571,29 @@ lifecycle. No Paper order was used as a build or deployment test.
   submission plus live money remain hard-disabled.
 - Corrections/follow-ups: deploy after exact-sha CI, re-run the account/watchlist projections, and
   record the final audited tool inventory without exposing account identifiers or credentials.
+
+### C086 — `Record Robinhood server read verification`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-09 PDT.
+- User intent: confirm that the VPS itself can access the authorized Robinhood account balance and
+  watchlists after the browser relay exits.
+- Scope: reconcile the deployed bridge, server-side account projection, watchlist traversal, and
+  audited MCP call inventory in durable project memory.
+- Architecture/decision impact: none. The loopback relay remains a one-shot authorization return
+  hop only; ongoing MCP access originates on the VPS with encrypted server-held credentials.
+- Validation: the production Agentic account is active, is the sole account marked
+  `agentic_allowed`, and returned `$500` total value, `$500` cash, `$500` buying power, and no
+  equity or crypto holdings. The VPS discovered 17 lists: 16 returned their items successfully,
+  while the empty provider-owned Options Watchlist rejected item expansion. The call audit contains
+  only `tools/list`, `get_accounts`, `get_portfolio`, `get_watchlists`, and
+  `get_watchlist_items`; no order preview, placement, cancellation, or mutation tool appears.
+- Expected global state after commit: Robinhood authorization and the read-only server bridge are
+  proven independently of the operator workstation. The per-list compatibility correction awaits
+  exact-sha CI and guarded production deployment. Live money and Robinhood submission remain
+  disabled.
+- Corrections/follow-ups: after the C085 image is deployed, repeat the authenticated UI projection
+  and record that the special Options Watchlist is isolated without a whole-request failure.
 
 ## Template for future commit entries
 
