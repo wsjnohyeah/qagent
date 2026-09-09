@@ -4460,7 +4460,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C082 — `Record dormant Robinhood bridge deployment`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `3ba0e030f6dbec1e41ca74ec66cc4e9e13d2e8d9`.
 - Date: 2026-09-08 PDT.
 - User intent: deploy the Robinhood MCP bridge now so its connection and future broker boundary
   are ready while current operation remains simulation-only.
@@ -4486,6 +4486,33 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: administrator OAuth is still required. After it succeeds, capture the
   authenticated schema and complete the separate idempotency/reconciliation/security milestone
   before asking for any new live-money decision.
+
+### C083 — `Relay Robinhood OAuth through loopback`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-09 PDT.
+- User intent: fix Robinhood's generic `/oauth/error` after the administrator followed the
+  documented external-desktop authorization flow.
+- Scope: require Robinhood's supported `http://127.0.0.1:8765/callback` redirect in production,
+  add a one-shot local callback relay that forwards only allowlisted OAuth result fields to the
+  VPS over HTTPS, update Control Center guidance and deployment/runbook documentation, and add
+  callback validation regressions.
+- Architecture/decision impact: Robinhood still authorizes QAgent as a public PKCE client, but its
+  browser redirect terminates on the administrator's loopback listener. QAgent's verifier and all
+  resulting access/refresh tokens stay on the VPS; the workstation relay neither sees the verifier
+  nor stores tokens and closes after one callback. The MCP endpoint and forward callback remain
+  HTTPS-pinned, and no order-submission route or worker is added.
+- Validation: production logs show two successful QAgent OAuth starts, two unconsumed flow rows,
+  and no callback/token record, proving the failure occurred on Robinhood before token exchange.
+  Robinhood's current DCR returns its recognized shared public client, while current successful
+  client traces use a loopback callback. Focused Robinhood, Phase 6, and safety tests pass, as do
+  Flake8 and strict mypy across 61 source files; full release gates and deployment remain pending.
+- Expected global state after commit: the operator starts the local relay, selects **Connect
+  Robinhood**, completes consent/onboarding in a desktop browser, and lets the single-use relay
+  deliver the authorization result to QAgent. Live-money and Robinhood order submission remain
+  hard-disabled.
+- Corrections/follow-ups: after the first successful callback, verify token exchange, runtime
+  tool discovery, and a read-only portfolio probe without issuing an order.
 
 ## Template for future commit entries
 

@@ -26,6 +26,10 @@ execution path, violating the existing risk-authority boundary.
 2. OAuth uses dynamic client registration, authorization-code PKCE, a 15-minute single-use
    state, and refresh tokens. Tokens are Fernet-encrypted at rest under a separately supplied
    secret and are never returned by status APIs, stored in audit payloads, or sent to an LLM.
+   Robinhood's shared public MCP client currently requires a loopback redirect for unknown client
+   platforms. Production therefore uses a one-shot listener on the administrator's workstation;
+   it relays only the authorization response to the VPS callback over HTTPS. The verifier and
+   encrypted tokens remain on the VPS, and the relay never stores them.
 3. The initial bridge allows tool discovery, explicitly allowlisted read tools, and
    `review_equity_order`. Every call stores argument/response hashes and only a redacted summary.
 4. The source adapter contains `place_equity_order` and `cancel_equity_order` methods so their

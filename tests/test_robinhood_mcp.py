@@ -25,6 +25,10 @@ from agentic_quant.robinhood_mcp import (
     RobinhoodMCPConfigurationError,
     require_robinhood_mcp_endpoint,
 )
+from agentic_quant.robinhood_oauth_relay import (
+    build_forward_url,
+    require_forward_url,
+)
 
 
 def test_robinhood_endpoint_and_submission_are_fail_closed() -> None:
@@ -74,6 +78,7 @@ def test_robinhood_oauth_tool_discovery_and_read_probe(
             assert form["code"] == ["one-time-code"]
             assert form["client_id"] == ["registered-client"]
             assert form["code_verifier"][0]
+            assert form["resource"] == [ROBINHOOD_MCP_SERVER_URL]
             return httpx.Response(
                 200,
                 json={
@@ -213,6 +218,47 @@ def test_robinhood_bridge_settings_accept_valid_dormant_configuration() -> None:
     )
     assert value.robinhood_mcp_bridge_enabled is True
     assert value.robinhood_order_submission_enabled is False
+
+
+def test_production_robinhood_bridge_requires_exact_loopback_callback() -> None:
+    common = {
+        "_env_file": None,
+        "app_env": "production",
+        "auto_migrate": False,
+        "source_git_sha": "a" * 40,
+        "auth_required": True,
+        "admin_username": "operator",
+        "admin_password_hash": SecretStr("stored-argon2-hash"),
+        "session_secret": SecretStr("s" * 64),
+        "robinhood_mcp_bridge_enabled": True,
+        "robinhood_token_encryption_key": SecretStr(Fernet.generate_key().decode()),
+    }
+    value = Settings(
+        **common,
+        robinhood_oauth_redirect_uri="http://127.0.0.1:8765/callback",
+    )
+    assert value.robinhood_oauth_redirect_uri == "http://127.0.0.1:8765/callback"
+    with pytest.raises(ValueError, match="exact loopback callback"):
+        Settings(
+            **common,
+            robinhood_oauth_redirect_uri=(
+                "https://qagent.example/v1/robinhood/oauth/callback"
+            ),
+        )
+
+
+def test_robinhood_loopback_relay_forwards_only_oauth_fields() -> None:
+    target = "https://qagent.example/v1/robinhood/oauth/callback"
+    forwarded = build_forward_url(
+        target,
+        "code=one-time-code&state=opaque-state&ignored=secret",
+    )
+    query = parse_qs(urlparse(forwarded).query)
+    assert query == {"code": ["one-time-code"], "state": ["opaque-state"]}
+    with pytest.raises(ValueError, match="HTTPS URL"):
+        require_forward_url("http://qagent.example/v1/robinhood/oauth/callback")
+    with pytest.raises(ValueError, match="repeated code"):
+        build_forward_url(target, "code=one&code=two&state=opaque-state")
 
 
 def test_control_api_exposes_only_dormant_robinhood_bridge(

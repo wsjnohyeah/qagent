@@ -37,8 +37,10 @@
 - A dormant Robinhood MCP bridge is implemented for official-host-pinned OAuth PKCE, encrypted
   refresh tokens, runtime tool discovery, allowlisted reads, and equity-order preview. It has no
   place/cancel API or worker; configuration and production Compose reject order submission while
-  `LIVE_TRADING_ENABLED` remains false. The bridge is deployed and configured in production but
-  is not connected; administrator OAuth through Control Center is the remaining connection step.
+  `LIVE_TRADING_ENABLED` remains false. Robinhood's shared public MCP client requires its
+  loopback OAuth callback for an unknown platform, so a one-shot local relay forwards only the
+  authorization result to the VPS HTTPS callback. The verifier and encrypted tokens remain on
+  the VPS. The bridge is deployed but not yet authorized.
 - Local lint, strict type checking, all 206 tests, API readiness, the authenticated HTTP
   vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.

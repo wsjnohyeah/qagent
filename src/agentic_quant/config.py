@@ -124,22 +124,32 @@ class Settings(BaseSettings):
                     "ROBINHOOD_TOKEN_ENCRYPTION_KEY must be a Fernet key"
                 ) from exc
             redirect = urlparse(self.robinhood_oauth_redirect_uri)
-            allowed_schemes = (
-                {"https"}
-                if self.app_env == AppEnvironment.PRODUCTION
-                else {"http", "https"}
+            production_loopback = (
+                redirect.scheme == "http"
+                and redirect.hostname == "127.0.0.1"
+                and redirect.port == 8765
+                and redirect.path == "/callback"
+                and not redirect.params
+                and not redirect.query
+                and not redirect.fragment
+                and not redirect.username
+                and not redirect.password
             )
-            if (
-                redirect.scheme not in allowed_schemes
-                or not redirect.hostname
-                or redirect.username
-                or redirect.password
-                or redirect.query
-                or redirect.fragment
-                or redirect.path != "/v1/robinhood/oauth/callback"
-            ):
+            development_callback = (
+                self.app_env == AppEnvironment.DEVELOPMENT
+                and redirect.scheme in {"http", "https"}
+                and bool(redirect.hostname)
+                and redirect.path == "/v1/robinhood/oauth/callback"
+                and not redirect.params
+                and not redirect.query
+                and not redirect.fragment
+                and not redirect.username
+                and not redirect.password
+            )
+            if not (production_loopback or development_callback):
                 raise ValueError(
-                    "ROBINHOOD_OAUTH_REDIRECT_URI must use the exact callback path"
+                    "Production Robinhood OAuth requires the exact loopback callback "
+                    "http://127.0.0.1:8765/callback"
                 )
         if self.market_scanner_llm_enabled and not self.market_scanner_enabled:
             raise ValueError(

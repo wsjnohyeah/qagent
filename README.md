@@ -122,6 +122,9 @@ development-scoped while the authenticated remote deployment path is being commi
 A dormant Robinhood Agentic Trading bridge lets the VPS act as its own official-host-pinned MCP
 client. It supports OAuth PKCE, encrypted refreshable authorization, runtime tool discovery,
 allowlisted read calls, and order simulation without passing broker credentials to either LLM.
+Robinhood's shared public MCP client uses a localhost OAuth callback for unknown platforms, so a
+one-shot loopback relay forwards only the authorization result from the administrator's desktop
+to the VPS over HTTPS; token exchange and encrypted token storage remain server-side.
 The compiled place/cancel methods are unreachable in this release: configuration rejects order
 submission, production pins it off, and there is no live worker or HTTP route. See ADR 0040 and
 `runbooks/robinhood_mcp.md`.
@@ -315,7 +318,7 @@ ALPACA_STOCK_FEED=sip
 ALPACA_OPTION_FEED=opra
 ROBINHOOD_MCP_BRIDGE_ENABLED=false
 ROBINHOOD_MCP_SERVER_URL=https://agent.robinhood.com/mcp/trading
-ROBINHOOD_OAUTH_REDIRECT_URI=
+ROBINHOOD_OAUTH_REDIRECT_URI=http://127.0.0.1:8765/callback
 ROBINHOOD_TOKEN_ENCRYPTION_KEY=
 ROBINHOOD_ORDER_SUBMISSION_ENABLED=false
 ```

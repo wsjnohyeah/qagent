@@ -45,6 +45,7 @@ quant-alpaca = "agentic_quant.alpaca_cli:main"
 quant-events = "agentic_quant.event_cli:main"
 quant-llm = "agentic_quant.llm_cli:main"
 quant-research = "agentic_quant.research_cli:main"
+quant-robinhood-relay = "agentic_quant.robinhood_oauth_relay:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agentic_quant"]

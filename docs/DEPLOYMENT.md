@@ -71,7 +71,7 @@ MARKET_SCANNER_POLICY_PATH=./configs/market_scanner.yaml
 # Optional dormant Robinhood authorization/read/preview bridge. Keep submission false.
 ROBINHOOD_MCP_BRIDGE_ENABLED=false
 ROBINHOOD_MCP_SERVER_URL=https://agent.robinhood.com/mcp/trading
-ROBINHOOD_OAUTH_REDIRECT_URI=
+ROBINHOOD_OAUTH_REDIRECT_URI=http://127.0.0.1:8765/callback
 ROBINHOOD_TOKEN_ENCRYPTION_KEY=
 ROBINHOOD_ORDER_SUBMISSION_ENABLED=false
 AUTO_MIGRATE=false
@@ -98,11 +98,11 @@ production data plane has no Paper enrollment, so activation cannot submit until
 administrator separately confirms one in Control Center and resumes new exposure.
 
 When the dormant Robinhood bridge is approved, generate its Fernet key in the target secret
-manager, set the exact public HTTPS callback, and enable only
+manager, set the exact loopback callback shown above, and enable only
 `ROBINHOOD_MCP_BRIDGE_ENABLED`. Production Compose pins
 `ROBINHOOD_ORDER_SUBMISSION_ENABLED=false` even if the environment file is wrong. Complete
-OAuth and tool discovery through Control Center after deployment; never test it with a real
-order. Follow `runbooks/robinhood_mcp.md`.
+OAuth with the one-shot workstation relay and perform tool discovery through Control Center
+after deployment; never test it with a real order. Follow `runbooks/robinhood_mcp.md`.
 
 Generate the production hash interactively without putting the password in shell history:
 
