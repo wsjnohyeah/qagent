@@ -11,7 +11,7 @@
   strictly Qualified and no adopted strategy has accumulated forward observation time.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `a5452f8adad6917d1f9b43746bffe7ac433c1758` image, PostgreSQL, Redis, API, Shadow worker,
+  `3c517aa9cc09adf357bd23572d8f123934c02712` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled. Seventeen explicitly approved Candidate Shadow
@@ -42,7 +42,10 @@
   authorization result to the VPS HTTPS callback. The verifier and encrypted tokens remain on
   the VPS. The production bridge is authorized and has completed server-side tool discovery plus
   audited, read-only account, portfolio, and watchlist calls; account identifiers stay redacted
-  and no order tool has been called.
+  and no order tool has been called. The dedicated Agentic account is the sole account marked
+  agent-accessible. Sixteen ordinary equity/crypto watchlists are readable; Robinhood currently
+  rejects item expansion for its special empty Options Watchlist, which is isolated as an
+  unavailable list rather than failing the complete read.
 - Local lint, strict type checking, all 208 tests, API readiness, the authenticated HTTP
   vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.

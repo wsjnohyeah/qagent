@@ -559,6 +559,20 @@ class RobinhoodMCPBridge:
                 tool_name="get_watchlist_items",
                 arguments={"list_id": list_id},
             )
+            if bool(items_result.get("isError", False)):
+                summaries.append(
+                    {
+                        "display_name": item.get("display_name"),
+                        "owner_type": item.get("owner_type"),
+                        "reported_item_count": item.get("item_count"),
+                        "symbols": [],
+                        "read_status": "UNAVAILABLE",
+                        "warning": (
+                            "Robinhood did not expose items for this watchlist"
+                        ),
+                    }
+                )
+                continue
             symbols: list[str] = []
             self._collect_symbols(self._text_json_documents(items_result), symbols)
             summaries.append(

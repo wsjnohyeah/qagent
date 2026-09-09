@@ -155,15 +155,41 @@ def test_robinhood_oauth_tool_discovery_and_read_probe(
                                     "display_name": "Technology",
                                     "item_count": 2,
                                     "owner_type": "custom",
+                                },
+                                {
+                                    "id": "options-watchlist-id",
+                                    "display_name": "Options Watchlist",
+                                    "item_count": 0,
+                                    "owner_type": "system",
                                 }
                             ]
                         }
                     }
                 elif tool_name == "get_watchlist_items":
-                    assert payload["params"]["arguments"] == {
-                        "list_id": "watchlist-id"
+                    list_id = payload["params"]["arguments"]["list_id"]
+                    if list_id == "options-watchlist-id":
+                        return httpx.Response(
+                            200,
+                            json={
+                                "jsonrpc": "2.0",
+                                "id": "qagent-call",
+                                "result": {
+                                    "content": [
+                                        {
+                                            "type": "text",
+                                            "text": "API error 400: options unavailable",
+                                        }
+                                    ],
+                                    "isError": True,
+                                },
+                            },
+                        )
+                    assert list_id == "watchlist-id"
+                    result = {
+                        "data": {
+                            "items": [{"symbol": "AAPL"}, {"symbol": "NVDA"}]
+                        }
                     }
-                    result = {"data": {"items": [{"symbol": "AAPL"}, {"symbol": "NVDA"}]}}
                 else:
                     raise AssertionError(f"Unexpected tool call: {tool_name}")
                 return httpx.Response(
@@ -233,6 +259,14 @@ def test_robinhood_oauth_tool_discovery_and_read_probe(
                 "owner_type": "custom",
                 "reported_item_count": 2,
                 "symbols": ["AAPL", "NVDA"],
+            },
+            {
+                "display_name": "Options Watchlist",
+                "owner_type": "system",
+                "reported_item_count": 0,
+                "symbols": [],
+                "read_status": "UNAVAILABLE",
+                "warning": "Robinhood did not expose items for this watchlist",
             }
         ]
     }
@@ -250,6 +284,7 @@ def test_robinhood_oauth_tool_discovery_and_read_probe(
         "get_accounts",
         "get_portfolio",
         "get_watchlists",
+        "get_watchlist_items",
         "get_watchlist_items",
     ]
     assert {

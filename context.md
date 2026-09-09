@@ -4516,7 +4516,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C084 — `Complete and inspect Robinhood read authorization`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `3c517aa9cc09adf357bd23572d8f123934c02712`.
 - Date: 2026-09-09 PDT.
 - User intent: complete the Robinhood connection and verify that the VPS—not a workstation
   process—can access balances, account metadata, and watchlists.
@@ -4534,15 +4534,43 @@ lifecycle. No Paper order was used as a build or deployment test.
   connected authorization with an expiry and successfully completed `tools/list`, `get_accounts`,
   `get_portfolio`, `get_watchlists`, and `get_watchlist_items`. The read returned one accessible
   dedicated Agentic account plus non-empty portfolio/watchlist data, with identifiers redacted in
-  operator diagnostics; no preview, place, cancel, or other mutation tool was called. Focused
-  Robinhood tests, Flake8, strict mypy, and the secret scan pass; full gates and deployment of the
-  readable projections remain pending.
+  operator diagnostics; no preview, place, cancel, or other mutation tool was called. GitHub CI
+  run 34326309489 passed for the exact commit; `make check` passed Flake8, strict mypy across 61
+  source files, and all 208 tests, while `make doctor` and the secret scan passed. Production
+  migrated and deployed the immutable exact-SHA image; API, worker, coordinator, PostgreSQL, and
+  Redis health gates passed with live trading and Robinhood submission disabled.
 - Expected global state after commit: QAgent's VPS maintains the Robinhood OAuth/MCP session and
   can show the dedicated Agentic account balance and grouped watchlists through authenticated,
   audited read endpoints. The desktop has no persistent relay or broker credential. Live-money
   and order submission remain hard-disabled.
-- Corrections/follow-ups: capture and version the authenticated order schemas before any future
-  execution design; a separate security review and explicit live-money decision remain required.
+- Corrections/follow-ups: C085 isolates Robinhood's special Options Watchlist item-read failure.
+  Capture and version the authenticated order schemas before any future execution design; a
+  separate security review and explicit live-money decision remain required.
+
+### C085 — `Isolate unsupported Robinhood watchlists`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-09 PDT.
+- User intent: verify from the VPS that Robinhood balances and watchlists are actually readable
+  after OAuth authorization.
+- Scope: treat a provider-level `isError` from one watchlist as a per-list unavailable state,
+  preserve all successfully read lists, render the isolated warning in Control Center, and add a
+  regression for Robinhood's non-JSON error text.
+- Architecture/decision impact: the authenticated projection remains read-only and audited. A
+  special provider-owned list can no longer suppress unrelated account/list data; its raw error
+  text is not propagated to the operator projection.
+- Validation: direct production MCP inspection found sixteen readable standard lists and one empty
+  special Options Watchlist whose item API rejects `load_all_attributes`. The dedicated Agentic
+  account portfolio probe succeeded. Focused Robinhood/Control Center tests pass; `make check`
+  passed Flake8, strict mypy across 61 source files, and all 208 tests; `make doctor` and the secret
+  scan passed. Exact-sha CI, deployment, and post-deployment projection verification remain
+  pending.
+- Expected global state after commit: authenticated operators can read the dedicated Agentic
+  account balance and all supported Robinhood watchlists from the VPS. Unsupported lists are
+  visible as unavailable without breaking the page. No order tool is invoked, and Robinhood order
+  submission plus live money remain hard-disabled.
+- Corrections/follow-ups: deploy after exact-sha CI, re-run the account/watchlist projections, and
+  record the final audited tool inventory without exposing account identifiers or credentials.
 
 ## Template for future commit entries
 
