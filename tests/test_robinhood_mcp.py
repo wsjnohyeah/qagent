@@ -117,7 +117,10 @@ def test_robinhood_oauth_tool_discovery_and_read_probe(
                         "id": "qagent-call",
                         "result": {
                             "tools": [
+                                {"name": "get_accounts", "inputSchema": {}},
                                 {"name": "get_portfolio", "inputSchema": {}},
+                                {"name": "get_watchlists", "inputSchema": {}},
+                                {"name": "get_watchlist_items", "inputSchema": {}},
                                 {"name": "review_equity_order", "inputSchema": {}},
                                 {"name": "place_equity_order", "inputSchema": {}},
                             ]
@@ -125,7 +128,44 @@ def test_robinhood_oauth_tool_discovery_and_read_probe(
                     },
                 )
             if method == "tools/call":
-                assert payload["params"]["name"] == "get_portfolio"
+                tool_name = payload["params"]["name"]
+                if tool_name == "get_accounts":
+                    result = {
+                        "data": {
+                            "accounts": [
+                                {
+                                    "account_number": "secret-account-number",
+                                    "agentic_allowed": True,
+                                    "nickname": "Agentic",
+                                }
+                            ]
+                        }
+                    }
+                elif tool_name == "get_portfolio":
+                    assert payload["params"]["arguments"] == {
+                        "account_number": "secret-account-number"
+                    }
+                    result = {"data": {"total_value": "500.00", "cash": "500.00"}}
+                elif tool_name == "get_watchlists":
+                    result = {
+                        "data": {
+                            "watchlists": [
+                                {
+                                    "id": "watchlist-id",
+                                    "display_name": "Technology",
+                                    "item_count": 2,
+                                    "owner_type": "custom",
+                                }
+                            ]
+                        }
+                    }
+                elif tool_name == "get_watchlist_items":
+                    assert payload["params"]["arguments"] == {
+                        "list_id": "watchlist-id"
+                    }
+                    result = {"data": {"items": [{"symbol": "AAPL"}, {"symbol": "NVDA"}]}}
+                else:
+                    raise AssertionError(f"Unexpected tool call: {tool_name}")
                 return httpx.Response(
                     200,
                     json={
@@ -133,7 +173,7 @@ def test_robinhood_oauth_tool_discovery_and_read_probe(
                         "id": "qagent-call",
                         "result": {
                             "content": [
-                                {"type": "text", "text": '{"equity":"1000"}'}
+                                {"type": "text", "text": json.dumps(result)}
                             ],
                             "isError": False,
                         },
@@ -173,14 +213,29 @@ def test_robinhood_oauth_tool_discovery_and_read_probe(
     assert status["connected"] is True
     tools = asyncio.run(bridge.list_tools())
     assert [tool["name"] for tool in tools] == [
+        "get_accounts",
         "get_portfolio",
+        "get_watchlists",
+        "get_watchlist_items",
         "review_equity_order",
         "place_equity_order",
     ]
-    portfolio = asyncio.run(
-        bridge.call_read_tool(tool_name="get_portfolio", arguments={})
-    )
-    assert portfolio["isError"] is False
+    portfolio = asyncio.run(bridge.agentic_portfolio())
+    assert portfolio["account"]["nickname"] == "Agentic"
+    assert portfolio["account"]["account_number_last_four"] == "mber"
+    assert "account_number" not in portfolio["account"]
+    assert portfolio["portfolio"][0]["data"]["total_value"] == "500.00"
+    watchlists = asyncio.run(bridge.watchlists())
+    assert watchlists == {
+        "watchlists": [
+            {
+                "display_name": "Technology",
+                "owner_type": "custom",
+                "reported_item_count": 2,
+                "symbols": ["AAPL", "NVDA"],
+            }
+        ]
+    }
     with pytest.raises(RobinhoodMCPConfigurationError, match="hard-disabled"):
         asyncio.run(bridge.place_equity_order(arguments={"symbol": "AAPL"}))
 
@@ -190,7 +245,13 @@ def test_robinhood_oauth_tool_discovery_and_read_probe(
         calls = connection.execute(select(robinhood_mcp_calls)).all()
     assert "sensitive-access-token" not in stored.access_token_ciphertext
     assert "sensitive-refresh-token" not in stored.refresh_token_ciphertext
-    assert [call.tool_name for call in calls] == ["tools/list", "get_portfolio"]
+    assert [call.tool_name for call in calls] == [
+        "tools/list",
+        "get_accounts",
+        "get_portfolio",
+        "get_watchlists",
+        "get_watchlist_items",
+    ]
     assert {
         event["event_type"]
         for event in ledger.by_correlation_id(str(stored.connection_id))
@@ -275,6 +336,7 @@ def test_control_api_exposes_only_dormant_robinhood_bridge(
             "/v1/robinhood/oauth/start",
             json={"reason": "Verify disabled bridge"},
         ).status_code == 409
+        assert client.get("/v1/robinhood/watchlists").status_code == 409
         assert client.post(
             "/v1/robinhood/place-equity-order",
             json={"arguments": {"symbol": "AAPL"}},

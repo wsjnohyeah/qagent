@@ -1462,10 +1462,14 @@ def create_app(
     @application.post("/v1/robinhood/probe")
     async def robinhood_probe() -> dict[str, Any]:
         try:
-            return await robinhood.call_read_tool(
-                tool_name="get_portfolio",
-                arguments={},
-            )
+            return await robinhood.agentic_portfolio()
+        except RobinhoodMCPError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @application.get("/v1/robinhood/watchlists")
+    async def robinhood_watchlists() -> dict[str, Any]:
+        try:
+            return await robinhood.watchlists()
         except RobinhoodMCPError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 

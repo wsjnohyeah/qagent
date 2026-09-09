@@ -40,8 +40,10 @@
   `LIVE_TRADING_ENABLED` remains false. Robinhood's shared public MCP client requires its
   loopback OAuth callback for an unknown platform, so a one-shot local relay forwards only the
   authorization result to the VPS HTTPS callback. The verifier and encrypted tokens remain on
-  the VPS. The bridge is deployed but not yet authorized.
-- Local lint, strict type checking, all 206 tests, API readiness, the authenticated HTTP
+  the VPS. The production bridge is authorized and has completed server-side tool discovery plus
+  audited, read-only account, portfolio, and watchlist calls; account identifiers stay redacted
+  and no order tool has been called.
+- Local lint, strict type checking, all 208 tests, API readiness, the authenticated HTTP
   vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
 - The full Compose stack is healthy: PostgreSQL 17, Redis 8, MinIO, and the API all passed direct checks; the PostgreSQL-backed shadow slice recorded six lineage events.

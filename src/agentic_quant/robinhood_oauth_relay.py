@@ -4,9 +4,9 @@ import argparse
 from html import escape
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
-from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlencode, urlparse
-from urllib.request import Request, urlopen
+
+import httpx
 
 
 LOOPBACK_HOST = "127.0.0.1"
@@ -75,16 +75,20 @@ class _CallbackHandler(BaseHTTPRequestHandler):
             return
         try:
             target = build_forward_url(self.server.forward_url, parsed.query)
-            request = Request(target, headers={"User-Agent": "QAgent-OAuth-Relay/1"})
-            with urlopen(request, timeout=30) as response:  # noqa: S310
-                response.read(1)
+            response = httpx.get(
+                target,
+                headers={"User-Agent": "QAgent-OAuth-Relay/1"},
+                follow_redirects=True,
+                timeout=30,
+            )
+            response.raise_for_status()
             self.server.completed = True
             self._reply(
                 200,
                 "Robinhood authorization was delivered to QAgent. "
                 "Return to the QAgent Robinhood bridge page and refresh it.",
             )
-        except (ValueError, HTTPError, URLError, TimeoutError) as exc:
+        except (ValueError, httpx.HTTPError) as exc:
             self.server.completed = True
             self._reply(502, f"QAgent authorization relay failed: {escape(str(exc))}")
 

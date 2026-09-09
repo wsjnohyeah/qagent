@@ -64,6 +64,7 @@ def test_admin_session_is_required_and_csrf_protects_writes(
         assert "EXECUTION_RISK_REVIEW" in page.text
         assert "Alpaca paper trading" in page.text
         assert "Robinhood bridge" in page.text
+        assert "View watchlists" in page.text
         assert "Connected does not mean armed" in page.text
         assert "Paper order submission is fail-closed" in page.text
         assert "Live money is impossible" in page.text

@@ -60,6 +60,7 @@ GET  /v1/robinhood/oauth/callback
 POST /v1/robinhood/disconnect
 GET  /v1/robinhood/tools
 POST /v1/robinhood/probe
+GET  /v1/robinhood/watchlists
 POST /v1/robinhood/review-equity-order
 ```
 

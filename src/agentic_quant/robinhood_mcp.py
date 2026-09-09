@@ -42,6 +42,8 @@ READ_ONLY_TOOLS = {
     "get_equity_quotes",
     "get_equity_orders",
     "get_equity_tradability",
+    "get_watchlists",
+    "get_watchlist_items",
 }
 PREVIEW_TOOLS = {"review_equity_order"}
 MUTATING_TOOLS = {"place_equity_order", "cancel_equity_order"}
@@ -497,6 +499,78 @@ class RobinhoodMCPBridge:
             arguments=arguments,
         )
 
+    async def agentic_portfolio(self) -> dict[str, Any]:
+        accounts_result = await self.call_read_tool(
+            tool_name="get_accounts",
+            arguments={},
+        )
+        accounts: list[dict[str, Any]] = []
+        for document in self._text_json_documents(accounts_result):
+            data = document.get("data")
+            if not isinstance(data, dict):
+                continue
+            values = data.get("accounts")
+            if isinstance(values, list):
+                accounts.extend(item for item in values if isinstance(item, dict))
+        eligible = [item for item in accounts if item.get("agentic_allowed") is True]
+        if len(eligible) != 1:
+            raise RobinhoodMCPProtocolError(
+                "Expected exactly one Robinhood account accessible to this agent"
+            )
+        account_number = eligible[0].get("account_number")
+        if not isinstance(account_number, str) or not account_number:
+            raise RobinhoodMCPProtocolError(
+                "Agentic Robinhood account omitted its account number"
+            )
+        portfolio_result = await self.call_read_tool(
+            tool_name="get_portfolio",
+            arguments={"account_number": account_number},
+        )
+        account = {
+            key: value
+            for key, value in eligible[0].items()
+            if key not in {"account_number", "rhc_account_number", "rhs_account_number"}
+        }
+        account["account_number_last_four"] = account_number[-4:]
+        return {
+            "account": account,
+            "portfolio": self._text_json_documents(portfolio_result),
+        }
+
+    async def watchlists(self) -> dict[str, Any]:
+        watchlists_result = await self.call_read_tool(
+            tool_name="get_watchlists",
+            arguments={},
+        )
+        watchlists: list[dict[str, Any]] = []
+        for document in self._text_json_documents(watchlists_result):
+            data = document.get("data")
+            if not isinstance(data, dict):
+                continue
+            values = data.get("watchlists")
+            if isinstance(values, list):
+                watchlists.extend(item for item in values if isinstance(item, dict))
+        summaries: list[dict[str, Any]] = []
+        for item in watchlists:
+            list_id = item.get("id")
+            if not isinstance(list_id, str) or not list_id:
+                continue
+            items_result = await self.call_read_tool(
+                tool_name="get_watchlist_items",
+                arguments={"list_id": list_id},
+            )
+            symbols: list[str] = []
+            self._collect_symbols(self._text_json_documents(items_result), symbols)
+            summaries.append(
+                {
+                    "display_name": item.get("display_name"),
+                    "owner_type": item.get("owner_type"),
+                    "reported_item_count": item.get("item_count"),
+                    "symbols": list(dict.fromkeys(symbols)),
+                }
+            )
+        return {"watchlists": summaries}
+
     async def place_equity_order(self, *, arguments: dict[str, Any]) -> dict[str, Any]:
         if not self.order_submission_enabled:
             raise RobinhoodMCPConfigurationError(
@@ -820,6 +894,40 @@ class RobinhoodMCPBridge:
                 f"{operation} returned a non-object envelope"
             )
         return {str(key): value for key, value in payload.items()}
+
+    @staticmethod
+    def _text_json_documents(result: dict[str, Any]) -> list[dict[str, Any]]:
+        documents: list[dict[str, Any]] = []
+        content = result.get("content")
+        if not isinstance(content, list):
+            return documents
+        for item in content:
+            if not isinstance(item, dict) or item.get("type") != "text":
+                continue
+            try:
+                value = json.loads(str(item.get("text") or ""))
+            except json.JSONDecodeError as exc:
+                raise RobinhoodMCPProtocolError(
+                    "Robinhood read tool returned invalid JSON text"
+                ) from exc
+            if not isinstance(value, dict):
+                raise RobinhoodMCPProtocolError(
+                    "Robinhood read tool returned a non-object JSON document"
+                )
+            documents.append({str(key): entry for key, entry in value.items()})
+        return documents
+
+    @staticmethod
+    def _collect_symbols(node: Any, destination: list[str]) -> None:
+        if isinstance(node, dict):
+            symbol = node.get("symbol")
+            if isinstance(symbol, str) and symbol:
+                destination.append(symbol)
+            for value in node.values():
+                RobinhoodMCPBridge._collect_symbols(value, destination)
+        elif isinstance(node, list):
+            for value in node:
+                RobinhoodMCPBridge._collect_symbols(value, destination)
 
     @staticmethod
     def _json_object(response: httpx.Response, operation: str) -> dict[str, Any]:

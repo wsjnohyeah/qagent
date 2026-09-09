@@ -4489,7 +4489,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C083 — `Relay Robinhood OAuth through loopback`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `bb65fce4de4a300c777e32d3e2b6232147d54d8c`.
 - Date: 2026-09-09 PDT.
 - User intent: fix Robinhood's generic `/oauth/error` after the administrator followed the
   documented external-desktop authorization flow.
@@ -4513,6 +4513,36 @@ lifecycle. No Paper order was used as a build or deployment test.
   hard-disabled.
 - Corrections/follow-ups: after the first successful callback, verify token exchange, runtime
   tool discovery, and a read-only portfolio probe without issuing an order.
+
+### C084 — `Complete and inspect Robinhood read authorization`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-09 PDT.
+- User intent: complete the Robinhood connection and verify that the VPS—not a workstation
+  process—can access balances, account metadata, and watchlists.
+- Scope: use `httpx` with its managed CA bundle for the one-shot relay's HTTPS forward, expose
+  explicit read-only account/portfolio and watchlist projections, add a readable Control Center
+  view, and expand bridge tests for Agentic-account selection, identifier redaction, and watchlist
+  traversal.
+- Architecture/decision impact: localhost remains only the provider-required browser return hop.
+  It forwards the one-time authorization result and exits. The VPS holds the PKCE verifier,
+  exchanges the code, encrypts the refresh/access tokens, establishes MCP sessions, and performs
+  every durable account call. The account projection selects the sole `agentic_allowed` account
+  and never returns its full account identifiers.
+- Validation: Robinhood returned an authorization code to the loopback listener; after the CA
+  compatibility correction, the relay delivered it to the VPS and closed. Production reports a
+  connected authorization with an expiry and successfully completed `tools/list`, `get_accounts`,
+  `get_portfolio`, `get_watchlists`, and `get_watchlist_items`. The read returned one accessible
+  dedicated Agentic account plus non-empty portfolio/watchlist data, with identifiers redacted in
+  operator diagnostics; no preview, place, cancel, or other mutation tool was called. Focused
+  Robinhood tests, Flake8, strict mypy, and the secret scan pass; full gates and deployment of the
+  readable projections remain pending.
+- Expected global state after commit: QAgent's VPS maintains the Robinhood OAuth/MCP session and
+  can show the dedicated Agentic account balance and grouped watchlists through authenticated,
+  audited read endpoints. The desktop has no persistent relay or broker credential. Live-money
+  and order submission remain hard-disabled.
+- Corrections/follow-ups: capture and version the authenticated order schemas before any future
+  execution design; a separate security review and explicit live-money decision remain required.
 
 ## Template for future commit entries
 

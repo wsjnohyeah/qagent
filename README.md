@@ -121,7 +121,8 @@ development-scoped while the authenticated remote deployment path is being commi
 
 A dormant Robinhood Agentic Trading bridge lets the VPS act as its own official-host-pinned MCP
 client. It supports OAuth PKCE, encrypted refreshable authorization, runtime tool discovery,
-allowlisted read calls, and order simulation without passing broker credentials to either LLM.
+allowlisted account/portfolio/watchlist reads, and order simulation without passing broker
+credentials to either LLM.
 Robinhood's shared public MCP client uses a localhost OAuth callback for unknown platforms, so a
 one-shot loopback relay forwards only the authorization result from the administrator's desktop
 to the VPS over HTTPS; token exchange and encrypted token storage remain server-side.
