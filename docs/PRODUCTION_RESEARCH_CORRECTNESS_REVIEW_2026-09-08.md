@@ -147,3 +147,19 @@ statistical gates today.
   operator review, autonomous one-session daily-bar research is disabled so the current `$40`
   budget prioritizes 5/20/63/126/252-session research. One-session remains available for
   explicit comparison but is not described as minute-data intraday trading.
+
+## Multi-session autonomous rollout follow-up
+
+- GitHub CI run `34297741237` passed for functional commit
+  `bb154d9148fcbd9b053c96b1441622823134a42e`, and that exact image is healthy in production.
+- Autonomous creation and backlog recovery now share the enabled horizon set
+  `5/20/63/126/252`; historical one-session groups cannot consume new scheduler or LLM capacity.
+- The earlier fresh 5- and 20-session groups were not rejected by exact validation: for each
+  horizon, 19 symbols reached `WAITING_LLM_BUDGET` under the former `$18` OpenAI ceiling and one
+  lacked enough hybrid evidence. Generation and validation consequently had no specification to
+  evaluate.
+- The first post-rollout cycle is a fresh 20-session group over all 20 pool symbols. At the first
+  verification point it had completed 42 of 180 jobs with zero failed or exhausted jobs; strategy
+  quality remains pending.
+- Runtime remains research/Shadow/Paper-only: live money is disabled, 17 Candidate Shadow
+  deployments are active with zero open positions, and Paper has zero enrollments and orders.

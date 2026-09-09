@@ -4384,7 +4384,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C079 — `Skip disabled research backlog in autonomous runs`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `bb154d9148fcbd9b053c96b1441622823134a42e`.
 - Date: 2026-09-08 PDT.
 - User intent: disable the daily-bar one-session strategy completely from autonomous production
   operation while retaining its immutable history and explicit/manual reproducibility.
@@ -4401,6 +4401,29 @@ lifecycle. No Paper order was used as a build or deployment test.
   receives the available scheduler and LLM capacity.
 - Corrections/follow-ups: observe the first fresh 5- and 20-session groups after deployment and
   report exact funnel outcomes rather than treating job completion as validated alpha.
+
+### C080 — `Record multi-session scheduler deployment`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-08 PDT.
+- User intent: deploy the autonomous one-session disablement and explain why no 5- or 20-session
+  strategy had appeared.
+- Scope: record the exact CI-verified production image, guarded rollout, runtime resume, prior
+  multi-session funnel diagnosis, and the first post-deployment 20-session coordinator cycle.
+- Architecture/decision impact: none; this is deployment and production-evidence reconciliation.
+- Validation: GitHub CI run 34297741237 passed for the exact functional commit; API, PostgreSQL,
+  Redis, Shadow worker, and coordinator are healthy. Production reports `live_trading_enabled=false`,
+  global new exposure resumed, 17 active Candidate Shadow deployments with zero open positions,
+  zero Paper enrollments/orders, and zero newly failed or exhausted workflow jobs. The prior fresh
+  5- and 20-session batches each had 19 symbols blocked at `WAITING_LLM_BUDGET` under the former
+  `$18` OpenAI limit and one without enough hybrid evidence; neither batch reached exact validation.
+  A fresh 20-session group began after rollout over 20 symbols with 180 jobs and no early failures.
+- Expected global state after commit: production runs only 5/20/63/126/252-session autonomous
+  research under the current `$40` critical/daily ceiling. Historical one-session results remain
+  queryable but do not receive autonomous scheduler or LLM capacity.
+- Corrections/follow-ups: allow the new 20-session cycle and the next 5-session rotation to finish,
+  then distinguish generated specifications, cost-adjusted validation failures, and review-eligible
+  Candidate/Qualified results without weakening deterministic risk or positive-return gates.
 
 ## Template for future commit entries
 

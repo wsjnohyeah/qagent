@@ -11,7 +11,7 @@
   strictly Qualified and no adopted strategy has accumulated forward observation time.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `dea9c34e30f6b31ed624ab78f736a3577384e2d9` image, PostgreSQL, Redis, API, Shadow worker,
+  `bb154d9148fcbd9b053c96b1441622823134a42e` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled. Seventeen explicitly approved Candidate Shadow
@@ -26,6 +26,9 @@
 - Autonomous research creates and resumes only 5/20/63/126/252-session groups. One-session
   daily-bar research remains an explicit/manual reproducibility path and is not represented as
   a minute-level intraday strategy.
+- The first post-deployment autonomous group is a fresh 20-session cycle over all 20 Scanner
+  Trading Pool symbols. Its initial 42 completed stages had no failed or exhausted job; exact
+  strategy and validation outcomes remain pending and must not be inferred from job startup.
 - Local-lite uses Python 3.12, a project-local `uv`, SQLite, and filesystem object storage.
 - The Control API, single-admin object-centric web console, persistent System Steward,
   append-only event ledger, deterministic risk engine, and shadow runtime exist.
