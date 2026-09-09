@@ -4563,8 +4563,8 @@ lifecycle. No Paper order was used as a build or deployment test.
   special Options Watchlist whose item API rejects `load_all_attributes`. The dedicated Agentic
   account portfolio probe succeeded. Focused Robinhood/Control Center tests pass; `make check`
   passed Flake8, strict mypy across 61 source files, and all 208 tests; `make doctor` and the secret
-  scan passed. Exact-sha CI, deployment, and post-deployment projection verification remain
-  pending.
+  scan passed. GitHub CI run 34327635860 passed and published the exact immutable image; C087
+  records its deployment and post-deployment projection verification.
 - Expected global state after commit: authenticated operators can read the dedicated Agentic
   account balance and all supported Robinhood watchlists from the VPS. Unsupported lists are
   visible as unavailable without breaking the page. No order tool is invoked, and Robinhood order
@@ -4574,7 +4574,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C086 — `Record Robinhood server read verification`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `af17c8c73c7bcd536368cde10de9e9374455e440`.
 - Date: 2026-09-09 PDT.
 - User intent: confirm that the VPS itself can access the authorized Robinhood account balance and
   watchlists after the browser relay exits.
@@ -4594,6 +4594,38 @@ lifecycle. No Paper order was used as a build or deployment test.
   disabled.
 - Corrections/follow-ups: after the C085 image is deployed, repeat the authenticated UI projection
   and record that the special Options Watchlist is isolated without a whole-request failure.
+
+### C087 — `Record Robinhood watchlist compatibility deployment`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-09 PDT.
+- User intent: leave the VPS able to display the authorized Robinhood balance and watchlists after
+  correcting the provider-specific list failure.
+- Scope: record exact-sha CI/image publication, guarded production deployment, post-deployment
+  read-only account/list verification, service health, call-audit inventory, and runtime resume.
+- Architecture/decision impact: none beyond C085. Robinhood credentials and calls remain on the
+  VPS; the workstation is not an ongoing bridge, and unsupported provider lists are isolated at
+  the read projection boundary.
+- Validation: GitHub CI run 34327635860 passed and published image
+  `5ef7919d8f9fdc5dc86f14ace691ed271a6e5498`. The guarded deployment completed with API,
+  coordinator, Shadow worker, PostgreSQL, and Redis healthy; public readiness reports
+  `live_trading_enabled=false`. After restart, Robinhood remained `CONNECTED`; the authenticated
+  account probe returned the active, sole agent-accessible Agentic account with `$500` total,
+  cash, and buying power and no equity/crypto holdings. The watchlist endpoint returned HTTP 200,
+  16 readable lists, and one isolated unavailable Options Watchlist. The audit inventory contains
+  only discovery/account/portfolio/watchlist read tools and no preview, place, cancel, or mutation
+  call. Audited action `01a0854d-2b84-7de4-ae7e-075c79635af5` resumed the previously approved
+  research and broker-free Shadow workflow after deployment. Diagnostic admin sessions were
+  revoked after a transient session value appeared in local diagnostic output; the operator must
+  sign in again, while Robinhood authorization remains unaffected.
+- Expected global state after commit: production independently reads the dedicated Agentic balance
+  and supported Robinhood watchlists, the Control Center degrades one unsupported list cleanly,
+  and approved simulation workflows are running. Robinhood submission and live money remain
+  disabled.
+- Corrections/follow-ups: Robinhood token refresh should be observed before the current access-token
+  expiry. Order schemas may be captured without submission, but idempotency/reconciliation,
+  account binding, a security review, and a new explicit live-money decision remain mandatory
+  before any future execution path.
 
 ## Template for future commit entries
 
