@@ -4,7 +4,9 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 import re
+from urllib.parse import urlparse
 
+from cryptography.fernet import Fernet
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -74,6 +76,11 @@ class Settings(BaseSettings):
     alpaca_stock_stream_base_url: str = "wss://stream.data.alpaca.markets/v2"
     alpaca_stock_feed: str = "sip"
     alpaca_option_feed: str = "opra"
+    robinhood_mcp_bridge_enabled: bool = False
+    robinhood_mcp_server_url: str = "https://agent.robinhood.com/mcp/trading"
+    robinhood_oauth_redirect_uri: str | None = None
+    robinhood_token_encryption_key: SecretStr | None = None
+    robinhood_order_submission_enabled: bool = False
     sec_user_agent: str | None = None
     enable_social_aggregates: bool = False
     social_aggregate_url: str | None = None
@@ -97,6 +104,43 @@ class Settings(BaseSettings):
     def live_execution_is_impossible(self) -> Settings:
         if self.live_trading_enabled:
             raise ValueError("Live trading is prohibited; LIVE_TRADING_ENABLED must remain false")
+        if self.robinhood_order_submission_enabled:
+            raise ValueError(
+                "Robinhood order submission is prohibited by the current operating contract"
+            )
+        if self.robinhood_mcp_bridge_enabled:
+            if self.robinhood_token_encryption_key is None:
+                raise ValueError(
+                    "Robinhood MCP bridge requires ROBINHOOD_TOKEN_ENCRYPTION_KEY"
+                )
+            if not self.robinhood_oauth_redirect_uri:
+                raise ValueError(
+                    "Robinhood MCP bridge requires ROBINHOOD_OAUTH_REDIRECT_URI"
+                )
+            try:
+                Fernet(self.robinhood_token_encryption_key.get_secret_value().encode())
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "ROBINHOOD_TOKEN_ENCRYPTION_KEY must be a Fernet key"
+                ) from exc
+            redirect = urlparse(self.robinhood_oauth_redirect_uri)
+            allowed_schemes = (
+                {"https"}
+                if self.app_env == AppEnvironment.PRODUCTION
+                else {"http", "https"}
+            )
+            if (
+                redirect.scheme not in allowed_schemes
+                or not redirect.hostname
+                or redirect.username
+                or redirect.password
+                or redirect.query
+                or redirect.fragment
+                or redirect.path != "/v1/robinhood/oauth/callback"
+            ):
+                raise ValueError(
+                    "ROBINHOOD_OAUTH_REDIRECT_URI must use the exact callback path"
+                )
         if self.market_scanner_llm_enabled and not self.market_scanner_enabled:
             raise ValueError(
                 "MARKET_SCANNER_LLM_ENABLED=true requires MARKET_SCANNER_ENABLED=true"

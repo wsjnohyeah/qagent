@@ -1745,3 +1745,53 @@ code_change_sessions = Table(
     Column("updated_at", DateTime(timezone=True), nullable=False, index=True),
     Column("approved_at", DateTime(timezone=True), nullable=True),
 )
+
+robinhood_oauth_flows = Table(
+    "robinhood_oauth_flows",
+    metadata,
+    Column("oauth_flow_id", String(36), primary_key=True),
+    Column("state_sha256", String(64), nullable=False, unique=True),
+    Column("code_verifier_ciphertext", Text, nullable=False),
+    Column("client_id", String(240), nullable=False),
+    Column("redirect_uri", Text, nullable=False),
+    Column("requested_by", String(80), nullable=False),
+    Column("reason", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("consumed_at", DateTime(timezone=True), nullable=True),
+)
+
+robinhood_mcp_connections = Table(
+    "robinhood_mcp_connections",
+    metadata,
+    Column("connection_id", String(36), primary_key=True),
+    Column("provider", String(40), nullable=False, unique=True),
+    Column("client_id", String(240), nullable=False),
+    Column("redirect_uri", Text, nullable=False),
+    Column("access_token_ciphertext", Text, nullable=False),
+    Column("refresh_token_ciphertext", Text, nullable=True),
+    Column("token_type", String(40), nullable=False),
+    Column("scope", String(240), nullable=True),
+    Column("expires_at", DateTime(timezone=True), nullable=True),
+    Column("status", String(24), nullable=False, index=True),
+    Column("connected_by", String(80), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("disconnected_at", DateTime(timezone=True), nullable=True),
+)
+
+robinhood_mcp_calls = Table(
+    "robinhood_mcp_calls",
+    metadata,
+    Column("mcp_call_id", String(36), primary_key=True),
+    Column("connection_id", String(36), nullable=True, index=True),
+    Column("tool_name", String(120), nullable=False, index=True),
+    Column("arguments_sha256", String(64), nullable=False),
+    Column("arguments_json", JSON, nullable=False),
+    Column("response_sha256", String(64), nullable=True),
+    Column("response_json", JSON, nullable=True),
+    Column("status", String(24), nullable=False, index=True),
+    Column("error_code", String(120), nullable=True),
+    Column("started_at", DateTime(timezone=True), nullable=False),
+    Column("finished_at", DateTime(timezone=True), nullable=True, index=True),
+)

@@ -34,7 +34,11 @@
   append-only event ledger, deterministic risk engine, and shadow runtime exist.
 - `live` is not a valid trading mode; `LIVE_TRADING_ENABLED=true` fails configuration validation.
   Paper submission is separately disabled by default and hard-pinned to Alpaca's Paper host.
-- Local lint, strict type checking, all 201 tests, API readiness, the authenticated HTTP
+- A dormant Robinhood MCP bridge is implemented for official-host-pinned OAuth PKCE, encrypted
+  refresh tokens, runtime tool discovery, allowlisted reads, and equity-order preview. It has no
+  place/cancel API or worker; configuration and production Compose reject order submission while
+  `LIVE_TRADING_ENABLED` remains false.
+- Local lint, strict type checking, all 206 tests, API readiness, the authenticated HTTP
   vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
 - The full Compose stack is healthy: PostgreSQL 17, Redis 8, MinIO, and the API all passed direct checks; the PostgreSQL-backed shadow slice recorded six lineage events.
@@ -357,21 +361,24 @@
 
 ## Next
 
-1. Replace the temporary `sslip.io` hostname with the operator's permanent domain, select an
+1. Authorize the dormant Robinhood MCP bridge in Control Center, inspect its authenticated tool
+   schemas, and verify read-only plus order-preview behavior. Do not submit an order; idempotency,
+   reconciliation, account binding, and a separate live-money decision remain open gates.
+2. Replace the temporary `sslip.io` hostname with the operator's permanent domain, select an
    off-site backup target and external alert destination, then automate both retention and
    notification checks.
-2. Deploy the reviewed `research_gate@0.4.0` correction, then let horizon-correct cycles
+3. Deploy the reviewed `research_gate@0.4.0` correction, then let horizon-correct cycles
    revalidate both new and previously accepted exact strategies,
    and review any Candidate/Qualified Shadow eligibility without
    manufacturing a pass. Candidate deployments may gather broker-free forward evidence;
    only a Qualified one-session deployment may be separately enrolled in Paper.
-3. Continue production-scale history/evidence coverage and collect Phase 5 statistical plus
+4. Continue production-scale history/evidence coverage and collect Phase 5 statistical plus
    continuous-Shadow evidence and ML-only versus ML+LLM ablations.
-4. Continue interactive Phase 6.1 UI review with real operator navigation and refine labels;
+5. Continue interactive Phase 6.1 UI review with real operator navigation and refine labels;
    the Strategy lineage redesign is implemented locally and awaits operator feedback.
-5. Extend fill realism with multi-bar partial fills, order cancellation, quote-derived
+6. Extend fill realism with multi-bar partial fills, order cancellation, quote-derived
    rather than configured spread, and symbol-change/delisting replay.
-6. Add an operator-selected provider-lag/sequence-gap notification channel; dead-letter replay
+7. Add an operator-selected provider-lag/sequence-gap notification channel; dead-letter replay
    is now inspectable and confirmation-gated in the Control Center.
 
 ## Blocked

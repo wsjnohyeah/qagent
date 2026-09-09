@@ -170,6 +170,12 @@ A Git commit cannot contain its own content-derived hash without changing that h
   `next_session_day_limit_bracket_timed_exit@0.1.0` contract. Alpaca Paper remains explicitly
   one-session-only until a next-session entry-expiry plus durable GTC protection and timed-exit
   recovery contract is implemented and validated.
+- Robinhood Agentic Trading is represented by a dormant, official-host-pinned remote MCP bridge.
+  QAgent—not an LLM provider—is the MCP client. OAuth authorization-code PKCE and refresh tokens
+  are encrypted at rest; only allowlisted reads, runtime tool discovery, and order preview are
+  reachable. Place/cancel code is compiled for future contract testing but configuration,
+  Compose, and the absence of any route/worker keep it unreachable while
+  `LIVE_TRADING_ENABLED=false`. ADR 0040 governs this boundary.
 - Code modification is represented by scoped change sessions. The web process exposes no
   shell; a trusted external coding worker must produce a diff and passing test record before
   a separate local-commit approval. Push and deployment remain external actions.
@@ -4404,7 +4410,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C080 — `Record multi-session scheduler deployment`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `ccabee0c80c780e8b5edf24602101bb7dac69612`.
 - Date: 2026-09-08 PDT.
 - User intent: deploy the autonomous one-session disablement and explain why no 5- or 20-session
   strategy had appeared.
@@ -4424,6 +4430,33 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: allow the new 20-session cycle and the next 5-session rotation to finish,
   then distinguish generated specifications, cost-adjusted validation failures, and review-eligible
   Candidate/Qualified results without weakening deterministic risk or positive-return gates.
+
+### C081 — `Add a dormant Robinhood MCP bridge`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-08 PDT.
+- User intent: prepare Robinhood Agentic Trading as a future autonomous broker capability while
+  the running system remains in Shadow and does not submit real-money orders.
+- Scope: add official endpoint/OAuth metadata pinning, dynamic client registration, PKCE and
+  encrypted refreshable token storage, MCP Streamable HTTP initialization/tool calls, read and
+  equity-order-preview allowlists, redacted call audit, connection events, Control Center
+  authorization/status/probe UI, schema migration 0036, runbook, tests, and ADR 0040.
+- Architecture/decision impact: QAgent becomes the MCP client; OpenAI/Meta remain research-only
+  and never receive a broker token. The future place/cancel adapter methods exist for mock/schema
+  testing, but settings reject submission, production Compose pins it false, and no API route or
+  worker can call them. There is still no live trading mode.
+- Validation: focused Robinhood OAuth/MCP/config/API tests passed; `make check` passed Flake8,
+  strict mypy across 60 source files, and all 206 tests. Migration 0036 passed a fresh
+  upgrade/downgrade/re-upgrade cycle; `make doctor`, the secret scan, the rebuilt Compose
+  stack, and the PostgreSQL-backed `docker-doctor` passed
+  with `live_trading_enabled=false`. Exact-sha CI, deployment, and authenticated Robinhood tool
+  discovery remain to be recorded after commit.
+- Expected global state after commit: a production administrator can explicitly authorize the
+  dedicated Robinhood Agentic Account and verify read/preview connectivity without creating an
+  order. Actual autonomous submission remains blocked pending authenticated schema capture,
+  idempotency/reconciliation proof, strategy enrollment design, and a new live-money decision.
+- Corrections/follow-ups: after administrator OAuth, freeze the observed order schemas and perform
+  the next security review; never use a real order as a connectivity test.
 
 ## Template for future commit entries
 

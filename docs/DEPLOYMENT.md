@@ -68,6 +68,12 @@ MARKET_SCANNER_LLM_ENABLED=false
 # Requires both scanner flags. It refreshes only the scanner-owned pool, never an order.
 MARKET_SCANNER_AUTO_TRADING_POOL_ENABLED=false
 MARKET_SCANNER_POLICY_PATH=./configs/market_scanner.yaml
+# Optional dormant Robinhood authorization/read/preview bridge. Keep submission false.
+ROBINHOOD_MCP_BRIDGE_ENABLED=false
+ROBINHOOD_MCP_SERVER_URL=https://agent.robinhood.com/mcp/trading
+ROBINHOOD_OAUTH_REDIRECT_URI=
+ROBINHOOD_TOKEN_ENCRYPTION_KEY=
+ROBINHOOD_ORDER_SUBMISSION_ENABLED=false
 AUTO_MIGRATE=false
 POSTGRES_DB=quant
 POSTGRES_USER=quant
@@ -90,6 +96,13 @@ and health responses. When Paper is enabled, `TRADING_MODE` must be `paper`, the
 remain exact, and the dedicated worker must report a healthy `paper` heartbeat. A fresh
 production data plane has no Paper enrollment, so activation cannot submit until the
 administrator separately confirms one in Control Center and resumes new exposure.
+
+When the dormant Robinhood bridge is approved, generate its Fernet key in the target secret
+manager, set the exact public HTTPS callback, and enable only
+`ROBINHOOD_MCP_BRIDGE_ENABLED`. Production Compose pins
+`ROBINHOOD_ORDER_SUBMISSION_ENABLED=false` even if the environment file is wrong. Complete
+OAuth and tool discovery through Control Center after deployment; never test it with a real
+order. Follow `runbooks/robinhood_mcp.md`.
 
 Generate the production hash interactively without putting the password in shell history:
 
@@ -224,6 +237,8 @@ Verify and record:
   available.
 - Login succeeds through TLS, mutating requests reject a missing CSRF header, logout revokes
   the session, and the administrator credential is not plaintext in the environment file.
+- If the dormant Robinhood bridge is enabled, its status is connected only after explicit OAuth,
+  tool discovery works, and both `order_submission_enabled` and `live_money_enabled` remain false.
 
 Phase 6 supplies application authentication, but a public production deployment still needs
 TLS, backups, monitoring, secret delivery, and infrastructure access controls. Until those

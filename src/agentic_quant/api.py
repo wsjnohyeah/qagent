@@ -5,12 +5,13 @@ from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 import hmac
+import httpx
 import json
 from pathlib import Path
 from typing import Any, Callable, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import inspect
 
@@ -101,6 +102,10 @@ from agentic_quant.risk import (
     RiskPolicy,
 )
 from agentic_quant.research_store import ResearchStore
+from agentic_quant.robinhood_mcp import (
+    RobinhoodMCPBridge,
+    RobinhoodMCPError,
+)
 from agentic_quant.shadow import ShadowRuntime
 from agentic_quant.steward import SystemSteward
 from agentic_quant.strategy_generation import HybridStrategyGenerator
@@ -123,6 +128,10 @@ def _coordinator_next_delay(
 
 class OperatorCommand(BaseModel):
     reason: str = Field(min_length=3, max_length=500)
+
+
+class RobinhoodMCPToolRequest(BaseModel):
+    arguments: dict[str, Any] = Field(default_factory=dict)
 
 
 class AdminLoginRequest(BaseModel):
@@ -293,6 +302,7 @@ def create_app(
     shadow_now_provider: Callable[[], datetime] | None = None,
     paper_now_provider: Callable[[], datetime] | None = None,
     paper_broker_factory: BrokerFactory | None = None,
+    robinhood_http_client: httpx.AsyncClient | None = None,
 ) -> FastAPI:
     app_settings = settings or Settings()
     if process_role not in {"api", "worker", "coordinator"}:
@@ -392,6 +402,20 @@ def create_app(
         trading_mode=app_settings.trading_mode.value,
         now_provider=paper_now_provider,
     )
+    robinhood = RobinhoodMCPBridge(
+        ledger.engine,
+        enabled=app_settings.robinhood_mcp_bridge_enabled,
+        server_url=app_settings.robinhood_mcp_server_url,
+        redirect_uri=app_settings.robinhood_oauth_redirect_uri,
+        encryption_key=(
+            app_settings.robinhood_token_encryption_key.get_secret_value()
+            if app_settings.robinhood_token_encryption_key is not None
+            else None
+        ),
+        order_submission_enabled=app_settings.robinhood_order_submission_enabled,
+        ledger=ledger,
+        client=robinhood_http_client,
+    )
     application: FastAPI
 
     def set_runtime_paused(paused: bool) -> None:
@@ -483,6 +507,7 @@ def create_app(
             "live_trading_enabled": False,
             "paper_trading_enabled": app_settings.paper_trading_enabled,
             "paper": paper.status(),
+            "robinhood_mcp": robinhood.status(),
             "new_exposure_paused": runtime_is_paused(),
             "data_operating_scope": app_settings.data_operating_scope,
             "llm_routing": llm_gateway.status(),
@@ -553,6 +578,7 @@ def create_app(
         application.state.objects = objects
         application.state.shadow = shadow
         application.state.paper = paper
+        application.state.robinhood = robinhood
         application.state.actions = actions
         application.state.steward = steward
         application.state.code_changes = code_changes
@@ -842,6 +868,7 @@ def create_app(
                 await coordinator_task
             if paper_task is not None:
                 await paper_task
+            await robinhood.aclose()
             await llm_gateway.aclose()
             ledger.engine.dispose()
 
@@ -859,6 +886,7 @@ def create_app(
             "/health/ready",
             "/v1/auth/login",
             "/v1/auth/session",
+            "/v1/robinhood/oauth/callback",
         }
         request.state.admin = None
         if app_settings.auth_required and request.url.path not in public_paths:
@@ -1011,6 +1039,7 @@ def create_app(
             "live_trading_enabled": False,
             "paper_trading_enabled": app_settings.paper_trading_enabled,
             "paper_submission_ready": paper.status()["submission_ready"],
+            "robinhood_mcp": robinhood.status(),
             "new_exposure_paused": runtime_is_paused(),
             "database": "healthy" if ledger.health() else "unhealthy",
             "phase": "phase7-paper-integration",
@@ -1075,6 +1104,7 @@ def create_app(
             **objects.health_summary(),
             **shadow.health_summary(),
             "paper": paper.status(),
+            "robinhood_mcp": robinhood.status(),
             **auth.health_summary(),
             **ledger.outbox_health(),
             "raw_archive": "healthy" if application.state.archive.health() else "unhealthy",
@@ -1386,6 +1416,67 @@ def create_app(
             deployment_id=deployment_id,
             limit=limit,
         )
+
+    @application.get("/v1/robinhood/status")
+    def robinhood_status() -> dict[str, Any]:
+        return robinhood.status()
+
+    @application.post("/v1/robinhood/oauth/start")
+    async def robinhood_oauth_start(
+        payload: OperatorCommand,
+        request: Request,
+    ) -> dict[str, Any]:
+        try:
+            return await robinhood.begin_oauth(
+                requested_by=admin_username(request),
+                reason=payload.reason,
+            )
+        except RobinhoodMCPError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @application.get("/v1/robinhood/oauth/callback")
+    async def robinhood_oauth_callback(
+        state: str | None = Query(default=None, max_length=500),
+        code: str | None = Query(default=None, max_length=4_000),
+        error: str | None = Query(default=None, max_length=240),
+    ) -> RedirectResponse:
+        if error or not state or not code:
+            return RedirectResponse(url="/?robinhood=authorization_failed#robinhood")
+        try:
+            await robinhood.complete_oauth(state=state, code=code)
+        except RobinhoodMCPError:
+            return RedirectResponse(url="/?robinhood=authorization_failed#robinhood")
+        return RedirectResponse(url="/?robinhood=connected#robinhood")
+
+    @application.post("/v1/robinhood/disconnect")
+    def robinhood_disconnect(request: Request) -> dict[str, Any]:
+        return robinhood.disconnect(disconnected_by=admin_username(request))
+
+    @application.get("/v1/robinhood/tools")
+    async def robinhood_tools() -> tuple[dict[str, Any], ...]:
+        try:
+            return await robinhood.list_tools()
+        except RobinhoodMCPError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @application.post("/v1/robinhood/probe")
+    async def robinhood_probe() -> dict[str, Any]:
+        try:
+            return await robinhood.call_read_tool(
+                tool_name="get_portfolio",
+                arguments={},
+            )
+        except RobinhoodMCPError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @application.post("/v1/robinhood/review-equity-order")
+    async def robinhood_review_equity_order(
+        payload: RobinhoodMCPToolRequest,
+    ) -> dict[str, Any]:
+        try:
+            return await robinhood.review_equity_order(arguments=payload.arguments)
+        except RobinhoodMCPError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @application.get("/v1/paper/status")
     def paper_status() -> dict[str, Any]:

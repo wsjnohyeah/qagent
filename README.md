@@ -13,7 +13,9 @@ Paper-enrollment confirmations. Implementation completeness is not the same as p
 statistical or production-operational exit criteria; see
 `docs/REVIEW_REMEDIATION_C6A8020_2026-09-06.md`.
 
-> Live-money execution is not implemented. `live` is not a valid mode, and setting `LIVE_TRADING_ENABLED=true` makes startup fail.
+> Live-money execution is not enabled. `live` is not a valid mode, setting
+> `LIVE_TRADING_ENABLED=true` makes startup fail, and the dormant Robinhood MCP bridge exposes no
+> place-order route.
 
 Before changing the project, read `context.md`. It is the master project memory containing the current global state, architecture, decisions, iteration history, and per-commit ledger. Every material change and every commit must update it using the maintenance protocol defined there.
 
@@ -116,6 +118,13 @@ Phase 4B exposes that gateway in the local Control Center. The operator can crea
 workload-routing revisions and chat through `Auto`, OpenAI, or Meta while preserving model,
 route, token, latency, source, and configuration lineage. Paid research calls remain
 development-scoped while the authenticated remote deployment path is being commissioned.
+
+A dormant Robinhood Agentic Trading bridge lets the VPS act as its own official-host-pinned MCP
+client. It supports OAuth PKCE, encrypted refreshable authorization, runtime tool discovery,
+allowlisted read calls, and order simulation without passing broker credentials to either LLM.
+The compiled place/cancel methods are unreachable in this release: configuration rejects order
+submission, production pins it off, and there is no live worker or HTTP route. See ADR 0040 and
+`runbooks/robinhood_mcp.md`.
 
 Phase 6 replaces the development console with a single-admin Control Center. Login uses a
 long-lived, revocable server-side session and double-submit CSRF protection. The central
@@ -304,6 +313,11 @@ ALPACA_API_KEY=...
 ALPACA_API_SECRET=...
 ALPACA_STOCK_FEED=sip
 ALPACA_OPTION_FEED=opra
+ROBINHOOD_MCP_BRIDGE_ENABLED=false
+ROBINHOOD_MCP_SERVER_URL=https://agent.robinhood.com/mcp/trading
+ROBINHOOD_OAUTH_REDIRECT_URI=
+ROBINHOOD_TOKEN_ENCRYPTION_KEY=
+ROBINHOOD_ORDER_SUBMISSION_ENABLED=false
 ```
 
 Never paste credentials into tracked files. Verify entitlements without placing orders:
@@ -563,8 +577,9 @@ Submission is off by default. Staged setup is:
 
 The broker base URL is hard-pinned to `https://paper-api.alpaca.markets`; configuration that
 enables Paper against the live Alpaca host fails startup. There is no `live` trading mode and
-`LIVE_TRADING_ENABLED=true` always fails. See `runbooks/paper_trading.md`, ADR 0024, and
-ADR 0025 and its implemented resolution in ADR 0033.
+`LIVE_TRADING_ENABLED=true` always fails. The optional Robinhood MCP bridge remains read/preview
+only under the same rule. See `runbooks/paper_trading.md`, `runbooks/robinhood_mcp.md`, ADR 0024,
+ADR 0025 and its implemented resolution in ADR 0033, and ADR 0040.
 
 ## Repository map
 

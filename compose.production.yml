@@ -13,6 +13,8 @@ services:
       AUTO_MIGRATE: "false"
       SHADOW_RUNTIME_ENABLED: "${SHADOW_RUNTIME_ENABLED:-true}"
       AUTONOMOUS_COORDINATOR_ENABLED: "${AUTONOMOUS_COORDINATOR_ENABLED:-true}"
+      ROBINHOOD_MCP_BRIDGE_ENABLED: "${ROBINHOOD_MCP_BRIDGE_ENABLED:-false}"
+      ROBINHOOD_ORDER_SUBMISSION_ENABLED: "false"
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
@@ -42,6 +44,8 @@ services:
       AUTO_MIGRATE: "false"
       SHADOW_RUNTIME_ENABLED: "true"
       AUTONOMOUS_COORDINATOR_ENABLED: "false"
+      ROBINHOOD_MCP_BRIDGE_ENABLED: "false"
+      ROBINHOOD_ORDER_SUBMISSION_ENABLED: "false"
     volumes:
       - object-store-data:/app/work/object-store
     depends_on:
@@ -73,6 +77,8 @@ services:
       MARKET_SCANNER_ENABLED: "${MARKET_SCANNER_ENABLED:-false}"
       MARKET_SCANNER_LLM_ENABLED: "${MARKET_SCANNER_LLM_ENABLED:-false}"
       MARKET_SCANNER_AUTO_TRADING_POOL_ENABLED: "${MARKET_SCANNER_AUTO_TRADING_POOL_ENABLED:-false}"
+      ROBINHOOD_MCP_BRIDGE_ENABLED: "false"
+      ROBINHOOD_ORDER_SUBMISSION_ENABLED: "false"
     volumes:
       - object-store-data:/app/work/object-store
     depends_on:
