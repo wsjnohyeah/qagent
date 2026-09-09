@@ -11,7 +11,7 @@
   strictly Qualified and no adopted strategy has accumulated forward observation time.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `5ef7919d8f9fdc5dc86f14ace691ed271a6e5498` image, PostgreSQL, Redis, API, Shadow worker,
+  `d922e8bb2f49dd20b72110011524385dd21fc3b8` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled. Seventeen explicitly approved Candidate Shadow
@@ -165,6 +165,11 @@
 - A daily Shadow deployment activated after a completed close but before the next exchange open
   can arm that latest bar exactly once for a causally valid next-open decision. The arm is
   journaled; activation after the open still skips the bar and cannot manufacture a late fill.
+- All 17 production Candidate deployments used that guarded path before the September 9 open.
+  The first scheduler tick evaluated 17 bars, produced 15 long candidates, approved nine open
+  virtual plans, rejected six when the shared `$780` concurrent-risk ceiling could not support at
+  least one share, and left two flat. No broker order was created; the completed September 9 bar
+  will determine modeled next-open limit fills after the session closes.
 - The deployable `next_session_day_limit_bracket_moc@0.1.0` contract governs one-session
   validation, Forward Shadow, and Alpaca Paper. It includes identical conservative price
   rounding, DAY limit-entry semantics, stop-first ambiguity, and no target credit after an

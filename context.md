@@ -4629,7 +4629,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C088 — `Arm valid pre-open Shadow evaluations`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `d922e8bb2f49dd20b72110011524385dd21fc3b8`.
 - Date: 2026-09-09 PDT.
 - User intent: allow the currently approved Candidate Shadow strategies to participate at the
   September 9 open when a decision can still be made from the completed September 8 bar.
@@ -4643,14 +4643,44 @@ lifecycle. No Paper order was used as a build or deployment test.
   open continues to skip the already-known bar. Existing deterministic signal, risk, limit-fill,
   account-capacity, and no-broker controls remain unchanged.
 - Validation: the focused Shadow regression passes together with the surrounding validation and
-  Control Center suites. Full release gates, exact-sha CI, deployment, confirmed re-arming of the
-  17 pristine production deployments, and inspection of resulting signals/plans remain pending.
+  Control Center suites. `make check` passed Flake8, strict mypy across 61 source files, and all
+  209 tests; `make doctor` and the secret scan passed. GitHub CI run 34333366235 passed and
+  published the exact immutable image; C089 records deployment and runtime evidence.
 - Expected global state after commit: a newly activated daily Shadow strategy can evaluate the
   latest completed close once when there is still time to persist a valid next-open plan. Existing
   pristine deployments can receive the same behavior only through a repeated, confirmed
   `shadow.start`; no Paper or live order path is changed.
 - Corrections/follow-ups: after deployment, verify all re-armed cursors advance exactly once and
   report which signals became approved plans versus flat or risk-rejected decisions.
+
+### C089 — `Record first pre-open Shadow plans`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-09 PDT.
+- User intent: allow the active Candidate Shadow strategies to participate in the September 9
+  session without inventing a retroactive decision.
+- Scope: record exact-sha rollout, confirmed reactivation of every pristine deployment, the first
+  scheduler evaluation, approved/rejected plan counts, and the resumed simulation runtime.
+- Architecture/decision impact: none beyond C088. The September 8 completed daily bar was known
+  before every recorded decision and before the September 9 13:30 UTC open. The execution bar was
+  not yet known, so resulting plans preserve the point-in-time boundary.
+- Validation: CI run 34333366235 passed and published image
+  `d922e8bb2f49dd20b72110011524385dd21fc3b8`; guarded deployment reported healthy API,
+  coordinator, Shadow worker, PostgreSQL, and Redis. Seventeen individually confirmed
+  `shadow.start` actions recorded `PREOPEN_EVALUATION_ARMED`, then audited action
+  `01a08578-0e40-7eeb-9340-8ae7e15bf021` resumed new exposure. Scheduler run
+  `01a08578-10ec-7586-b151-802914b6dd13` processed all 17 deployments successfully: two were
+  flat, 15 produced candidates, nine were approved as open plans, and six were rejected with
+  `SIZE_ROUNDS_TO_ZERO` after shared reserved risk reached `$779.79` of the `$780` cap. The nine
+  plans reserve `$6,112.97` virtual cash. No virtual fill, Alpaca order, or Robinhood order exists
+  before the execution session.
+- Expected global state after commit: nine causally valid broker-free Shadow plans are eligible for
+  the September 9 session. Their modeled fill/no-fill result will be recorded only after the
+  completed execution bar is available. Seventeen deployments remain active/current, research and
+  incremental backfill continue automatically, and all real-money paths remain disabled.
+- Corrections/follow-ups: inspect the post-close fill decisions and distinguish limit-not-touched,
+  open-price risk rejection, and actual virtual position entry; do not promise that an open plan
+  must fill.
 
 ## Template for future commit entries
 
