@@ -4433,7 +4433,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C081 — `Add a dormant Robinhood MCP bridge`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `a5452f8adad6917d1f9b43746bffe7ac433c1758`.
 - Date: 2026-09-08 PDT.
 - User intent: prepare Robinhood Agentic Trading as a future autonomous broker capability while
   the running system remains in Shadow and does not submit real-money orders.
@@ -4457,6 +4457,35 @@ lifecycle. No Paper order was used as a build or deployment test.
   idempotency/reconciliation proof, strategy enrollment design, and a new live-money decision.
 - Corrections/follow-ups: after administrator OAuth, freeze the observed order schemas and perform
   the next security review; never use a real order as a connectivity test.
+
+### C082 — `Record dormant Robinhood bridge deployment`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-08 PDT.
+- User intent: deploy the Robinhood MCP bridge now so its connection and future broker boundary
+  are ready while current operation remains simulation-only.
+- Scope: record exact-sha CI/deployment, schema migration 0036, encrypted production OAuth
+  configuration, backup/restore evidence, runtime health, and the remaining administrator OAuth
+  handoff.
+- Architecture/decision impact: none beyond C081. Production enables only authorization,
+  read-only account tools, tool-schema discovery, and order preview. Robinhood order placement
+  and cancellation remain unreachable from HTTP routes and workers, explicitly false in settings,
+  pinned false in every Compose service, and outside the current operating contract.
+- Validation: GitHub Actions run 34318966581 passed for exact image
+  `a5452f8adad6917d1f9b43746bffe7ac433c1758`; backup `20260909T063031Z` passed checksum/catalog
+  verification and an isolated restore drill at pre-migration schema 0035. Production migrated to
+  0036; API, PostgreSQL, Redis, Shadow worker, and coordinator health gates passed; public readiness
+  reports `live_trading_enabled=false`; unauthenticated Robinhood status returns 401. Runtime status
+  reports bridge enabled/configured but disconnected, zero audited calls,
+  `order_submission_enabled=false`, and `live_money_enabled=false`. The audited runtime-resume
+  action `01a084e3-3b77-7969-aa7b-073ef922daa5` restored the previously approved simulation
+  workflow; 17 Shadow deployments are active and there are no Paper enrollments or orders.
+- Expected global state after commit: the production administrator can open **Robinhood bridge**,
+  complete Robinhood consent, discover the account's actual MCP tool schemas, and run a read-only
+  portfolio probe. Neither QAgent nor either research LLM can place or cancel a Robinhood order.
+- Corrections/follow-ups: administrator OAuth is still required. After it succeeds, capture the
+  authenticated schema and complete the separate idempotency/reconciliation/security milestone
+  before asking for any new live-money decision.
 
 ## Template for future commit entries
 

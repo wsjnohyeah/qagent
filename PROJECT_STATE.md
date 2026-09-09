@@ -11,7 +11,7 @@
   strictly Qualified and no adopted strategy has accumulated forward observation time.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `bb154d9148fcbd9b053c96b1441622823134a42e` image, PostgreSQL, Redis, API, Shadow worker,
+  `a5452f8adad6917d1f9b43746bffe7ac433c1758` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled. Seventeen explicitly approved Candidate Shadow
@@ -37,7 +37,8 @@
 - A dormant Robinhood MCP bridge is implemented for official-host-pinned OAuth PKCE, encrypted
   refresh tokens, runtime tool discovery, allowlisted reads, and equity-order preview. It has no
   place/cancel API or worker; configuration and production Compose reject order submission while
-  `LIVE_TRADING_ENABLED` remains false.
+  `LIVE_TRADING_ENABLED` remains false. The bridge is deployed and configured in production but
+  is not connected; administrator OAuth through Control Center is the remaining connection step.
 - Local lint, strict type checking, all 206 tests, API readiness, the authenticated HTTP
   vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
@@ -71,7 +72,7 @@
 - Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
   experiment runs, backtest trades, corporate actions, historical universe membership,
   feature parity checks, and walk-forward reports are stored through Alembic revision
-  `20260908_0035`, including exact validation and ML-training contracts, normalized Paper
+  `20260909_0036`, including exact validation and ML-training contracts, normalized Paper
   order legs, shadow risk lineage, fenced workflow
   attempts, generation-attempt audit, runtime leases, and the event outbox.
 - The Phase 3 runner provides buy-and-hold, long/cash momentum, and long/cash
