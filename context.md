@@ -4597,7 +4597,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C087 — `Record Robinhood watchlist compatibility deployment`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `f5e8b31214f6c1d478afa621190fc625627c45c0`.
 - Date: 2026-09-09 PDT.
 - User intent: leave the VPS able to display the authorized Robinhood balance and watchlists after
   correcting the provider-specific list failure.
@@ -4626,6 +4626,31 @@ lifecycle. No Paper order was used as a build or deployment test.
   expiry. Order schemas may be captured without submission, but idempotency/reconciliation,
   account binding, a security review, and a new explicit live-money decision remain mandatory
   before any future execution path.
+
+### C088 — `Arm valid pre-open Shadow evaluations`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-09 PDT.
+- User intent: allow the currently approved Candidate Shadow strategies to participate at the
+  September 9 open when a decision can still be made from the completed September 8 bar.
+- Scope: change daily deployment initialization so activation after a completed close and before
+  the next exchange open leaves that one bar pending; permit a repeated confirmed `shadow.start`
+  to repair pristine deployments created under the former cursor rule; persist an idempotent
+  `PREOPEN_EVALUATION_ARMED` event; and add a regression covering initial arming, legacy repair,
+  processing, and repeat protection.
+- Architecture/decision impact: this is forward evaluation, not historical replay. The decision
+  is computed and persisted before the execution session, while activation at or after the next
+  open continues to skip the already-known bar. Existing deterministic signal, risk, limit-fill,
+  account-capacity, and no-broker controls remain unchanged.
+- Validation: the focused Shadow regression passes together with the surrounding validation and
+  Control Center suites. Full release gates, exact-sha CI, deployment, confirmed re-arming of the
+  17 pristine production deployments, and inspection of resulting signals/plans remain pending.
+- Expected global state after commit: a newly activated daily Shadow strategy can evaluate the
+  latest completed close once when there is still time to persist a valid next-open plan. Existing
+  pristine deployments can receive the same behavior only through a repeated, confirmed
+  `shadow.start`; no Paper or live order path is changed.
+- Corrections/follow-ups: after deployment, verify all re-armed cursors advance exactly once and
+  report which signals became approved plans versus flat or risk-rejected decisions.
 
 ## Template for future commit entries
 

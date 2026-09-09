@@ -7,13 +7,19 @@ from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import insert, select
+from sqlalchemy import delete, insert, select, update
 
 from agentic_quant.api import create_app
 from agentic_quant.coordinator_runtime import ResearchCoordinatorHandler
 from agentic_quant.control_plane import SystemObjectStore
 from agentic_quant.data_quality import DataQualityError
-from agentic_quant.database import shadow_trade_plans, validation_reports, workflow_jobs
+from agentic_quant.database import (
+    shadow_deployments,
+    shadow_events,
+    shadow_trade_plans,
+    validation_reports,
+    workflow_jobs,
+)
 from agentic_quant.domain import BacktestCostModel, EventEnvelope, StockBar
 from agentic_quant.ids import uuid7
 from agentic_quant.ledger import EventLedger
@@ -405,6 +411,113 @@ def test_real_static_validation_can_reach_adoption_and_shadow_start(
             validation_report_id=report.validation_report_id,
         )
     assert shadow.deployments()[0]["contract_status"] == "CURRENT"
+
+
+def test_shadow_start_arms_latest_close_before_the_next_session_open(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    market = MarketDataStore(ledger.engine)
+    store = ResearchStore(ledger.engine)
+    bars = _regime_bars(count=75)
+    market.insert_bars(bars, raw_object_id="TEST_RAW")
+    spec = store.record_strategy_spec(
+        default_strategy_spec(
+            "mean_reversion",
+            timeframe="1Day",
+            code_sha256=research_code_sha256(),
+        )
+    )
+    policy = RiskPolicy.from_yaml(settings.risk_policy_path)
+    restrictions = RestrictionRegistry.from_yaml(
+        settings.restricted_securities_path
+    )
+    report_id = _seed_eligible_report(
+        ledger,
+        spec=spec,
+        timeframe="1Day",
+        risk_policy=policy,
+        restrictions=restrictions,
+    )
+    objects = SystemObjectStore(ledger.engine, ledger)
+    objects.ensure_defaults()
+    clock = [bars[-1].available_from + timedelta(minutes=1)]
+    assert clock[0] < MarketSessionClock("XNYS").next_daily_session_open(
+        bars[-1].event_time
+    )
+    shadow = ShadowRuntime(
+        ledger.engine,
+        store,
+        objects,
+        risk_policy=policy,
+        restrictions=restrictions,
+        now_provider=lambda: clock[0],
+    )
+    shadow.initialize_virtual_account()
+    shadow.adopt_strategy(
+        strategy_spec_id=spec.strategy_spec_id,
+        validation_report_id=report_id,
+        reason="Exercise pre-open first evaluation",
+        approved_by="test-admin",
+    )
+    deployment = shadow.start_deployment(
+        strategy_spec_id=spec.strategy_spec_id,
+        symbol="AAPL",
+        initial_cash=Decimal("100000"),
+        requested_by="test-admin",
+    )
+    assert deployment["last_processed_bar_time"].replace(tzinfo=UTC) == (
+        bars[-2].event_time
+    )
+    assert [event["event_type"] for event in shadow.events()] == [
+        "PREOPEN_EVALUATION_ARMED"
+    ]
+
+    # Reproduce a legacy deployment created after the close but initialized at
+    # the latest bar. A confirmed repeated start may arm it exactly once.
+    with ledger.engine.begin() as connection:
+        connection.execute(delete(shadow_events))
+        connection.execute(
+            update(shadow_deployments)
+            .where(
+                shadow_deployments.c.shadow_deployment_id
+                == deployment["shadow_deployment_id"]
+            )
+            .values(last_processed_bar_time=bars[-1].event_time)
+        )
+    rearmed = shadow.start_deployment(
+        strategy_spec_id=spec.strategy_spec_id,
+        symbol="AAPL",
+        initial_cash=Decimal("100000"),
+        requested_by="test-admin",
+    )
+    assert rearmed["last_processed_bar_time"].replace(tzinfo=UTC) == (
+        bars[-2].event_time
+    )
+    assert [event["event_type"] for event in shadow.events()] == [
+        "PREOPEN_EVALUATION_ARMED"
+    ]
+
+    result = asyncio.run(shadow.tick(trigger="preopen", new_exposure_paused=False))
+    assert result["bars_processed"] == 1
+    assert shadow.deployment(str(deployment["shadow_deployment_id"]))[
+        "last_processed_bar_time"
+    ].replace(tzinfo=UTC) == bars[-1].event_time
+
+    repeated = shadow.start_deployment(
+        strategy_spec_id=spec.strategy_spec_id,
+        symbol="AAPL",
+        initial_cash=Decimal("100000"),
+        requested_by="test-admin",
+    )
+    assert repeated["last_processed_bar_time"].replace(tzinfo=UTC) == (
+        bars[-1].event_time
+    )
+    assert sum(
+        event["event_type"] == "PREOPEN_EVALUATION_ARMED"
+        for event in shadow.events()
+    ) == 1
 
 
 def test_scanner_pool_lineage_can_authorize_confirmed_shadow_start(

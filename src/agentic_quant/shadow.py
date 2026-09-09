@@ -555,15 +555,26 @@ class ShadowRuntime:
                     strategy_specs.c.strategy_spec_id == strategy_spec_id
                 )
             ).scalar_one()
+        now = self._now()
         existing_bars = self.research_store.load_bars(
             symbol=normalized_symbol,
             timeframe=str(timeframe),
-            as_of_end=datetime.now(UTC),
+            as_of_end=now,
         )
         initial_cursor = (
             existing_bars[-1].event_time if existing_bars else None
         )
-        now = datetime.now(UTC)
+        preopen_bar = None
+        next_session_open = None
+        if str(timeframe) == "1Day" and len(existing_bars) >= 2:
+            latest_bar = existing_bars[-1]
+            candidate_open = self.session_clock.next_daily_session_open(
+                latest_bar.event_time
+            )
+            if latest_bar.available_from <= now < candidate_open:
+                initial_cursor = existing_bars[-2].event_time
+                preopen_bar = latest_bar
+                next_session_open = candidate_open
         with self.engine.begin() as connection:
             adoption = connection.execute(
                 select(strategy_adoptions).where(
@@ -606,6 +617,7 @@ class ShadowRuntime:
                         updated_at=now,
                     )
                 )
+                prime_preopen = preopen_bar is not None
             else:
                 if existing.status == "RETIRED":
                     raise ValueError("Retired deployments are immutable; create a new strategy")
@@ -614,6 +626,38 @@ class ShadowRuntime:
                     strategy_spec_id=strategy_spec_id,
                     symbol=normalized_symbol,
                     connection=connection,
+                )
+                marker_exists = False
+                if preopen_bar is not None:
+                    marker_exists = bool(
+                        connection.execute(
+                            select(func.count())
+                            .select_from(shadow_events)
+                            .where(
+                                (
+                                    shadow_events.c.shadow_deployment_id
+                                    == deployment_id
+                                )
+                                & (
+                                    shadow_events.c.bar_id
+                                    == preopen_bar.bar_id
+                                )
+                                & (
+                                    shadow_events.c.event_type
+                                    == "PREOPEN_EVALUATION_ARMED"
+                                )
+                            )
+                        ).scalar_one()
+                    )
+                existing_created_at = _utc(existing.created_at)
+                prime_preopen = bool(
+                    preopen_bar is not None
+                    and not marker_exists
+                    and _utc(existing.last_processed_bar_time)
+                    == preopen_bar.event_time
+                    and existing_created_at is not None
+                    and existing_created_at >= preopen_bar.available_from
+                    and Decimal(str(existing.position_quantity)) == _ZERO
                 )
                 connection.execute(
                     update(shadow_deployments)
@@ -624,7 +668,52 @@ class ShadowRuntime:
                         status="ACTIVE",
                         virtual_account_id=MAIN_VIRTUAL_ACCOUNT_ID,
                         strategy_sleeve_id=sleeve_id,
+                        last_processed_bar_time=(
+                            initial_cursor
+                            if prime_preopen
+                            else existing.last_processed_bar_time
+                        ),
                         updated_at=now,
+                    )
+                )
+            if prime_preopen:
+                assert preopen_bar is not None
+                assert next_session_open is not None
+                sequence = int(
+                    connection.execute(
+                        select(func.max(shadow_events.c.sequence)).where(
+                            shadow_events.c.shadow_deployment_id == deployment_id
+                        )
+                    ).scalar_one_or_none()
+                    or 0
+                ) + 1
+                connection.execute(
+                    insert(shadow_events).values(
+                        shadow_event_id=uuid7(),
+                        shadow_deployment_id=deployment_id,
+                        shadow_run_id=None,
+                        sequence=sequence,
+                        event_type="PREOPEN_EVALUATION_ARMED",
+                        event_time=now,
+                        symbol=normalized_symbol,
+                        bar_id=preopen_bar.bar_id,
+                        cash_balance=(
+                            initial_cash if existing is None else existing.cash_balance
+                        ),
+                        position_quantity=(
+                            _ZERO if existing is None else existing.position_quantity
+                        ),
+                        price=preopen_bar.close,
+                        realized_pnl_delta=_ZERO,
+                        payload_json={
+                            "decision_bar_available_from": (
+                                preopen_bar.available_from.isoformat()
+                            ),
+                            "next_session_open": next_session_open.isoformat(),
+                            "requested_by": requested_by,
+                            "virtual_only": True,
+                        },
+                        created_at=now,
                     )
                 )
         self._sync_active_symbols(

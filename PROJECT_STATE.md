@@ -162,6 +162,9 @@
 - A Shadow plan is first persisted as `PENDING_ACTIVATION` and becomes executable only after
   a post-commit clock check proves durability before the next session open. Shadow admission
   explicitly supports `1Day` only; unsupported minute strategies fail before deployment.
+- A daily Shadow deployment activated after a completed close but before the next exchange open
+  can arm that latest bar exactly once for a causally valid next-open decision. The arm is
+  journaled; activation after the open still skips the bar and cannot manufacture a late fill.
 - The deployable `next_session_day_limit_bracket_moc@0.1.0` contract governs one-session
   validation, Forward Shadow, and Alpaca Paper. It includes identical conservative price
   rounding, DAY limit-entry semantics, stop-first ambiguity, and no target credit after an

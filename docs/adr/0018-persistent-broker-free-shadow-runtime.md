@@ -24,6 +24,9 @@ requiring a multi-year development dataset.
 - A deployment owns virtual cash/P&L, status, last processed bar, and an ordered virtual
   event journal. Unique deployment/bar/type and sequence constraints make replay observable
   and idempotent.
+- A deployment activated after a completed daily close but before the next exchange open may
+  evaluate that known close once and create a next-open plan. The arm is journaled and
+  idempotent. Activation at or after the next open skips the bar, preventing retroactive fills.
 - Automated and manual ticks run through one lock and one deterministic implementation.
   Global pause and the shadow pipeline control stop scheduled processing.
 - The runtime reads the same normalized store and builds the same point-in-time feature

@@ -35,9 +35,12 @@ override and does not claim qualification.
   multi-session position is already open, the tick continues only its deterministic stop,
   target, mark, and timed-exit processing; it cannot create new exposure.
 - Only `ACTIVE` deployments are evaluated.
-- A new deployment establishes its cursor at the current data edge; historical bars seed its
-  first pending signal but are not replayed as pretend forward shadow results. Backtests own
-  historical evaluation.
+- A new daily deployment normally establishes its cursor at the current data edge; historical
+  bars seed future signals but are not replayed as pretend forward results. One narrow exception
+  is permitted when activation occurs after the latest daily bar became available and before its
+  next exchange open: that latest completed bar is armed exactly once for a genuinely forward
+  next-open decision. `PREOPEN_EVALUATION_ARMED` records this choice. Activation after the next
+  open continues to skip that bar, so a missed entry can never be backdated.
 - The runtime needs at least 21 decision bars and one following execution bar.
 - Each decision uses evidence available by the decision bar's `available_from` timestamp.
 - Momentum and mean-reversion use their immutable `StrategySpec` parameters and one of the
