@@ -787,6 +787,7 @@ def create_app(
                                 as_of=cycle_as_of,
                                 universe_scan_id=universe_scan_id,
                                 horizon_bars=research_horizon,
+                                backlog_horizons=AUTONOMOUS_RESEARCH_HORIZONS,
                             )
                             delay = _coordinator_next_delay(delay, result)
                             actions.record_pipeline_heartbeat(

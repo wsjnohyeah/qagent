@@ -142,6 +142,7 @@ class AutonomousCoordinator:
         max_jobs: int | None = None,
         universe_scan_id: str | None = None,
         horizon_bars: int = 1,
+        backlog_horizons: tuple[int, ...] | None = None,
     ) -> dict[str, Any]:
         group_id, _ = self.plan(
             symbols=symbols,
@@ -154,6 +155,17 @@ class AutonomousCoordinator:
             job_type_prefix="coordinator.",
             exclude_group_id=group_id,
         )
+        if backlog_horizons is not None:
+            allowed_horizons = set(backlog_horizons)
+            backlog_group_ids = tuple(
+                backlog_group_id
+                for backlog_group_id in backlog_group_ids
+                if (
+                    (group_jobs := self.jobs.jobs(job_group_id=backlog_group_id))
+                    and int(group_jobs[0].payload.get("horizon_bars", 1))
+                    in allowed_horizons
+                )
+            )
         backlog_summaries = []
         processed_total = 0
         for backlog_group_id in backlog_group_ids:

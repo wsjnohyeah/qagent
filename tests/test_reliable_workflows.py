@@ -1099,6 +1099,35 @@ def test_autonomous_rotation_excludes_one_session_research() -> None:
     assert AUTONOMOUS_RESEARCH_HORIZONS == (5, 20, 63, 126, 252)
 
 
+def test_autonomous_run_skips_disabled_horizon_backlog(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    jobs = WorkflowJobStore(EventLedger(settings.database_url).engine)
+    calls: list[int] = []
+
+    async def handler(job, dependencies):  # type: ignore[no-untyped-def]
+        del dependencies
+        calls.append(int(job.payload["horizon_bars"]))
+        return {"outcome": "COMPLETED"}
+
+    coordinator = AutonomousCoordinator(jobs, handler=handler)
+    cutoff = datetime(2026, 9, 9, tzinfo=UTC)
+    coordinator.plan(symbols=("AAPL",), as_of=cutoff, horizon_bars=1)
+    result = asyncio.run(
+        coordinator.run_once(
+            symbols=("AAPL",),
+            as_of=cutoff + timedelta(hours=1),
+            horizon_bars=5,
+            backlog_horizons=AUTONOMOUS_RESEARCH_HORIZONS,
+            max_jobs=1,
+        )
+    )
+
+    assert calls == [5]
+    assert result["backlog_groups"] == []
+
+
 def test_research_handler_propagates_planned_horizon_into_stage_context() -> None:
     observed: dict[str, object] = {}
 

@@ -4362,7 +4362,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C078 — `Prioritize multi-session autonomous research`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `18b923a1f123a2bef70a3d738d1a6ce40896f8c0`.
 - Date: 2026-09-08 PDT.
 - User intent: disable the misleading daily-bar one-session strategy from autonomous operation
   and prioritize 5- and 20-session swing research.
@@ -4381,6 +4381,26 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: observe fresh 5- and 20-session cycles under the current `$40` cap and
   evaluate their exact cost-adjusted validation results without lowering the positive-return
   requirement.
+
+### C079 — `Skip disabled research backlog in autonomous runs`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-08 PDT.
+- User intent: disable the daily-bar one-session strategy completely from autonomous production
+  operation while retaining its immutable history and explicit/manual reproducibility.
+- Scope: filter autonomous coordinator backlog recovery by the enabled 5/20/63/126/252-session
+  horizon set, pass that allowlist from the production scheduler, and add a regression proving an
+  unfinished one-session group is not resumed ahead of an enabled five-session group.
+- Architecture/decision impact: scheduler recovery now obeys the same horizon policy as new job
+  creation; manual coordinator calls remain able to inspect or resume any supported horizon.
+- Validation: focused scheduler/backlog regressions passed; `make check` passed Flake8, strict mypy
+  across 59 source files, and all 201 tests; `make doctor` and the secret scan passed with live
+  trading disabled.
+- Expected global state after commit: production autonomous work neither creates new one-session
+  research groups nor consumes budget finishing stale one-session backlog; multi-session research
+  receives the available scheduler and LLM capacity.
+- Corrections/follow-ups: observe the first fresh 5- and 20-session groups after deployment and
+  report exact funnel outcomes rather than treating job completion as validated alpha.
 
 ## Template for future commit entries
 

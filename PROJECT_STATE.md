@@ -23,12 +23,15 @@
   a stricter Research LLM output prompt, and `llm_budget@0.2.0` with a `$40` critical/daily
   ceiling that preserves same-day spend across policy versions, single-attempt invalid LLM
   output handling, and leakage-safe annual ML under a six-year daily-bar target.
+- Autonomous research creates and resumes only 5/20/63/126/252-session groups. One-session
+  daily-bar research remains an explicit/manual reproducibility path and is not represented as
+  a minute-level intraday strategy.
 - Local-lite uses Python 3.12, a project-local `uv`, SQLite, and filesystem object storage.
 - The Control API, single-admin object-centric web console, persistent System Steward,
   append-only event ledger, deterministic risk engine, and shadow runtime exist.
 - `live` is not a valid trading mode; `LIVE_TRADING_ENABLED=true` fails configuration validation.
   Paper submission is separately disabled by default and hard-pinned to Alpaca's Paper host.
-- Local lint, strict type checking, all 200 tests, API readiness, the authenticated HTTP
+- Local lint, strict type checking, all 201 tests, API readiness, the authenticated HTTP
   vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
 - The full Compose stack is healthy: PostgreSQL 17, Redis 8, MinIO, and the API all passed direct checks; the PostgreSQL-backed shadow slice recorded six lineage events.
