@@ -4682,6 +4682,35 @@ lifecycle. No Paper order was used as a build or deployment test.
   open-price risk rejection, and actual virtual position entry; do not promise that an open plan
   must fill.
 
+### C090 — `Harden continuous Shadow and research execution`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-10 PDT.
+- User intent: repair the production faults discovered after the first completed Shadow execution
+  session and restore a trustworthy autonomous runtime.
+- Scope: give all exchange-calendar consumers a fixed 1990–2100 range; make all-zero volume
+  baselines materialize conservatively; isolate one Shadow deployment failure from healthy peers;
+  continue deterministic management of open positions while new exposure is paused; keep the
+  coordinator heartbeat fresh throughout long scan/research cycles; and classify an LLM HTTP 429
+  as a bounded waiting outcome rather than exhausting one workflow job.
+- Architecture/decision impact: entry pause is explicitly not an execution-engine stop when a
+  virtual position exists. A mixed-success Shadow tick is durable `DEGRADED` evidence with a
+  per-deployment failure event; an all-deployment fault still fails and reaches restart
+  protection. Research-provider rate limits remain advisory and cannot block deterministic
+  Shadow accounting.
+- Validation: fixed regressions cover a 252-session expiry beyond the library's former default
+  boundary, a 20-bar zero-volume feature baseline, partial Shadow deployment failure isolation,
+  and LLM 429 waiting semantics. `make check` passed Flake8, strict mypy across 61 source files,
+  and all 213 tests. `make doctor`, secret scan, exact-SHA CI/deployment, and production
+  reconciliation remain the pre-deployment gates.
+- Expected global state after commit: the source tree is ready for guarded deployment. Production
+  remains on `d922e8bb2f49dd20b72110011524385dd21fc3b8` and safety-paused until exact-SHA CI passes;
+  the two virtual positions and unprocessed plans remain durable. Alpaca Paper, Robinhood order
+  submission, and live money are unchanged and disabled.
+- Corrections/follow-ups: deploy only after the remaining gates pass, resume only the already
+  approved simulation workflow, reconcile every September 9 plan and position, and record the
+  exact production outcome in the next context entry.
+
 ## Template for future commit entries
 
 Copy this section before making a commit:

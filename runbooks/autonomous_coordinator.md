@@ -46,7 +46,9 @@ all agree.
    corrections are captured idempotently. With `SEC_USER_AGENT` configured, the same stage
    refreshes five-year SEC filing metadata and company facts once per symbol per day. A
    completed empty partition is recorded as coverage rather than retried forever.
-3. `materialize_features`: create idempotent point-in-time snapshots for completed bars.
+3. `materialize_features`: create idempotent point-in-time snapshots for completed bars. A
+   provider-evidenced all-zero 20-bar volume window has a conservative zero volume ratio rather
+   than an undefined division that exhausts the job.
 4. `train_ml`: train chronological candidates after the configured minimum sample count;
    reuse requires the exact dataset and complete versioned training contract.
 5. `forecast_ml`: persist a forecast bound to the selected model and latest snapshot.
@@ -93,6 +95,12 @@ leaves a lease that is reclaimed after ten minutes. A provider exception marks o
 stage failed and is retried on the next poll; completed parents are never repeated. A final
 failed attempt becomes `EXHAUSTED`, is skipped fairly so later groups can recover, and is
 retried only after confirmation of `workflow.retry_exhausted` in the Pipelines page.
+
+The coordinator refreshes its `RUNNING` heartbeat throughout both market scanning and a long
+research cycle. An LLM HTTP 429 is represented as `WAITING_LLM_PROVIDER_RATE_LIMIT` after the
+gateway's bounded retry policy, so it does not consume all five workflow attempts in a one-minute
+retry loop. A later fresh cycle may try the advisory stage again; deterministic research and
+existing Shadow accounting continue independently.
 
 `WAITING_*` is a healthy business state. Common examples are insufficient history, missing
 credentials, paid research disabled, no accepted strategy proposal, insufficient validation

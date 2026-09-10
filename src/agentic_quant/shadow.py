@@ -1166,7 +1166,7 @@ class ShadowRuntime:
             ).all()
             failures = connection.execute(
                 select(shadow_runs)
-                .where(shadow_runs.c.status == "FAILED")
+                .where(shadow_runs.c.status.in_(("FAILED", "DEGRADED")))
                 .order_by(shadow_runs.c.finished_at.desc())
                 .limit(1_000)
             ).all()
@@ -1198,8 +1198,12 @@ class ShadowRuntime:
         alerts.extend(
             {
                 "alert_key": f"shadow-run:{row.shadow_run_id}",
-                "kind": "SHADOW_RUN_FAILED",
-                "severity": "ERROR",
+                "kind": (
+                    "SHADOW_RUN_FAILED"
+                    if row.status == "FAILED"
+                    else "SHADOW_RUN_DEGRADED"
+                ),
+                "severity": "ERROR" if row.status == "FAILED" else "WARNING",
                 "symbol": None,
                 "reason_codes": [str(row.error_code or "UNKNOWN")],
                 "occurrence_count": 1,
@@ -1220,7 +1224,7 @@ class ShadowRuntime:
         trigger: str = "manual",
         new_exposure_paused: bool,
     ) -> dict[str, Any]:
-        if new_exposure_paused and not self._has_open_positions():
+        if new_exposure_paused and not self.has_open_positions():
             raise ValueError("Global new-exposure pause blocks shadow processing")
         async with self._tick_lock:
             owner = f"{trigger}:{uuid7()}"
@@ -1276,8 +1280,9 @@ class ShadowRuntime:
         events_created = 0
         status = "SUCCEEDED"
         error_code: str | None = None
-        try:
-            for deployment in deployments:
+        failures: list[Exception] = []
+        for deployment in deployments:
+            try:
                 processed, created = self._process_deployment(
                     deployment,
                     run_id,
@@ -1286,31 +1291,43 @@ class ShadowRuntime:
                 )
                 bars_processed += processed
                 events_created += created
-        except Exception as exc:
-            status = "FAILED"
-            error_code = type(exc).__name__
-            raise
-        finally:
-            finished_at = datetime.now(UTC)
-            if trigger != "scheduler" or bars_processed > 0 or status == "FAILED":
-                with self.engine.begin() as connection:
-                    connection.execute(
-                        insert(shadow_runs).values(
-                            shadow_run_id=run_id,
-                            status=status,
-                            trigger=trigger[:40],
-                            deployment_count=len(deployments),
-                            bars_processed=bars_processed,
-                            events_created=events_created,
-                            started_at=started_at,
-                            finished_at=finished_at,
-                            error_code=error_code,
-                        )
+            except Exception as exc:
+                failures.append(exc)
+                if self._record_deployment_processing_failure(
+                    deployment=deployment,
+                    run_id=run_id,
+                    lease_token=lease_token,
+                    error=exc,
+                ):
+                    events_created += 1
+        if failures:
+            status = "FAILED" if len(failures) == len(deployments) else "DEGRADED"
+            error_code = ",".join(
+                sorted({type(failure).__name__ for failure in failures})
+            )[:120]
+        finished_at = datetime.now(UTC)
+        if trigger != "scheduler" or bars_processed > 0 or status != "SUCCEEDED":
+            with self.engine.begin() as connection:
+                connection.execute(
+                    insert(shadow_runs).values(
+                        shadow_run_id=run_id,
+                        status=status,
+                        trigger=trigger[:40],
+                        deployment_count=len(deployments),
+                        bars_processed=bars_processed,
+                        events_created=events_created,
+                        started_at=started_at,
+                        finished_at=finished_at,
+                        error_code=error_code,
                     )
+                )
+        if status == "FAILED":
+            raise failures[0]
         return {
             "shadow_run_id": run_id,
             "status": status,
             "deployment_count": len(deployments),
+            "deployment_failures": len(failures),
             "bars_processed": bars_processed,
             "events_created": events_created,
             "started_at": started_at,
@@ -1359,7 +1376,7 @@ class ShadowRuntime:
                 ),
             }
 
-    def _has_open_positions(self) -> bool:
+    def has_open_positions(self) -> bool:
         with self.engine.connect() as connection:
             count = connection.execute(
                 select(func.count())
@@ -1367,6 +1384,59 @@ class ShadowRuntime:
                 .where(shadow_trade_plans.c.status == "POSITION_OPEN")
             ).scalar_one()
         return int(count) > 0
+
+    def _record_deployment_processing_failure(
+        self,
+        *,
+        deployment: dict[str, Any],
+        run_id: str,
+        lease_token: str,
+        error: Exception,
+    ) -> bool:
+        """Persist one isolated deployment fault without blocking healthy peers."""
+        error_type = type(error).__name__
+        error_detail = str(error)[:500]
+        event = self._operational_event(
+            deployment=deployment,
+            run_id=run_id,
+            bar_id=None,
+            event_type="DEPLOYMENT_PROCESSING_FAILED",
+            event_time=self._now(),
+            payload={
+                "error_type": error_type,
+                "error_detail": error_detail,
+                "virtual_only": True,
+            },
+        )
+        event["sequence"] = self._next_event_sequence(
+            str(deployment["shadow_deployment_id"])
+        )
+        try:
+            with self.engine.begin() as connection:
+                self._assert_runtime_lease(connection, lease_token)
+                latest = connection.execute(
+                    select(
+                        shadow_events.c.event_type,
+                        shadow_events.c.payload_json,
+                    )
+                    .where(
+                        shadow_events.c.shadow_deployment_id
+                        == deployment["shadow_deployment_id"]
+                    )
+                    .order_by(shadow_events.c.sequence.desc())
+                    .limit(1)
+                ).one_or_none()
+                if (
+                    latest is not None
+                    and latest.event_type == "DEPLOYMENT_PROCESSING_FAILED"
+                    and dict(latest.payload_json or {}).get("error_type") == error_type
+                    and dict(latest.payload_json or {}).get("error_detail") == error_detail
+                ):
+                    return False
+                connection.execute(insert(shadow_events).values(**event))
+        except Exception:
+            return False
+        return True
 
     def _position_is_open(self, deployment_id: str) -> bool:
         with self.engine.connect() as connection:
@@ -2734,7 +2804,7 @@ class ShadowRuntime:
         *,
         deployment: dict[str, Any],
         run_id: str,
-        bar_id: str,
+        bar_id: str | None,
         event_type: str,
         event_time: datetime,
         payload: dict[str, Any],

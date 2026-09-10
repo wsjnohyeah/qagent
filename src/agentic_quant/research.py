@@ -165,11 +165,19 @@ class PointInTimeFeatureBuilder:
             (reference.event_time for reference in latest_catalysts),
             default=None,
         )
+        average_volume_20 = _average(volumes[-20:])
         values: dict[str, Decimal | int | bool | str | None] = {
             "close": closes[-1],
             "distance_sma_20": closes[-1] / _average(closes[-20:]) - _ONE,
             "realized_vol_20": variance.sqrt() * periods_per_year.sqrt(),
-            "volume_ratio_20": volumes[-1] / _average(volumes[-20:]),
+            # Provider-evidenced inactive windows can contain only zero-volume
+            # bars. Treat that missing baseline conservatively instead of
+            # raising Decimal DivisionUndefined and exhausting the workflow.
+            "volume_ratio_20": (
+                _ZERO
+                if average_volume_20 == _ZERO
+                else volumes[-1] / average_volume_20
+            ),
             "catalyst_count_90d": len(latest_catalysts),
             "corporate_fact_count": len(latest_facts),
             "corporate_action_count": len(actions),

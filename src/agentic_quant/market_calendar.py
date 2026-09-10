@@ -6,6 +6,21 @@ import exchange_calendars as exchange_calendars  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict
 
 
+# exchange_calendars otherwise builds a calendar around a moving default range.
+# Long-horizon strategies need future session labels for deterministic expiry
+# calculation, so every caller must share a deliberately wide, fixed range.
+MARKET_CALENDAR_START = "1990-01-01"
+MARKET_CALENDAR_END = "2100-12-31"
+
+
+def get_market_calendar(calendar_name: str):  # type: ignore[no-untyped-def]
+    return exchange_calendars.get_calendar(
+        calendar_name,
+        start=MARKET_CALENDAR_START,
+        end=MARKET_CALENDAR_END,
+    )
+
+
 class MarketDataGap(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -17,7 +32,7 @@ class MarketDataGap(BaseModel):
 
 class MarketSessionClock:
     def __init__(self, calendar_name: str = "XNYS") -> None:
-        self.calendar = exchange_calendars.get_calendar(calendar_name)
+        self.calendar = get_market_calendar(calendar_name)
 
     def daily_bar_available_from(self, event_time: datetime) -> datetime:
         session = self._session_for_daily_bar(event_time)
@@ -74,7 +89,7 @@ class MarketSessionClock:
 
 class MarketGapDetector:
     def __init__(self, calendar_name: str = "XNYS") -> None:
-        self.calendar = exchange_calendars.get_calendar(calendar_name)
+        self.calendar = get_market_calendar(calendar_name)
         self._last_bar_by_symbol: dict[str, datetime] = {}
 
     def seed(self, symbol: str, event_time: datetime | None) -> None:

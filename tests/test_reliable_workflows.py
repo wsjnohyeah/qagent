@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -41,6 +42,7 @@ from agentic_quant.domain import (
     BacktestCostModel,
     DataQualityStatus,
     EventEnvelope,
+    LLMProviderName,
     PointInTimeFeatureSnapshot,
     SignalAction,
     SourceDocument,
@@ -50,6 +52,7 @@ from agentic_quant.domain import (
     WorkflowJobStatus,
 )
 from agentic_quant.ledger import EventLedger
+from agentic_quant.llm import LLMProviderError
 from agentic_quant.market_ingestion import IngestionSummary
 from agentic_quant.market_calendar import MarketSessionClock
 from agentic_quant.market_store import MarketDataStore
@@ -67,6 +70,51 @@ from agentic_quant.reference_data import (
 from agentic_quant.research_store import ResearchStore
 from agentic_quant.workflow import ResumableMarketBackfill, WorkflowJobStore
 from agentic_quant.ids import uuid7
+
+
+def test_research_llm_rate_limit_is_a_business_wait_not_job_failure(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    handler = object.__new__(ResearchCoordinatorHandler)
+    handler.settings = settings.model_copy(
+        update={"coordinator_paid_research_enabled": True}
+    )
+    handler.research = SimpleNamespace(
+        feature_snapshot=lambda _snapshot_id: SimpleNamespace(
+            feature_snapshot_id="snapshot-1",
+            as_of=datetime(2026, 9, 9, tzinfo=UTC),
+        )
+    )
+    handler.ml = SimpleNamespace(
+        forecast=lambda _forecast_id: SimpleNamespace(
+            forecast_id="forecast-1",
+            horizon="5_sessions",
+        )
+    )
+    handler.evidence = SimpleNamespace(
+        retrieve=lambda **_kwargs: SimpleNamespace(evidence_bundle_hash="bundle-1")
+    )
+
+    async def rate_limited(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise LLMProviderError(
+            provider=LLMProviderName.OPENAI,
+            code="upstream_http_error",
+            status_code=429,
+        )
+
+    handler.analyst = SimpleNamespace(
+        store=SimpleNamespace(recent=lambda **_kwargs: ()),
+        analyze=rate_limited,
+    )
+
+    result = asyncio.run(
+        handler._research_llm(
+            {"feature_snapshot_id": "snapshot-1", "forecast_id": "forecast-1"}
+        )
+    )
+
+    assert result["outcome"] == "WAITING_LLM_PROVIDER_RATE_LIMIT"
+    assert result["provider"] == "openai"
 
 
 def _minute_bar(minute: int, *, high: str = "101", low: str = "99") -> StockBar:

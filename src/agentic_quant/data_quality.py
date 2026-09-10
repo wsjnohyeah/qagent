@@ -6,7 +6,6 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-import exchange_calendars as exchange_calendars  # type: ignore[import-untyped]
 from sqlalchemy import Engine, func, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -20,7 +19,7 @@ from agentic_quant.domain import (
 )
 from agentic_quant.ids import uuid7
 from agentic_quant.ledger import EventLedger
-from agentic_quant.market_calendar import MarketGapDetector
+from agentic_quant.market_calendar import MarketGapDetector, get_market_calendar
 
 
 DATA_QUALITY_RULESET_VERSION = "market_data_quality@0.2.0"
@@ -95,7 +94,7 @@ def inspect_market_bars(
             for bar in ordered
         )
     if require_complete:
-        calendar = exchange_calendars.get_calendar(calendar_name)
+        calendar = get_market_calendar(calendar_name)
         if expected_start is not None and expected_end is not None:
             if timeframe == "1Day":
                 sessions = calendar.sessions_in_range(

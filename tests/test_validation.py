@@ -16,6 +16,7 @@ from agentic_quant.data_quality import DataQualityError
 from agentic_quant.database import (
     shadow_deployments,
     shadow_events,
+    shadow_runs,
     shadow_trade_plans,
     validation_reports,
     workflow_jobs,
@@ -64,6 +65,57 @@ def test_continuous_oos_drawdown_keeps_intrafold_loss_and_cross_fold_peak() -> N
         Decimal("0.99"),
     )
     assert drawdown == Decimal("-0.5")
+
+
+def test_shadow_tick_isolates_one_deployment_failure(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    store = ResearchStore(ledger.engine)
+    objects = SystemObjectStore(ledger.engine, ledger)
+    objects.ensure_defaults()
+    shadow = ShadowRuntime(
+        ledger.engine,
+        store,
+        objects,
+        risk_policy=RiskPolicy.from_yaml(settings.risk_policy_path),
+        restrictions=RestrictionRegistry.from_yaml(
+            settings.restricted_securities_path
+        ),
+    )
+    deployments = (
+        {"status": "ACTIVE", "shadow_deployment_id": "broken"},
+        {"status": "ACTIVE", "shadow_deployment_id": "healthy"},
+    )
+    with (
+        patch.object(shadow, "deployments", return_value=list(deployments)),
+        patch.object(
+            shadow,
+            "_process_deployment",
+            side_effect=(ValueError("bad calendar boundary"), (2, 3)),
+        ) as process,
+        patch.object(
+            shadow,
+            "_record_deployment_processing_failure",
+            return_value=True,
+        ),
+    ):
+        result = shadow._tick_locked(
+            trigger="isolation-test",
+            lease_token="TEST",
+            new_exposure_paused=False,
+        )
+
+    assert process.call_count == 2
+    assert result["status"] == "DEGRADED"
+    assert result["deployment_failures"] == 1
+    assert result["bars_processed"] == 2
+    assert result["events_created"] == 4
+    with ledger.engine.connect() as connection:
+        run = connection.execute(select(shadow_runs)).one()
+    assert run.status == "DEGRADED"
+    assert run.error_code == "ValueError"
 
 
 def _regime_bars(count: int = 60) -> tuple[StockBar, ...]:

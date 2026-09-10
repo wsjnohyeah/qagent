@@ -627,33 +627,39 @@ def create_app(
                         application.state.publisher,
                         worker_id="shadow-runtime",
                     )
-                    if runtime_is_paused():
+                    pipeline_enabled = actions.pipeline_enabled("shadow")
+                    entry_paused = runtime_is_paused() or not pipeline_enabled
+                    if entry_paused and not shadow.has_open_positions():
                         actions.record_pipeline_heartbeat(
                             pipeline="shadow",
-                            status="WAITING",
+                            status=("WAITING" if pipeline_enabled else "PAUSED"),
                             detail=(
-                                "Global new-exposure pause is active; "
+                                "New exposure is paused and there are no open "
+                                "positions requiring exit management; "
                                 f"outbox published={delivery['published']} "
                                 f"failed={delivery['failed']}"
                             ),
                         )
-                    elif not actions.pipeline_enabled("shadow"):
-                        actions.record_pipeline_heartbeat(
-                            pipeline="shadow",
-                            status="PAUSED",
-                            detail="Shadow pipeline control is disabled",
-                        )
                     else:
                         result = await shadow.tick(
                             trigger="scheduler",
-                            new_exposure_paused=runtime_is_paused(),
+                            new_exposure_paused=entry_paused,
                         )
                         actions.record_pipeline_heartbeat(
                             pipeline="shadow",
-                            status="IDLE",
+                            status=(
+                                "DEGRADED"
+                                if result["status"] == "DEGRADED"
+                                else "WAITING"
+                                if entry_paused
+                                else "IDLE"
+                            ),
                             detail=(
                                 f"Last tick processed {result['bars_processed']} bars "
-                                f"and created {result['events_created']} events"
+                                f"and created {result['events_created']} events; "
+                                f"deployment_failures="
+                                f"{result['deployment_failures']}; "
+                                f"new_entry_paused={entry_paused}"
                             ),
                         )
                     failure_streak = 0
@@ -775,17 +781,63 @@ def create_app(
                             detail="Autonomous coordinator is disabled by control plane",
                         )
                     else:
-                        universe_scan_id = None
-                        if app_settings.market_scanner_enabled:
-                            scan = await market_scanner.run_once(
-                                as_of=datetime.now(UTC),
-                            )
-                            symbols = tuple(scan["selected_symbols"])
-                            universe_scan_id = str(scan["scan_id"])
-                        else:
-                            universe = objects.get_list("trading-universe")
-                            symbols = tuple(universe["members"]) if universe else ()
-                        if not symbols:
+                        heartbeat_stop = asyncio.Event()
+
+                        async def coordinator_heartbeat() -> None:
+                            while not heartbeat_stop.is_set():
+                                try:
+                                    await asyncio.wait_for(
+                                        heartbeat_stop.wait(),
+                                        timeout=60,
+                                    )
+                                except TimeoutError:
+                                    actions.record_pipeline_heartbeat(
+                                        pipeline="coordinator",
+                                        status="RUNNING",
+                                        detail="Market scan/research cycle is still active",
+                                    )
+
+                        actions.record_pipeline_heartbeat(
+                            pipeline="coordinator",
+                            status="RUNNING",
+                            detail="Starting market scan/research cycle",
+                        )
+                        heartbeat_task = asyncio.create_task(
+                            coordinator_heartbeat(),
+                            name="research-coordinator-heartbeat",
+                        )
+                        try:
+                            universe_scan_id = None
+                            if app_settings.market_scanner_enabled:
+                                scan = await market_scanner.run_once(
+                                    as_of=datetime.now(UTC),
+                                )
+                                symbols = tuple(scan["selected_symbols"])
+                                universe_scan_id = str(scan["scan_id"])
+                            else:
+                                universe = objects.get_list("trading-universe")
+                                symbols = (
+                                    tuple(universe["members"]) if universe else ()
+                                )
+                            if not symbols:
+                                result = None
+                            else:
+                                cycle_as_of = datetime.now(UTC)
+                                research_horizon = AUTONOMOUS_RESEARCH_HORIZONS[
+                                    cycle_as_of.hour
+                                    % len(AUTONOMOUS_RESEARCH_HORIZONS)
+                                ]
+                                result = await coordinator.run_once(
+                                    symbols=symbols,
+                                    as_of=cycle_as_of,
+                                    universe_scan_id=universe_scan_id,
+                                    horizon_bars=research_horizon,
+                                    backlog_horizons=AUTONOMOUS_RESEARCH_HORIZONS,
+                                )
+                        finally:
+                            heartbeat_stop.set()
+                            await heartbeat_task
+                        if result is None:
                             actions.record_pipeline_heartbeat(
                                 pipeline="coordinator",
                                 status="WAITING",
@@ -796,25 +848,6 @@ def create_app(
                                 ),
                             )
                         else:
-                            actions.record_pipeline_heartbeat(
-                                pipeline="coordinator",
-                                status="RUNNING",
-                                detail=(
-                                    f"Starting research cycle for {len(symbols)} symbols; "
-                                    f"scan={universe_scan_id or 'disabled'}"
-                                ),
-                            )
-                            cycle_as_of = datetime.now(UTC)
-                            research_horizon = AUTONOMOUS_RESEARCH_HORIZONS[
-                                cycle_as_of.hour % len(AUTONOMOUS_RESEARCH_HORIZONS)
-                            ]
-                            result = await coordinator.run_once(
-                                symbols=symbols,
-                                as_of=cycle_as_of,
-                                universe_scan_id=universe_scan_id,
-                                horizon_bars=research_horizon,
-                                backlog_horizons=AUTONOMOUS_RESEARCH_HORIZONS,
-                            )
                             delay = _coordinator_next_delay(delay, result)
                             actions.record_pipeline_heartbeat(
                                 pipeline="coordinator",

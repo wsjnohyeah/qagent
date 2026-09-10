@@ -35,6 +35,9 @@ override and does not claim qualification.
   multi-session position is already open, the tick continues only its deterministic stop,
   target, mark, and timed-exit processing; it cannot create new exposure.
 - Only `ACTIVE` deployments are evaluated.
+- One deployment fault is persisted as `DEPLOYMENT_PROCESSING_FAILED` and makes that run
+  `DEGRADED`; the runtime continues evaluating the other active deployments. A run is `FAILED`
+  and contributes to worker restart protection only when every eligible deployment fails.
 - A new daily deployment normally establishes its cursor at the current data edge; historical
   bars seed future signals but are not replayed as pretend forward results. One narrow exception
   is permitted when activation occurs after the latest daily bar became available and before its
@@ -85,6 +88,9 @@ override and does not claim qualification.
   before the session from completed-bar evidence; execution-bar volume is used only to model
   whether that already bounded order could fill.
 - Deployment/bar/event uniqueness and `last_processed_bar_time` make reruns idempotent.
+- Global or pipeline new-entry pause still invokes the runtime while a position is open. This
+  is required for deterministic stop, target, mark, corporate-action, and timed-exit handling;
+  the pause cannot strand exposure.
 - Cash and realized P&L are virtual. This runtime has no broker SDK or submission call. The
   separate Phase 7 Paper runtime may mirror a newly approved plan only after an additional
   enrollment confirmation; it never converts Shadow history into broker history.

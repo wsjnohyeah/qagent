@@ -15,8 +15,11 @@
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled. Seventeen explicitly approved Candidate Shadow
-  sleeves are active and global new exposure is resumed for broker-free forward observation;
-  there are no Paper enrollments or orders. Live money remains structurally disabled.
+  sleeves are active; two opened virtual positions from the September 9 execution bar, while
+  seven pre-existing plans still require reconciliation. A calendar-boundary exception restarted
+  the Shadow worker and its boot safety gate paused new exposure. The local C090 correction is
+  tested but not yet deployed. There are no Paper enrollments or orders. Live money remains
+  structurally disabled.
 - The deployed remediation adds `research_gate@0.4.0`, horizon-specific
   Candidate Shadow activity minima, horizon-specific research-trial accounting, budget-
   independent revalidation of accepted specs, scanner-pool authorization at Shadow start,
@@ -46,7 +49,7 @@
   agent-accessible. Sixteen ordinary equity/crypto watchlists are readable; Robinhood currently
   rejects item expansion for its special empty Options Watchlist, which is isolated as an
   unavailable list rather than failing the complete read.
-- Local lint, strict type checking, all 208 tests, API readiness, the authenticated HTTP
+- Local lint, strict type checking, all 213 tests, API readiness, the authenticated HTTP
   vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
 - The full Compose stack is healthy: PostgreSQL 17, Redis 8, MinIO, and the API all passed direct checks; the PostgreSQL-backed shadow slice recorded six lineage events.
@@ -142,6 +145,9 @@
   share that horizon. Multi-session Shadow persists open-position accounting across restarts,
   checks stop/target on every completed bar, handles recorded splits/dividends, and exits at
   the maximum holding session. Global pause blocks new exposure but continues existing exits.
+  The scheduler preserves that exit-management contract even when global or pipeline entry pause
+  is active. Per-deployment faults produce an audited degraded run while healthy sleeves
+  continue; only an all-deployment failure reaches worker restart protection.
 - Provider-observed listing/resumption boundaries propagate through market reads, feature
   materialization, ML datasets, LLM evidence, and exact validation. Old raw bars and feature
   snapshots remain auditable but cannot train the current issuer after a ticker-reuse boundary.
@@ -168,8 +174,10 @@
 - All 17 production Candidate deployments used that guarded path before the September 9 open.
   The first scheduler tick evaluated 17 bars, produced 15 long candidates, approved nine open
   virtual plans, rejected six when the shared `$780` concurrent-risk ceiling could not support at
-  least one share, and left two flat. No broker order was created; the completed September 9 bar
-  will determine modeled next-open limit fills after the session closes.
+  least one share, and left two flat. Post-close processing opened two virtual positions (INTC
+  and IREN) before a 252-session calendar-boundary exception blocked the remaining plans; C090
+  widens the fixed exchange-calendar range and isolates future per-sleeve faults. No broker order
+  was created.
 - The deployable `next_session_day_limit_bracket_moc@0.1.0` contract governs one-session
   validation, Forward Shadow, and Alpaca Paper. It includes identical conservative price
   rounding, DAY limit-entry semantics, stop-first ambiguity, and no target credit after an
@@ -199,6 +207,9 @@
   defaults paid research off, and cannot promote/adopt/execute without human confirmation.
   Incomplete current or backlog cycles are rechecked every minute, so an expired worker lease
   is reclaimed promptly instead of waiting for the next hourly scan cadence.
+  The coordinator refreshes its worker heartbeat during long scans/training cycles. Provider 429
+  responses become a bounded `WAITING_LLM_PROVIDER_RATE_LIMIT` business state rather than
+  exhausting the same job, and all-zero provider volume baselines materialize conservatively.
   Validation reuse is bound to the exact execution/data contracts, current promotion policy,
   and current horizon-specific research-search count. When a new paid generation stage is
   unavailable, validation rotates through accepted immutable specs for the same horizon. ML

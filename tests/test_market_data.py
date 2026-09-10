@@ -323,6 +323,17 @@ def test_daily_availability_uses_exact_exchange_session_close() -> None:
         clock.daily_bar_available_from(datetime(2026, 12, 25, 5, tzinfo=UTC))
 
 
+def test_daily_calendar_supports_long_horizon_expiry_beyond_default_range() -> None:
+    clock = MarketSessionClock("XNYS")
+
+    expiry = clock.daily_session_close_after(
+        datetime(2026, 9, 9, tzinfo=UTC),
+        sessions_ahead=252,
+    )
+
+    assert expiry == datetime(2027, 9, 10, 20, tzinfo=UTC)
+
+
 def test_alpaca_adapter_normalizes_option_snapshot() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/v1beta1/options/snapshots/AAPL"

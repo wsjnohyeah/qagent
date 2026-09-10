@@ -131,6 +131,26 @@ def test_feature_snapshot_excludes_future_evidence_and_is_idempotent(
         assert len(connection.execute(select(feature_snapshots)).all()) == 1
 
 
+def test_feature_snapshot_handles_zero_volume_baseline(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    ledger, market_store, research_store = _stores(settings)
+    bars = tuple(
+        bar.model_copy(update={"volume": 0})
+        for bar in _daily_bars(symbol="GRAB", count=25)
+    )
+    market_store.insert_bars(bars, raw_object_id="TEST_RAW")
+
+    snapshot = PointInTimeFeatureBuilder(research_store).build(
+        symbol="GRAB",
+        timeframe="1Day",
+        as_of=bars[-1].available_from,
+        bars=bars,
+    )
+
+    assert Decimal(str(snapshot.values["volume_ratio_20"])) == Decimal("0")
+
+
 def test_cost_aware_backtest_uses_next_bar_and_records_immutable_run(
     settings,  # type: ignore[no-untyped-def]
 ) -> None:

@@ -5,7 +5,6 @@ from decimal import Decimal
 import hashlib
 from typing import Any, Callable
 
-import exchange_calendars as exchange_calendars  # type: ignore[import-untyped]
 from sqlalchemy import func, select
 
 from agentic_quant.archive import RawArchive
@@ -33,7 +32,9 @@ from agentic_quant.intelligence import (
 )
 from agentic_quant.ledger import EventLedger
 from agentic_quant.llm import LLMConfigurationError
+from agentic_quant.llm import LLMProviderError
 from agentic_quant.llm_budget import LLMBudgetExceededError
+from agentic_quant.market_calendar import get_market_calendar
 from agentic_quant.market_ingestion import MarketDataIngestionService
 from agentic_quant.market_scanner import AUTO_TRADING_POOL_SLUG, MARKET_SCAN_EVENT
 from agentic_quant.market_store import MarketDataStore
@@ -94,7 +95,7 @@ def daily_bar_gap_windows(
         return ()
     start_utc = start.astimezone(UTC)
     end_utc = end.astimezone(UTC)
-    calendar = exchange_calendars.get_calendar(calendar_name)
+    calendar = get_market_calendar(calendar_name)
     sessions = tuple(
         session
         for session in calendar.sessions_in_range(
@@ -151,7 +152,7 @@ def resumed_daily_history_start(
         raise ValueError("Suspension boundary requires at least one session")
     if start.tzinfo is None or end.tzinfo is None:
         raise ValueError("Suspension-boundary timestamps must be timezone-aware")
-    calendar = exchange_calendars.get_calendar(calendar_name)
+    calendar = get_market_calendar(calendar_name)
     sessions = tuple(
         session.date()
         for session in calendar.sessions_in_range(
@@ -1057,6 +1058,14 @@ class ResearchCoordinatorHandler:
             return {"outcome": "WAITING_LLM_BUDGET", "detail": str(exc)}
         except LLMConfigurationError as exc:
             return {"outcome": "WAITING_LLM_CONFIGURATION", "detail": str(exc)}
+        except LLMProviderError as exc:
+            if exc.status_code == 429:
+                return {
+                    "outcome": "WAITING_LLM_PROVIDER_RATE_LIMIT",
+                    "provider": exc.provider.value,
+                    "detail": "The research provider rate limit is temporarily active",
+                }
+            raise
         return {
             "outcome": (
                 "COMPLETED"
