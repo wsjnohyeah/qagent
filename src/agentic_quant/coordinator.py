@@ -23,6 +23,9 @@ COORDINATOR_STAGES = (
     "validate_strategy",
     "await_shadow_adoption",
 )
+COORDINATOR_STAGE_ORDER = {
+    stage: order for order, stage in enumerate(COORDINATOR_STAGES)
+}
 COORDINATOR_RESEARCH_HORIZONS = (1, 5, 20, 63, 126, 252)
 # One-session strategies remain available for explicit research and historical
 # comparison, but production automation prioritizes multi-session horizons until
@@ -144,7 +147,7 @@ class AutonomousCoordinator:
         horizon_bars: int = 1,
         backlog_horizons: tuple[int, ...] | None = None,
     ) -> dict[str, Any]:
-        group_id, _ = self.plan(
+        group_id, planned = self.plan(
             symbols=symbols,
             as_of=as_of,
             timeframe=timeframe,
@@ -166,8 +169,23 @@ class AutonomousCoordinator:
                     in allowed_horizons
                 )
             )
-        backlog_summaries = []
-        processed_total = 0
+        backlog_summaries: list[dict[str, Any]] = []
+        # Refresh the current cycle's market edge across the entire symbol set
+        # before consuming older, potentially LLM-heavy research backlog. This
+        # keeps today's completed bars available to forward Shadow promptly.
+        current_priority_budget = sum(
+            item.payload.get("stage") == "collect_market_data" for item in planned
+        )
+        if max_jobs is not None:
+            current_priority_budget = min(current_priority_budget, max_jobs)
+        current_priority = await self._run_group(
+            group_id,
+            max_jobs=current_priority_budget,
+        )
+        processed_total = int(current_priority["processed_this_run"])
+        if max_jobs is not None and processed_total >= max_jobs:
+            current_priority["backlog_groups"] = backlog_summaries
+            return current_priority
         for backlog_group_id in backlog_group_ids:
             remaining = (
                 None
@@ -208,6 +226,19 @@ class AutonomousCoordinator:
         for _ in range(max(1, len(self.jobs.jobs(job_group_id=group_id)))):
             progressed = False
             current = self.jobs.jobs(job_group_id=group_id)
+            current = tuple(
+                sorted(
+                    current,
+                    key=lambda item: (
+                        COORDINATOR_STAGE_ORDER.get(
+                            str(item.payload.get("stage")),
+                            len(COORDINATOR_STAGES),
+                        ),
+                        str(item.payload.get("symbol", "")),
+                        item.partition_key,
+                    ),
+                )
+            )
             by_id = {item.workflow_job_id: item for item in current}
             for job in current:
                 if job.status == WorkflowJobStatus.COMPLETED:

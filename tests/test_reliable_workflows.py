@@ -1176,6 +1176,50 @@ def test_autonomous_run_skips_disabled_horizon_backlog(
     assert result["backlog_groups"] == []
 
 
+def test_current_market_refresh_precedes_research_backlog(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    jobs = WorkflowJobStore(EventLedger(settings.database_url).engine)
+    calls: list[tuple[str, str, str]] = []
+
+    async def handler(job, dependencies):  # type: ignore[no-untyped-def]
+        del dependencies
+        calls.append(
+            (
+                str(job.job_group_id),
+                str(job.payload["stage"]),
+                str(job.payload["symbol"]),
+            )
+        )
+        return {"outcome": "COMPLETED"}
+
+    coordinator = AutonomousCoordinator(jobs, handler=handler)
+    cutoff = datetime(2026, 9, 9, tzinfo=UTC)
+    old_group_id, _ = coordinator.plan(
+        symbols=("OLD",),
+        as_of=cutoff,
+        horizon_bars=5,
+    )
+    result = asyncio.run(
+        coordinator.run_once(
+            symbols=("MSFT", "AAPL"),
+            as_of=cutoff + timedelta(hours=1),
+            horizon_bars=5,
+            backlog_horizons=AUTONOMOUS_RESEARCH_HORIZONS,
+            max_jobs=2,
+        )
+    )
+
+    assert [item[1:] for item in calls] == [
+        ("collect_market_data", "AAPL"),
+        ("collect_market_data", "MSFT"),
+    ]
+    assert all(item[0] == result["job_group_id"] for item in calls)
+    assert result["job_group_id"] != old_group_id
+    assert result["backlog_groups"] == []
+
+
 def test_research_handler_propagates_planned_horizon_into_stage_context() -> None:
     observed: dict[str, object] = {}
 

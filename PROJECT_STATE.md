@@ -11,15 +11,15 @@
   strictly Qualified and no adopted strategy has accumulated forward observation time.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `d922e8bb2f49dd20b72110011524385dd21fc3b8` image, PostgreSQL, Redis, API, Shadow worker,
+  `3717b5f23f7e53f5549e2948136bff1b1bfcee55` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled. Seventeen explicitly approved Candidate Shadow
-  sleeves are active; two opened virtual positions from the September 9 execution bar, while
-  seven pre-existing plans still require reconciliation. A calendar-boundary exception restarted
-  the Shadow worker and its boot safety gate paused new exposure. The local C090 correction is
-  tested but not yet deployed. There are no Paper enrollments or orders. Live money remains
-  structurally disabled.
+  sleeves are active; three opened virtual positions from the September 9 execution bar, while
+  six pre-existing plans await their symbols' September 9 daily bars. C090 is deployed and the
+  audited runtime is resumed. Local C091 prioritizes the current universe's market-data edge
+  before historical research backlog and awaits exact-SHA deployment. There are no Paper
+  enrollments or orders. Live money remains structurally disabled.
 - The deployed remediation adds `research_gate@0.4.0`, horizon-specific
   Candidate Shadow activity minima, horizon-specific research-trial accounting, budget-
   independent revalidation of accepted specs, scanner-pool authorization at Shadow start,
@@ -49,7 +49,7 @@
   agent-accessible. Sixteen ordinary equity/crypto watchlists are readable; Robinhood currently
   rejects item expansion for its special empty Options Watchlist, which is isolated as an
   unavailable list rather than failing the complete read.
-- Local lint, strict type checking, all 213 tests, API readiness, the authenticated HTTP
+- Local lint, strict type checking, all 214 tests, API readiness, the authenticated HTTP
   vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
 - The full Compose stack is healthy: PostgreSQL 17, Redis 8, MinIO, and the API all passed direct checks; the PostgreSQL-backed shadow slice recorded six lineage events.
@@ -210,6 +210,8 @@
   The coordinator refreshes its worker heartbeat during long scans/training cycles. Provider 429
   responses become a bounded `WAITING_LLM_PROVIDER_RATE_LIMIT` business state rather than
   exhausting the same job, and all-zero provider volume baselines materialize conservatively.
+  Current-cycle market collection is stage-major and runs across the selected universe before
+  older downstream research work, so a deep LLM/ML backlog cannot starve today's data edge.
   Validation reuse is bound to the exact execution/data contracts, current promotion policy,
   and current horizon-specific research-search count. When a new paid generation stage is
   unavailable, validation rotates through accepted immutable specs for the same horizon. ML

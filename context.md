@@ -4655,7 +4655,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C089 — `Record first pre-open Shadow plans`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `96f72ebff37db87e9f64c89c8d0bb6febf2b7404`.
 - Date: 2026-09-09 PDT.
 - User intent: allow the active Candidate Shadow strategies to participate in the September 9
   session without inventing a retroactive decision.
@@ -4684,7 +4684,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C090 — `Harden continuous Shadow and research execution`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `3717b5f23f7e53f5549e2948136bff1b1bfcee55`.
 - Date: 2026-09-10 PDT.
 - User intent: repair the production faults discovered after the first completed Shadow execution
   session and restore a trustworthy autonomous runtime.
@@ -4710,6 +4710,36 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: deploy only after the remaining gates pass, resume only the already
   approved simulation workflow, reconcile every September 9 plan and position, and record the
   exact production outcome in the next context entry.
+
+### C091 — `Prioritize current market refresh`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-10 PDT.
+- User intent: finish repairing the live autonomous workflow rather than leave apparently healthy
+  services with stale per-symbol bars and unprocessed Shadow plans.
+- Scope: run ready coordinator jobs in stage-major order and give the current cycle an initial
+  market-refresh budget equal to the selected symbol count before consuming older downstream
+  backlog. Add a regression proving that two current symbols collect market data before an older
+  group's research work.
+- Architecture/decision impact: current market freshness is now explicitly higher priority than
+  historical ML/LLM research throughput. Older recoverable groups are still processed in durable
+  order immediately after that bounded current-edge pass; no job, evidence, or retry history is
+  discarded.
+- Validation: C090 CI run 34451290013 passed and published exact image
+  `3717b5f23f7e53f5549e2948136bff1b1bfcee55`; guarded deployment passed API, Shadow worker,
+  coordinator, PostgreSQL, and Redis health gates. Audited action
+  `01a08a4c-a0cf-7822-947a-83ed3e792f7d` resumed simulation. The first corrected scheduler run
+  succeeded without a calendar exception and opened NVDA as the third virtual position. Six
+  audited retry actions returned the former GRAB zero-volume feature jobs to `PENDING`. The new
+  ordering regression and existing rollover/backlog fairness regressions pass; the full 214-test
+  gate, doctor, secret scan, exact-SHA CI, and deployment remain required.
+- Expected global state after commit: C090 remains deployed and healthy while C091 awaits its
+  immutable image. Once C091 deploys, every new scan refreshes current daily bars across the
+  selected universe before it spends time on older feature, ML, or LLM stages. Existing virtual
+  positions, open plans, workflow history, and broker safety controls remain durable.
+- Corrections/follow-ups: after guarded deployment, resume simulation, verify the September 9
+  bars arrive for active symbols, reconcile the six remaining plans, and record exact plan/fill
+  outcomes without interpreting modeled fills as broker trades.
 
 ## Template for future commit entries
 
