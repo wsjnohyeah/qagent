@@ -4713,33 +4713,59 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C091 — `Prioritize current market refresh`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `a6c67dce3a42a85902b1f4b2a685750b96cc8eac`.
 - Date: 2026-09-10 PDT.
 - User intent: finish repairing the live autonomous workflow rather than leave apparently healthy
   services with stale per-symbol bars and unprocessed Shadow plans.
-- Scope: run ready coordinator jobs in stage-major order and give the current cycle an initial
-  market-refresh budget equal to the selected symbol count before consuming older downstream
-  backlog. Add a regression proving that two current symbols collect market data before an older
-  group's research work.
+- Scope: run ready coordinator jobs in stage-major order and give the current research cycle an
+  initial market-refresh budget equal to the selected symbol count before consuming older
+  downstream backlog. Add a regression proving that current symbols collect market data before
+  an older group's research work.
 - Architecture/decision impact: current market freshness is now explicitly higher priority than
   historical ML/LLM research throughput. Older recoverable groups are still processed in durable
   order immediately after that bounded current-edge pass; no job, evidence, or retry history is
   discarded.
-- Validation: C090 CI run 34451290013 passed and published exact image
-  `3717b5f23f7e53f5549e2948136bff1b1bfcee55`; guarded deployment passed API, Shadow worker,
-  coordinator, PostgreSQL, and Redis health gates. Audited action
-  `01a08a4c-a0cf-7822-947a-83ed3e792f7d` resumed simulation. The first corrected scheduler run
-  succeeded without a calendar exception and opened NVDA as the third virtual position. Six
-  audited retry actions returned the former GRAB zero-volume feature jobs to `PENDING`. The new
-  ordering regression and existing rollover/backlog fairness regressions pass; the full 214-test
-  gate, doctor, secret scan, exact-SHA CI, and deployment remain required.
+- Validation: `make check` passed Flake8, strict mypy across 61 source files, and all 214 tests;
+  `make doctor` and the secret scan passed. CI run 34452829808 passed and published exact image
+  `a6c67dce3a42a85902b1f4b2a685750b96cc8eac`. Guarded deployment passed API, Shadow worker,
+  coordinator, PostgreSQL, and Redis health gates; audited action
+  `01a08a5c-3528-7ffb-a274-722fa7d5da42` resumed simulation. Production confirmed the new order
+  across all 20 scanner-selected symbols, then exposed the active-symbol gap corrected by C092.
 - Expected global state after commit: C090 remains deployed and healthy while C091 awaits its
-  immutable image. Once C091 deploys, every new scan refreshes current daily bars across the
-  selected universe before it spends time on older feature, ML, or LLM stages. Existing virtual
+  immutable image. Once C091 deploys, every new scan first refreshes current daily bars across its
+  research shortlist before it spends time on older feature, ML, or LLM stages. Existing virtual
   positions, open plans, workflow history, and broker safety controls remain durable.
-- Corrections/follow-ups: after guarded deployment, resume simulation, verify the September 9
-  bars arrive for active symbols, reconcile the six remaining plans, and record exact plan/fill
-  outcomes without interpreting modeled fills as broker trades.
+- Corrections/follow-ups: C092 adds a separate current-edge job group because production proved
+  that active Shadow symbols can rotate out of the scanner shortlist and would otherwise remain
+  stale even after C091.
+
+### C092 — `Refresh active Shadow market data`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-10 PDT.
+- User intent: complete the production repair so every active plan and position receives current
+  bars even when its symbol is no longer selected for new research.
+- Scope: create an hourly, durable, market-only refresh group for `shadow-active` symbols outside
+  the current scanner shortlist; run it after the current research-universe market stage and
+  before historical ML/LLM backlog; keep scanner lineage confined to symbols actually selected by
+  that scan; and extend the priority regression to cover an active-only symbol.
+- Architecture/decision impact: forward execution-data coverage and new-strategy research
+  membership are now separate concerns. Scanner rotation may stop new research for a symbol but
+  cannot starve an already active position or plan of deterministic daily-bar updates.
+- Validation: C091 CI run 34452829808 passed and its guarded deployment reported healthy API,
+  Shadow worker, coordinator, PostgreSQL, and Redis. Audited action
+  `01a08a5c-3528-7ffb-a274-722fa7d5da42` resumed simulation. Production then confirmed the C091
+  ordering across all 20 current scanner symbols, but showed six open plans belonged to active
+  symbols still at September 8 because they had rotated out of that shortlist. The C092 regression
+  proves current research symbols and an active-only symbol refresh before old backlog. `make
+  check` passed Flake8, strict mypy across 61 source files, and all 214 tests; `make doctor` and the
+  secret scan passed.
+- Expected global state after commit: source is ready for guarded C092 deployment. Production
+  remains healthy on C091 with three virtual positions and six open plans; C092 will refresh the
+  missing active-symbol bars without expanding the scanner's research/admission authority.
+- Corrections/follow-ups: deploy the exact image, resume simulation after the boot pause, and
+  verify all active symbols reach the September 9 market-data edge and every eligible old plan is
+  deterministically filled or cancelled.
 
 ## Template for future commit entries
 

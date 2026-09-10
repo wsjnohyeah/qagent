@@ -16,10 +16,10 @@
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled. Seventeen explicitly approved Candidate Shadow
   sleeves are active; three opened virtual positions from the September 9 execution bar, while
-  six pre-existing plans await their symbols' September 9 daily bars. C090 is deployed and the
-  audited runtime is resumed. Local C091 prioritizes the current universe's market-data edge
-  before historical research backlog and awaits exact-SHA deployment. There are no Paper
-  enrollments or orders. Live money remains structurally disabled.
+  six pre-existing plans await their symbols' September 9 daily bars. C091 is deployed and the
+  audited runtime is resumed. Local C092 adds a dedicated current-edge refresh for active Shadow
+  symbols that rotated out of the scanner shortlist and awaits exact-SHA deployment. There are no
+  Paper enrollments or orders. Live money remains structurally disabled.
 - The deployed remediation adds `research_gate@0.4.0`, horizon-specific
   Candidate Shadow activity minima, horizon-specific research-trial accounting, budget-
   independent revalidation of accepted specs, scanner-pool authorization at Shadow start,
@@ -210,8 +210,9 @@
   The coordinator refreshes its worker heartbeat during long scans/training cycles. Provider 429
   responses become a bounded `WAITING_LLM_PROVIDER_RATE_LIMIT` business state rather than
   exhausting the same job, and all-zero provider volume baselines materialize conservatively.
-  Current-cycle market collection is stage-major and runs across the selected universe before
-  older downstream research work, so a deep LLM/ML backlog cannot starve today's data edge.
+  A durable current-edge group refreshes the union of the selected research universe and active
+  Shadow symbols before older downstream research work, so scanner rotation or a deep LLM/ML
+  backlog cannot starve the bars needed for position and plan management.
   Validation reuse is bound to the exact execution/data contracts, current promotion policy,
   and current horizon-specific research-search count. When a new paid generation stage is
   unavailable, validation rotates through accepted immutable specs for the same horizon. ML

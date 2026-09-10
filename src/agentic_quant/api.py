@@ -819,6 +819,20 @@ def create_app(
                                 symbols = (
                                     tuple(universe["members"]) if universe else ()
                                 )
+                            shadow_active = objects.get_list("shadow-active")
+                            market_refresh_symbols = tuple(
+                                sorted(
+                                    set(symbols)
+                                    | {
+                                        str(symbol).upper()
+                                        for symbol in (
+                                            shadow_active["members"]
+                                            if shadow_active is not None
+                                            else ()
+                                        )
+                                    }
+                                )
+                            )
                             if not symbols:
                                 result = None
                             else:
@@ -833,6 +847,7 @@ def create_app(
                                     universe_scan_id=universe_scan_id,
                                     horizon_bars=research_horizon,
                                     backlog_horizons=AUTONOMOUS_RESEARCH_HORIZONS,
+                                    market_refresh_symbols=market_refresh_symbols,
                                 )
                         finally:
                             heartbeat_stop.set()

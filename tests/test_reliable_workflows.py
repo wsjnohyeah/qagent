@@ -1152,11 +1152,16 @@ def test_autonomous_run_skips_disabled_horizon_backlog(
 ) -> None:
     upgrade_database(settings.database_url)
     jobs = WorkflowJobStore(EventLedger(settings.database_url).engine)
-    calls: list[int] = []
+    calls: list[tuple[int, bool]] = []
 
     async def handler(job, dependencies):  # type: ignore[no-untyped-def]
         del dependencies
-        calls.append(int(job.payload["horizon_bars"]))
+        calls.append(
+            (
+                int(job.payload["horizon_bars"]),
+                bool(job.payload.get("refresh_only")),
+            )
+        )
         return {"outcome": "COMPLETED"}
 
     coordinator = AutonomousCoordinator(jobs, handler=handler)
@@ -1172,7 +1177,7 @@ def test_autonomous_run_skips_disabled_horizon_backlog(
         )
     )
 
-    assert calls == [5]
+    assert calls == [(5, False)]
     assert result["backlog_groups"] == []
 
 
@@ -1207,15 +1212,19 @@ def test_current_market_refresh_precedes_research_backlog(
             as_of=cutoff + timedelta(hours=1),
             horizon_bars=5,
             backlog_horizons=AUTONOMOUS_RESEARCH_HORIZONS,
-            max_jobs=2,
+            market_refresh_symbols=("MSFT", "ACTIVE", "AAPL"),
+            max_jobs=3,
         )
     )
 
     assert [item[1:] for item in calls] == [
         ("collect_market_data", "AAPL"),
         ("collect_market_data", "MSFT"),
+        ("collect_market_data", "ACTIVE"),
     ]
-    assert all(item[0] == result["job_group_id"] for item in calls)
+    assert calls[0][0] == result["job_group_id"]
+    assert calls[1][0] == result["job_group_id"]
+    assert calls[2][0] == result["market_refresh"]["job_group_id"]
     assert result["job_group_id"] != old_group_id
     assert result["backlog_groups"] == []
 

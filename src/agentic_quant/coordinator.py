@@ -136,6 +136,71 @@ class AutonomousCoordinator:
             tuple(item.workflow_job_id for item in planned)
         )
 
+    def plan_market_refresh(
+        self,
+        *,
+        symbols: tuple[str, ...],
+        as_of: datetime,
+        timeframe: str = "1Day",
+        max_attempts: int = 5,
+    ) -> tuple[str, tuple[WorkflowJob, ...]]:
+        """Plan a durable current-edge refresh independent of research membership."""
+        if as_of.tzinfo is None:
+            raise ValueError("Coordinator cutoff must be timezone-aware")
+        if timeframe != "1Day":
+            raise ValueError("Autonomous market refresh currently supports only 1Day bars")
+        normalized = tuple(
+            sorted({value.strip().upper() for value in symbols if value.strip()})
+        )
+        if not normalized:
+            raise ValueError("Market refresh requires at least one governed symbol")
+        cycle_key = as_of.astimezone(UTC).strftime("%Y-%m-%dT%H")
+        group_id = stable_uuid("autonomous-market-refresh-v1", timeframe, cycle_key)
+        now = datetime.now(UTC)
+        planned = tuple(
+            WorkflowJob(
+                workflow_job_id=stable_uuid(
+                    "coordinator-market-refresh-job", group_id, symbol
+                ),
+                job_group_id=group_id,
+                job_type="coordinator.collect_market_data",
+                partition_key=f"{symbol}:01:collect_market_data",
+                request_sha256=_hash(
+                    {
+                        "symbol": symbol,
+                        "timeframe": timeframe,
+                        "as_of": as_of.astimezone(UTC).isoformat(),
+                        "stage": "collect_market_data",
+                        "cycle_key": cycle_key,
+                        "horizon_bars": 1,
+                        "refresh_only": True,
+                    }
+                ),
+                payload={
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                    "as_of": as_of.astimezone(UTC).isoformat(),
+                    "stage": "collect_market_data",
+                    "cycle_key": cycle_key,
+                    "horizon_bars": 1,
+                    "refresh_only": True,
+                },
+                status=WorkflowJobStatus.PENDING,
+                attempt_count=0,
+                max_attempts=max_attempts,
+                dependency_job_ids=(),
+                cursor={},
+                result={},
+                created_at=now,
+                updated_at=now,
+            )
+            for symbol in normalized
+        )
+        self.jobs.ensure_jobs(planned)
+        return group_id, self.jobs.jobs_by_ids(
+            tuple(item.workflow_job_id for item in planned)
+        )
+
     async def run_once(
         self,
         *,
@@ -146,6 +211,7 @@ class AutonomousCoordinator:
         universe_scan_id: str | None = None,
         horizon_bars: int = 1,
         backlog_horizons: tuple[int, ...] | None = None,
+        market_refresh_symbols: tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
         group_id, planned = self.plan(
             symbols=symbols,
@@ -170,12 +236,12 @@ class AutonomousCoordinator:
                 )
             )
         backlog_summaries: list[dict[str, Any]] = []
-        # Refresh the current cycle's market edge across the entire symbol set
-        # before consuming older, potentially LLM-heavy research backlog. This
-        # keeps today's completed bars available to forward Shadow promptly.
-        current_priority_budget = sum(
+        # Refresh the current research universe first. Its ordinary first-stage
+        # jobs retain the scanner lineage used by downstream strategy review.
+        current_market_job_count = sum(
             item.payload.get("stage") == "collect_market_data" for item in planned
         )
+        current_priority_budget = current_market_job_count
         if max_jobs is not None:
             current_priority_budget = min(current_priority_budget, max_jobs)
         current_priority = await self._run_group(
@@ -184,8 +250,56 @@ class AutonomousCoordinator:
         )
         processed_total = int(current_priority["processed_this_run"])
         if max_jobs is not None and processed_total >= max_jobs:
+            current_priority["market_refresh"] = None
             current_priority["backlog_groups"] = backlog_summaries
             return current_priority
+
+        # Active Shadow symbols that rotated out of today's research shortlist
+        # get their own market-only durable jobs. They do not inherit a scanner
+        # ID that did not select them and do not create unnecessary LLM/ML work.
+        research_symbols = {
+            item.payload["symbol"]
+            for item in planned
+            if item.payload.get("stage") == "collect_market_data"
+        }
+        extra_refresh_symbols = tuple(
+            sorted(
+                {
+                    value.strip().upper()
+                    for value in (market_refresh_symbols or ())
+                    if value.strip()
+                }
+                - research_symbols
+            )
+        )
+        market_refresh: dict[str, Any] | None = None
+        if extra_refresh_symbols:
+            refresh_group_id, refresh_jobs = self.plan_market_refresh(
+                symbols=extra_refresh_symbols,
+                as_of=as_of,
+                timeframe=timeframe,
+            )
+            remaining = (
+                None if max_jobs is None else max(0, max_jobs - processed_total)
+            )
+            market_refresh = await self._run_group(
+                refresh_group_id,
+                max_jobs=(
+                    len(refresh_jobs)
+                    if remaining is None
+                    else min(len(refresh_jobs), remaining)
+                ),
+            )
+            processed_total += int(market_refresh["processed_this_run"])
+            if max_jobs is not None and processed_total >= max_jobs:
+                result = self._summary(
+                    group_id,
+                    recovered=0,
+                    processed=processed_total,
+                )
+                result["market_refresh"] = market_refresh
+                result["backlog_groups"] = backlog_summaries
+                return result
         for backlog_group_id in backlog_group_ids:
             remaining = (
                 None
@@ -207,6 +321,7 @@ class AutonomousCoordinator:
         current["processed_this_run"] = (
             int(current["processed_this_run"]) + processed_total
         )
+        current["market_refresh"] = market_refresh
         current["backlog_groups"] = backlog_summaries
         return current
 

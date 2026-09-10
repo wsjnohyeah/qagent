@@ -30,10 +30,11 @@ Each hourly group is partitioned by an approved 1, 5, 20, 63, 126, or 252-sessio
 `horizon_bars`. Every stage reconstructs that value from the immutable job payload; do not
 infer it from a dependency result or a one-session default. The ML label, forecast, Research
 LLM context, generated holding period, replay, validation window, and Shadow contract must
-all agree. Within a scheduler poll, the current cycle's `collect_market_data` jobs run across
-the complete selected universe before older research backlog or slower downstream LLM/ML work.
-Within every group, ready jobs are likewise stage-major. This prevents historical research from
-delaying today's completed bars and therefore delaying forward Shadow decisions.
+all agree. Within a scheduler poll, a separate durable refresh group runs
+`collect_market_data` across the union of the current research shortlist and `shadow-active`
+symbols before older research backlog or slower downstream LLM/ML work. Active positions and
+plans therefore keep receiving bars even if their symbols rotate out of today's scanner list.
+Within every group, ready jobs are likewise stage-major.
 
 1. `collect_market_data`: incrementally ingest Alpaca `1Day` bars. A fresh production store
    starts with `COORDINATOR_INITIAL_LOOKBACK_DAYS` (default 2,192, approximately six calendar
