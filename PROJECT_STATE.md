@@ -11,14 +11,13 @@
   strictly Qualified and no adopted strategy has accumulated forward observation time.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `3717b5f23f7e53f5549e2948136bff1b1bfcee55` image, PostgreSQL, Redis, API, Shadow worker,
+  `ec83c09d9898c93a06e9d40b74f24adce6caef73` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled. Seventeen explicitly approved Candidate Shadow
-  sleeves are active; three opened virtual positions from the September 9 execution bar, while
-  six pre-existing plans await their symbols' September 9 daily bars. C091 is deployed and the
-  audited runtime is resumed. Local C092 adds a dedicated current-edge refresh for active Shadow
-  symbols that rotated out of the scanner shortlist and awaits exact-SHA deployment. There are no
+  sleeves are active and every one of their 13 symbols is current through September 9. Eight of
+  the nine pre-open plans became virtual positions and NOK was deterministically cancelled because
+  its DAY limit was not touched. C092 is deployed and the audited runtime is resumed. There are no
   Paper enrollments or orders. Live money remains structurally disabled.
 - The deployed remediation adds `research_gate@0.4.0`, horizon-specific
   Candidate Shadow activity minima, horizon-specific research-trial accounting, budget-

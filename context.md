@@ -4741,7 +4741,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C092 — `Refresh active Shadow market data`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `ec83c09d9898c93a06e9d40b74f24adce6caef73`.
 - Date: 2026-09-10 PDT.
 - User intent: complete the production repair so every active plan and position receives current
   bars even when its symbol is no longer selected for new research.
@@ -4752,20 +4752,53 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Architecture/decision impact: forward execution-data coverage and new-strategy research
   membership are now separate concerns. Scanner rotation may stop new research for a symbol but
   cannot starve an already active position or plan of deterministic daily-bar updates.
-- Validation: C091 CI run 34452829808 passed and its guarded deployment reported healthy API,
-  Shadow worker, coordinator, PostgreSQL, and Redis. Audited action
-  `01a08a5c-3528-7ffb-a274-722fa7d5da42` resumed simulation. Production then confirmed the C091
-  ordering across all 20 current scanner symbols, but showed six open plans belonged to active
-  symbols still at September 8 because they had rotated out of that shortlist. The C092 regression
-  proves current research symbols and an active-only symbol refresh before old backlog. `make
-  check` passed Flake8, strict mypy across 61 source files, and all 214 tests; `make doctor` and the
-  secret scan passed.
-- Expected global state after commit: source is ready for guarded C092 deployment. Production
-  remains healthy on C091 with three virtual positions and six open plans; C092 will refresh the
-  missing active-symbol bars without expanding the scanner's research/admission authority.
-- Corrections/follow-ups: deploy the exact image, resume simulation after the boot pause, and
-  verify all active symbols reach the September 9 market-data edge and every eligible old plan is
-  deterministically filled or cancelled.
+- Validation: C091 CI run 34452829808 passed and its guarded deployment first confirmed the new
+  order across the current scanner shortlist, exposing the remaining active-symbol gap. The C092
+  regression then proved current research symbols and an active-only symbol refresh before old
+  backlog. `make check` passed Flake8, strict mypy across 61 source files, and all 214 tests;
+  `make doctor` and the secret scan passed. CI run 34454386798 passed and published the exact C092
+  image. Guarded deployment passed API, Shadow worker, coordinator, PostgreSQL, and Redis gates;
+  audited action `01a08a6d-3c1b-7b84-ba82-5bb32bc810ef` resumed simulation. Eleven market-only
+  jobs refreshed the active symbols outside the latest scanner shortlist. All 13 distinct active
+  Shadow symbols then reached September 9, and scheduler run
+  `01a08a6d-bdfb-7728-98af-c28495489341` succeeded across nine bars with no deployment failure.
+- Expected global state after commit: production runs C092 with zero worker/coordinator restarts,
+  fresh heartbeats, and new exposure resumed. All nine September 8 plans are resolved: eight are
+  open virtual positions and NOK is cancelled because its DAY limit was not touched. Net virtual
+  unrealized P&L at inspection was `-$14.475316`; reserved virtual cash was `$5,110.93` and
+  reserved concurrent risk was `$650.07 / $780`. No Paper enrollment/order or live-money action
+  exists.
+- Corrections/follow-ups: five of the six previously exhausted GRAB zero-volume jobs completed
+  after audited retry. The sixth was interrupted by deployment, received one additional audited
+  retry (`01a08a6f-9da0-7216-b388-944bf4bb9a7e`), and remains a normal pending job for the running
+  coordinator. Historical failed/exhausted rows remain immutable audit evidence rather than being
+  deleted.
+
+### C093 — `Record active Shadow data recovery`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-10 PDT.
+- User intent: leave a durable record of the completed production repair and current autonomous
+  system state.
+- Scope: record C092 exact-SHA deployment, audited resume, active-symbol refresh coverage, complete
+  September 9 plan reconciliation, virtual portfolio state, worker health, and the remaining
+  non-blocking historical feature retry.
+- Architecture/decision impact: none beyond C090–C092. This is deployment and runtime evidence,
+  not a new trading rule or strategy claim.
+- Validation: CI run 34454386798 passed for
+  `ec83c09d9898c93a06e9d40b74f24adce6caef73`; the guarded production gates and public readiness
+  passed with `live_trading_enabled=false`. API, worker, coordinator, PostgreSQL, and Redis are
+  healthy; worker and coordinator restart counts are zero. Current-edge jobs updated every active
+  Shadow symbol through September 9, and the latest Shadow runs are `SUCCEEDED` with no new
+  `RequestedSessionOutOfBounds` failure.
+- Expected global state after commit: the autonomous market-data, research, and broker-free Shadow
+  workflow is online and resumed. Eight virtual positions are open, NOK's unfilled DAY plan is
+  cancelled, and no old plan remains open. Paper submission is not ready, Paper orders are zero,
+  Robinhood remains read-only, and live trading is disabled.
+- Corrections/follow-ups: let the final explicitly retried GRAB feature job run normally; continue
+  treating historical `FAILED`/`EXHAUSTED` rows as audit history rather than current service
+  health. The next daily bar will drive deterministic stop/target/mark/timed-exit processing for
+  the eight virtual positions.
 
 ## Template for future commit entries
 
