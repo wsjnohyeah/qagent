@@ -323,24 +323,55 @@ def test_llm_reviewed_scan_refreshes_audited_trading_pool(
     assert first["automatic_execution"] is False
 
     handler = ResearchCoordinatorHandler.__new__(ResearchCoordinatorHandler)
-    handler.settings = scanner.settings
+    handler.settings = scanner.settings.model_copy(
+        update={
+            "autonomous_coordinator_enabled": True,
+            "coordinator_auto_shadow_enabled": True,
+        }
+    )
     handler.ledger = scanner.ledger
     handler.objects = objects
+
+    class FakeShadow:
+        def __init__(self) -> None:
+            self.adoptions: list[dict[str, Any]] = []
+            self.deployments: list[dict[str, Any]] = []
+
+        def virtual_account(self) -> dict[str, str]:
+            return {"initial_cash": "100000"}
+
+        def adopt_strategy(self, **kwargs: Any) -> dict[str, str]:
+            self.adoptions.append(kwargs)
+            return {"adoption_id": "auto-adoption"}
+
+        def start_deployment(self, **kwargs: Any) -> dict[str, str]:
+            self.deployments.append(kwargs)
+            return {"shadow_deployment_id": "auto-deployment"}
+
+    shadow = FakeShadow()
+    handler.shadow = shadow
     ready = asyncio.run(
         handler._await_shadow_adoption(
             {
                 "symbol": "SNDK",
                 "validation_report_id": "validation-id",
-                "eligible_for_human_review": True,
+                "strategy_spec_id": "strategy-id",
+                "eligible_for_human_review": False,
+                "eligible_for_candidate_shadow_review": True,
                 "universe_scan_id": first["scan_id"],
             }
         )
     )
-    assert ready["outcome"] == "WAITING_HUMAN_CONFIRMATION"
+    assert ready["outcome"] == "AUTO_SHADOW_ACTIVE"
+    assert ready["admission_tier"] == "CANDIDATE"
+    assert ready["automatic_broker_orders"] is False
     assert ready["trading_pool_authority"] == "SCANNER_LLM_TRADING_POOL"
     assert ready["scanner_admission"]["basis_llm_invocation_id"] == (
         first["llm_invocation_id"]
     )
+    assert shadow.adoptions[0]["author_kind"] == "system"
+    assert shadow.adoptions[0]["allow_operator_override"] is False
+    assert shadow.deployments[0]["allow_operator_resume"] is False
 
     second = asyncio.run(scanner.run_once(as_of=NOW + timedelta(hours=1)))
     assert second["llm_status"] == "SKIPPED_INTERVAL"
@@ -360,12 +391,16 @@ def test_llm_reviewed_scan_refreshes_audited_trading_pool(
             {
                 "symbol": "SNDK",
                 "validation_report_id": "validation-id",
-                "eligible_for_human_review": True,
+                "strategy_spec_id": "strategy-id",
+                "eligible_for_human_review": False,
+                "eligible_for_candidate_shadow_review": True,
                 "universe_scan_id": first["scan_id"],
             }
         )
     )
     assert stale["outcome"] == "WAITING_TRADING_UNIVERSE_APPROVAL"
+    assert len(shadow.adoptions) == 1
+    assert len(shadow.deployments) == 1
 
     repaired = asyncio.run(scanner.run_once(as_of=NOW + timedelta(hours=2)))
     assert repaired["llm_status"] == "COMPLETED"

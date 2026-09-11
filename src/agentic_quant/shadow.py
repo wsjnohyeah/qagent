@@ -386,7 +386,11 @@ class ShadowRuntime:
         reason: str,
         approved_by: str,
         admission_tier: str = "QUALIFIED",
+        author_kind: str = "admin",
+        allow_operator_override: bool = True,
     ) -> dict[str, Any]:
+        if author_kind not in {"admin", "system"}:
+            raise ValueError("Strategy adoption author kind is invalid")
         preview = self.adoption_preview(
             strategy_spec_id=strategy_spec_id,
             validation_report_id=validation_report_id,
@@ -414,6 +418,14 @@ class ShadowRuntime:
                     strategy_adoptions.c.strategy_spec_id == strategy_spec_id
                 )
             ).one_or_none()
+            if (
+                existing is not None
+                and existing.status in {"PAUSED", "RETIRED"}
+                and not allow_operator_override
+            ):
+                raise ValueError(
+                    "Automatic Shadow admission cannot override an operator hold"
+                )
             values = {
                 "status": "ADOPTED_FOR_SHADOW",
                 "admission_tier": normalized_tier,
@@ -422,6 +434,16 @@ class ShadowRuntime:
                 "approved_by": approved_by,
                 "updated_at": now,
             }
+            changed = existing is None or any(
+                (
+                    str(existing.status) != values["status"],
+                    str(existing.admission_tier) != values["admission_tier"],
+                    str(existing.validation_report_id)
+                    != values["validation_report_id"],
+                    str(existing.reason) != values["reason"],
+                    str(existing.approved_by) != values["approved_by"],
+                )
+            )
             if existing is None:
                 adoption_id = uuid7()
                 connection.execute(
@@ -432,25 +454,28 @@ class ShadowRuntime:
                         **values,
                     )
                 )
-            else:
+            elif changed:
                 adoption_id = str(existing.adoption_id)
                 connection.execute(
                     update(strategy_adoptions)
                     .where(strategy_adoptions.c.adoption_id == adoption_id)
                     .values(**values)
                 )
-        self.objects.post(
-            object_type="strategy",
-            object_id=strategy_spec_id,
-            title=str(spec.name),
-            author_kind="admin",
-            author_name=approved_by,
-            body=f"Adopted for shadow operation. {reason}",
-            metadata={
-                "validation_report_id": validation_report_id,
-                "admission_tier": normalized_tier,
-            },
-        )
+            else:
+                adoption_id = str(existing.adoption_id)
+        if changed:
+            self.objects.post(
+                object_type="strategy",
+                object_id=strategy_spec_id,
+                title=str(spec.name),
+                author_kind=author_kind,
+                author_name=approved_by,
+                body=f"Adopted for shadow operation. {reason}",
+                metadata={
+                    "validation_report_id": validation_report_id,
+                    "admission_tier": normalized_tier,
+                },
+            )
         return self.adoption(adoption_id)
 
     def set_adoption_status(
@@ -542,6 +567,7 @@ class ShadowRuntime:
         symbol: str,
         initial_cash: Decimal,
         requested_by: str,
+        allow_operator_resume: bool = True,
     ) -> dict[str, Any]:
         normalized_symbol = symbol.strip().upper()
         self.deployment_preview(
@@ -621,6 +647,10 @@ class ShadowRuntime:
             else:
                 if existing.status == "RETIRED":
                     raise ValueError("Retired deployments are immutable; create a new strategy")
+                if existing.status == "PAUSED" and not allow_operator_resume:
+                    raise ValueError(
+                        "Automatic Shadow admission cannot override an operator hold"
+                    )
                 deployment_id = str(existing.shadow_deployment_id)
                 sleeve_id = self.accounts.ensure_sleeve(
                     strategy_spec_id=strategy_spec_id,

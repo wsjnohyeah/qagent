@@ -6,6 +6,9 @@
   while having no broker order path. ADR 0036 adds an explicitly observation-only Candidate
   tier while retaining the strict Qualified tier.
 
+> Amendment: ADR 0041 replaces the human-confirmation requirement for configured automatic
+> broker-free Shadow admission. Exact validation and all deterministic controls remain.
+
 ## Context
 
 Phase 3 replay established research accounting, but it did not continuously track an adopted

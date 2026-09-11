@@ -127,7 +127,7 @@ OOS folds to estimate PBO, and calculates Deflated Sharpe from those OOS fold re
 The versioned thresholds live in `configs/research_promotion_policy.yaml`. The strict
 assessment can only return `INSUFFICIENT_EVIDENCE`, `REJECTED`, or
 `ELIGIBLE_FOR_HUMAN_REVIEW`; it never promotes automatically. The report separately records
-Candidate Shadow eligibility, which is an observation-only human-review gate rather than a
+Candidate Shadow eligibility, which is an observation-only deterministic gate rather than a
 statistical qualification. The bounded smoke sample is intentionally too small for either.
 
 `research_gate@0.4.0` distinguishes two subjects. An `adaptive_selector` must satisfy the
@@ -196,7 +196,8 @@ curl -fsS \
   capacity analysis are not implemented.
 - The LLM research and predictive ML tools are connected through the persistent coordinator,
   but paid stages default off. Generated strategies remain research-only until exact
-  validation and separate administrator-confirmed adoption.
+  validation and, when configured, deterministic automatic Shadow admission. Paper remains a
+  separate administrator-confirmed boundary.
 - Outcome feedback sent back into later Research LLM cycles is a bounded, schema-versioned
   summary of the newest backtests, validation gates, Shadow events, and Paper events. It does
   not embed complete fold histories in the prompt; the underlying records remain inspectable

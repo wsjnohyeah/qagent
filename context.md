@@ -1,17 +1,17 @@
 # Master Project Context
 
-Last updated: 2026-09-08 PDT
+Last updated: 2026-09-11 PDT
 
 Context format: v1
 
 Current phase: the unified research, Shadow, and Alpaca Paper foundations are deployed to a
 fresh production data plane. Paid ML + LLM research and source-specific historical backfill
-are active, while new exposure remains paused and no external simulated order is eligible
-until an exact strategy passes deterministic validation and receives the separate adoption,
-Shadow-start, and Paper-enrollment confirmations. Off-site backup/alerting and statistical/
-elapsed production evidence remain open
+are active. The source now supports opt-in automatic admission of exact deterministic
+Candidate/Qualified results to broker-free Shadow; Paper enrollment remains separately
+human-confirmed and live money remains impossible. Off-site backup/alerting and statistical/
+elapsed production evidence remain open.
 
-Current documented baseline: C062 — `Record tiered Shadow production rollout`
+Current documented baseline: C094 — `Automate exact-strategy Shadow admission`
 
 ## Purpose and authority
 
@@ -73,8 +73,9 @@ A Git commit cannot contain its own content-derived hash without changing that h
   and OOS trades; no-trade windows no longer masquerade as losing windows in the stability
   ratio. Candidate activity requirements scale with the 1/5/20/63/126/252-session horizon,
   while profitability after costs and drawdown limits remain mandatory. A strict Qualified
-  gate and a lower-authority Candidate Shadow gate can only mark exact static results eligible
-  for later human review; neither promotes automatically.
+  gate and a lower-authority Candidate Shadow gate can admit exact static results to configured
+  broker-free Shadow automation. Neither gate promotes an ML model or grants Paper/live broker
+  authority.
 - Phase 5A adds persisted fail-closed market-data audits, configured half-spread fill costs,
   governed point-in-time reference imports, and idempotent resumable backfill partitions.
 - A front-loaded Phase 4B gateway and local Control Center now present one audited contract over OpenAI GPT-5.6 Sol
@@ -4799,6 +4800,28 @@ lifecycle. No Paper order was used as a build or deployment test.
   treating historical `FAILED`/`EXHAUSTED` rows as audit history rather than current service
   health. The next daily bar will drive deterministic stop/target/mark/timed-exit processing for
   the eight virtual positions.
+
+### C094 — `Automate exact-strategy Shadow admission`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-11 PDT.
+- User intent: remove the unnecessary daily human bottleneck between successful ML + LLM
+  strategy research and broker-free Shadow observation.
+- Scope: add an opt-in coordinator control that automatically adopts the strongest available
+  exact Candidate/Qualified tier and starts its matching strategy/symbol Shadow sleeve; expose
+  the setting in system/coordinator status and the Control Center; preserve manual recovery.
+- Architecture/decision impact: ADR 0041 supersedes the human-confirmation portion of ADRs 0018,
+  0036, and 0037 for broker-free Shadow only. The deterministic exact-spec gate—not either LLM—
+  owns admission. An operator pause/retirement cannot be reversed by automation. Candidate
+  remains Paper-ineligible, no Paper enrollment is automatic, Robinhood order tools remain
+  unused, and live money remains impossible.
+- Validation: `make check` passed Flake8, strict mypy across 61 source files, and all 214 tests;
+  `make doctor` and the secret scan passed. Exact-SHA CI and production deployment remain pending.
+- Expected global state after commit: code and documentation are ready for an immutable rollout;
+  production remains on C092 until CI and guarded deployment complete.
+- Corrections/follow-ups: after deployment, enable the setting in the protected production
+  environment, reconcile current eligible 20-session candidates, and verify future 5-session
+  results enter Shadow without an administrator confirmation.
 
 ## Template for future commit entries
 

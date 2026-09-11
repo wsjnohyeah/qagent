@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     paper_poll_seconds: int = Field(default=30, ge=5, le=3_600)
     autonomous_coordinator_enabled: bool = False
     coordinator_paid_research_enabled: bool = False
+    coordinator_auto_shadow_enabled: bool = False
     coordinator_poll_seconds: int = Field(default=3_600, ge=60, le=86_400)
     coordinator_initial_lookback_days: int = Field(default=2_192, ge=30, le=3_650)
     coordinator_document_lookback_days: int = Field(default=1_826, ge=1, le=3_650)
@@ -161,6 +162,14 @@ class Settings(BaseSettings):
             raise ValueError(
                 "MARKET_SCANNER_AUTO_TRADING_POOL_ENABLED=true requires both "
                 "MARKET_SCANNER_ENABLED=true and MARKET_SCANNER_LLM_ENABLED=true"
+            )
+        if (
+            self.coordinator_auto_shadow_enabled
+            and not self.autonomous_coordinator_enabled
+        ):
+            raise ValueError(
+                "COORDINATOR_AUTO_SHADOW_ENABLED=true requires "
+                "AUTONOMOUS_COORDINATOR_ENABLED=true"
             )
         if self.paper_trading_enabled or self.market_scanner_enabled:
             if self.alpaca_paper_base_url.rstrip("/") != (

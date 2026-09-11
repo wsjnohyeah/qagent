@@ -61,6 +61,8 @@ COORDINATOR_DOCUMENT_PARTITION_DAYS=90
 COORDINATOR_DOCUMENT_MAX_PAGES=100
 # Leave false until routes and USD budgets are reviewed after bootstrap.
 COORDINATOR_PAID_RESEARCH_ENABLED=false
+# Enable only after exact Candidate/Qualified validation and Shadow risk controls are reviewed.
+COORDINATOR_AUTO_SHADOW_ENABLED=false
 # Enable only after the Alpaca screener/snapshot probe and policy review pass.
 MARKET_SCANNER_ENABLED=false
 # This spends against the routine_pipeline daily USD budget and fails back to deterministic.

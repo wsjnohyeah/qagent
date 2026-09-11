@@ -28,6 +28,10 @@
 - Autonomous research creates and resumes only 5/20/63/126/252-session groups. One-session
   daily-bar research remains an explicit/manual reproducibility path and is not represented as
   a minute-level intraday strategy.
+- The source now supports opt-in automatic broker-free Shadow admission: a current exact
+  Candidate or Qualified result is idempotently adopted and started by the deterministic
+  coordinator, while operator holds, Paper enrollment, Robinhood orders, and live money remain
+  outside that automation. This change awaits exact-SHA production deployment.
 - The first post-deployment autonomous group is a fresh 20-session cycle over all 20 Scanner
   Trading Pool symbols. Its initial 42 completed stages had no failed or exhausted job; exact
   strategy and validation outcomes remain pending and must not be inferred from job startup.
@@ -201,9 +205,11 @@
   research horizons and owns the gap-repaired market-data → source-specific
   document history →
   feature → ML → forecast → Research LLM → constrained strategy → exact-validation →
-  shadow-readiness DAG. It checks the full configured XNYS window instead of trusting only the
+  shadow-admission DAG. It checks the full configured XNYS window instead of trusting only the
   latest bar, recovers older incomplete hourly groups, records `WAITING_*` business gates,
-  defaults paid research off, and cannot promote/adopt/execute without human confirmation.
+  and defaults paid research and automatic Shadow admission off. When explicitly enabled, the
+  deterministic final stage may adopt and start only an exact current Candidate/Qualified result;
+  neither LLM can grant that eligibility or reach Paper/broker execution.
   Incomplete current or backlog cycles are rechecked every minute, so an expired worker lease
   is reclaimed promptly instead of waiting for the next hourly scan cadence.
   The coordinator refreshes its worker heartbeat during long scans/training cycles. Provider 429
@@ -491,3 +497,5 @@
 - ADR 0037: use horizon-aware Candidate activity/search accounting, revalidate accepted specs
   when new paid generation is unavailable, freeze approved search counts for running Shadow,
   and carry LLM spend across budget-policy versions.
+- ADR 0041: allow configured deterministic auto-adoption/start for exact current Candidate or
+  Qualified results in broker-free Shadow; preserve operator holds and every Paper/live boundary.

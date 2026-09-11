@@ -21,8 +21,9 @@ provider output, invalid JSON, or an invented symbol yields `FAILED_FALLBACK` an
 the deterministic result. When `MARKET_SCANNER_AUTO_TRADING_POOL_ENABLED=true`, a completed
 LLM-reviewed scan also refreshes the bounded `scanner-trading-pool`; an interval skip or failed
 review holds the previous pool and admits nothing new. Every pool revision records additions,
-removals, scan ID, and LLM invocation. Exact validation and explicit strategy-adoption/Shadow
-confirmations still apply, and neither candidate nor pool membership can submit an order.
+removals, scan ID, and LLM invocation. Exact validation still applies, and neither candidate
+nor pool membership can submit an order. When automatic Shadow admission is enabled, only a
+current exact Candidate/Qualified result may enter broker-free observation.
 
 ## Stages
 
@@ -66,9 +67,9 @@ Within every group, ready jobs are likewise stage-major.
    produce a new spec in that cycle, rotate through previously accepted immutable specs for
    the same symbol/timeframe/horizon and revalidate them against current data and policy.
 9. `await_shadow_adoption`: report the strategy/report IDs and available Candidate/Qualified
-   admission tiers, then wait for the administrator's separate `strategy.adopt` and
-   `shadow.start` confirmations. Candidate is broker-free observation only and cannot enter
-   Alpaca Paper.
+   admission tiers. With `COORDINATOR_AUTO_SHADOW_ENABLED=true`, idempotently adopt the strongest
+   available tier and start broker-free Shadow. An operator pause or retirement blocks automatic
+   reactivation. Candidate cannot enter Alpaca Paper, and neither tier is auto-enrolled in Paper.
 
 ## Configuration
 
@@ -78,6 +79,7 @@ COORDINATOR_POLL_SECONDS=3600
 COORDINATOR_INITIAL_LOOKBACK_DAYS=2192
 COORDINATOR_DOCUMENT_LOOKBACK_DAYS=1826
 COORDINATOR_DOCUMENT_PARTITION_DAYS=90
+COORDINATOR_AUTO_SHADOW_ENABLED=false
 COORDINATOR_PAID_RESEARCH_ENABLED=false
 MARKET_SCANNER_ENABLED=false
 MARKET_SCANNER_LLM_ENABLED=false
@@ -87,7 +89,9 @@ MARKET_SCANNER_POLICY_PATH=./configs/market_scanner.yaml
 
 Leave paid research false during initial bootstrap. After data coverage, model readiness,
 provider routes, and USD budgets have been inspected, changing it to true and restarting the
-worker permits the two LLM stages. The LLM still cannot adopt or execute a strategy.
+worker permits the two LLM stages. Automatic Shadow admission is a separate setting: the LLM
+still cannot adopt or execute a strategy; the deterministic exact gate and coordinator own the
+Shadow-only transition.
 
 ## Inspection and recovery
 
@@ -108,7 +112,8 @@ existing Shadow accounting continue independently.
 
 `WAITING_*` is a healthy business state. Common examples are insufficient history, missing
 credentials, paid research disabled, no accepted strategy proposal, insufficient validation
-evidence, or pending human confirmation. Do not convert these into silent success or bypass
+evidence, an operator hold, or disabled automatic Shadow admission. Do not convert these into
+silent success or bypass
 their gate.
 
 `WAITING_ML_TRAINING_REQUIREMENTS` means the nominal sample count was large enough to attempt

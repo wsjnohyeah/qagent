@@ -1353,22 +1353,74 @@ class ResearchCoordinatorHandler:
                 "required_actions": ["list.replace_members"],
                 "automatic_execution": False,
             }
+        available_tiers = [
+            tier
+            for tier, available in (
+                ("QUALIFIED", qualified),
+                ("CANDIDATE", candidate),
+            )
+            if available
+        ]
+        trading_pool_authority = (
+            "MANUAL_TRADING_UNIVERSE"
+            if symbol in governed
+            else "SCANNER_LLM_TRADING_POOL"
+        )
+        if self.settings.coordinator_auto_shadow_enabled:
+            strategy_spec_id = str(context.get("strategy_spec_id") or "")
+            validation_report_id = str(context["validation_report_id"])
+            if not strategy_spec_id:
+                return {"outcome": "WAITING_EXACT_VALIDATION"}
+            admission_tier = "QUALIFIED" if qualified else "CANDIDATE"
+            reason = (
+                "Automatically admitted to broker-free Shadow after current exact-spec "
+                f"{admission_tier.lower()} validation; no Paper or live authority"
+            )
+            try:
+                adoption = self.shadow.adopt_strategy(
+                    strategy_spec_id=strategy_spec_id,
+                    validation_report_id=validation_report_id,
+                    reason=reason,
+                    approved_by="research-coordinator",
+                    admission_tier=admission_tier,
+                    author_kind="system",
+                    allow_operator_override=False,
+                )
+                deployment = self.shadow.start_deployment(
+                    strategy_spec_id=strategy_spec_id,
+                    symbol=symbol,
+                    initial_cash=Decimal(
+                        str(self.shadow.virtual_account()["initial_cash"])
+                    ),
+                    requested_by="research-coordinator",
+                    allow_operator_resume=False,
+                )
+            except ValueError as exc:
+                return {
+                    "outcome": "WAITING_AUTOMATIC_SHADOW_GUARD",
+                    "detail": str(exc),
+                    "strategy_spec_id": strategy_spec_id,
+                    "validation_report_id": validation_report_id,
+                    "admission_tier": admission_tier,
+                    "automatic_broker_orders": False,
+                }
+            return {
+                "outcome": "AUTO_SHADOW_ACTIVE",
+                "strategy_spec_id": strategy_spec_id,
+                "validation_report_id": validation_report_id,
+                "admission_tier": admission_tier,
+                "adoption_id": str(adoption["adoption_id"]),
+                "shadow_deployment_id": str(deployment["shadow_deployment_id"]),
+                "trading_pool_authority": trading_pool_authority,
+                "scanner_admission": scanner_admission,
+                "automatic_broker_orders": False,
+                "virtual_only": True,
+            }
         return {
             "outcome": "WAITING_HUMAN_CONFIRMATION",
             "required_actions": ["strategy.adopt", "shadow.start"],
-            "available_admission_tiers": [
-                tier
-                for tier, available in (
-                    ("QUALIFIED", qualified),
-                    ("CANDIDATE", candidate),
-                )
-                if available
-            ],
-            "trading_pool_authority": (
-                "MANUAL_TRADING_UNIVERSE"
-                if symbol in governed
-                else "SCANNER_LLM_TRADING_POOL"
-            ),
+            "available_admission_tiers": available_tiers,
+            "trading_pool_authority": trading_pool_authority,
             "scanner_admission": scanner_admission,
             "automatic_broker_orders": False,
         }

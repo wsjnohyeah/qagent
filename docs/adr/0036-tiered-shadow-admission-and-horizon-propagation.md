@@ -5,6 +5,9 @@
   broker-free Shadow admission into `CANDIDATE` and `QUALIFIED` tiers without weakening the
   Alpaca Paper boundary.
 
+> Amendment: ADR 0041 permits configured deterministic automatic admission to either Shadow
+> tier; it does not change either tier's evidence threshold or Paper authority.
+
 ## Context
 
 The coordinator stored `horizon_bars` in each durable job but reconstructed stage context

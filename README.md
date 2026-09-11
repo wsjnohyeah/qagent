@@ -7,9 +7,10 @@ event/document ingestion, point-in-time research, evidence-bound LLM analysis, M
 and constrained strategy generation, an authenticated System Steward, a persistent
 broker-free shadow runtime, a shared account/coordinator, and a fail-closed Alpaca Paper
 adapter with durable reconciliation. The unified execution profile and automatic
-position-exit lifecycle are implemented, but no Paper order is eligible until an exact
-strategy passes validation and receives the separate adoption, Shadow-start, and
-Paper-enrollment confirmations. Implementation completeness is not the same as passing
+position-exit lifecycle are implemented. When explicitly enabled, an exact strategy that
+passes the deterministic Candidate or Qualified gate is automatically admitted to broker-free
+Shadow; no Paper order is eligible until a Qualified strategy receives a separate
+Paper-enrollment confirmation. Implementation completeness is not the same as passing
 statistical or production-operational exit criteria; see
 `docs/REVIEW_REMEDIATION_C6A8020_2026-09-06.md`.
 
@@ -82,17 +83,18 @@ and out of sample; the report records the train-selected strategy, its out-of-sa
 return/Sharpe degradation, selection-failure rate, and performance by realized market regime.
 
 Phase 3D adds combinatorial selection-risk diagnostics, Probability of Backtest Overfitting,
-Deflated Sharpe, and a versioned research gate. The gate may only mark a result eligible for
-human review; it never promotes a strategy automatically, and bounded synthetic evidence is
-expected to fail its minimum-sample requirements.
+Deflated Sharpe, and a versioned research gate. The gate never promotes an ML model or grants
+broker authority. An eligible exact strategy may enter broker-free Shadow automatically when
+that production control is enabled; bounded synthetic evidence is expected to fail its
+minimum-sample requirements.
 
 `research_gate@0.4.0` separates candidate-selection evidence from exact frozen-strategy
 evidence. PBO and minimum candidate breadth apply to an adaptive selector; they are explicitly
 N/A for one static spec. Sparse strategies report total folds, active folds, no-trade folds,
 and OOS trades separately; only active folds enter the positive-fold stability ratio. Strict
 qualification still requires the configured coverage, activity, regime, drawdown, and
-search-trial-adjusted Deflated Sharpe thresholds. A separate human-reviewed Candidate Shadow
-tier may collect broker-free forward evidence after horizon-scaled minimum activity, positive
+search-trial-adjusted Deflated Sharpe thresholds. A separate Candidate Shadow tier may collect
+broker-free forward evidence after horizon-scaled minimum activity, positive
 cost-adjusted OOS performance, and bounded drawdown, but is never eligible for Alpaca Paper.
 
 Phase 5A adds fail-closed market-data checks, explicit half-spread fill cost, governed
@@ -137,8 +139,10 @@ shadow deployments, activity, and discussion timelines. The System Steward is th
 full-page workspace rather than a sidebar. Its persistent conversation history renders safe
 Markdown, including tables and code blocks. The steward receives a bounded live system
 snapshot, must cite exact object IDs, and may only create an allowlisted pending action. List
-edits, pipeline controls, LLM routing, strategy adoption, shadow control, and code-change
-sessions require a second explicit confirmation.
+edits, pipeline controls, LLM routing, manual strategy overrides, shadow control, and
+code-change sessions require a second explicit confirmation. Deterministic automatic Shadow
+admission is a separate configured coordinator policy and never authorizes Paper or live
+execution.
 
 The Phase 6 shadow runtime admits only an exact immutable strategy specification covered by
 an exact execution-contract validation certificate. Each attempted exposure persists its
@@ -174,18 +178,21 @@ cap, and remaining concurrent-risk capacity.
 
 The autonomous coordinator persists an hourly, per-symbol nine-stage DAG from full-window,
 gap-repaired market data and source-specific document history through feature/ML/LLM research,
-constrained generation, exact validation, and human-gated shadow readiness. It resumes
+constrained generation, exact validation, and deterministic Shadow admission. It resumes
 retryable groups without repeating completed parents, and rechecks incomplete cycles every
 minute rather than leaving an expired worker lease until the next hourly cycle. Exhausted
 stages are explicit and require a confirmed one-attempt retry. Validation can rotate through
 previously accepted same-horizon specs when a new paid generation stage is unavailable. Reuse
 requires the exact execution contract, market-data/window fingerprint, current promotion
 policy, and current horizon-specific research-search count. ML reuse separately requires the
-exact versioned training contract.
+exact versioned training contract. With `COORDINATOR_AUTO_SHADOW_ENABLED=true`, a current exact
+Candidate or Qualified result is idempotently adopted and started in broker-free Shadow. An
+operator pause or retirement remains authoritative and cannot be reversed by automation.
 Later Research LLM calls receive bounded, point-in-time summaries of already-known backtest,
 validation, Shadow, and Paper outcomes plus the forecast model's label, untouched-holdout
-metrics, calibration, drift, and gate status. Paid LLM stages default off, and the coordinator
-cannot promote, adopt, or submit orders.
+metrics, calibration, drift, and gate status. Paid LLM stages default off. The LLM cannot
+promote, size, or submit orders; only the deterministic coordinator may auto-admit an exact
+gate-eligible strategy to broker-free Shadow.
 
 Newly listed symbols do not fabricate pre-listing gaps. After a complete leading-window
 provider probe, the coordinator records an immutable provider-observed history boundary and
@@ -207,8 +214,8 @@ to deterministic ranking. Scan evidence, scores, reasons, LLM comments, and coor
 lineage are persisted. When separately enabled, only a successfully completed LLM-reviewed
 scan refreshes a bounded Scanner Trading Pool; skipped or failed LLM review cannot admit a new
 symbol. An exact current scan/list revision can authorize the symbol at adoption and Shadow
-start; exact validation and both human confirmations still apply, and pool membership alone
-has no broker-order authority.
+start. Pool membership alone cannot admit a strategy; exact deterministic validation remains
+required. Configured automatic admission is Shadow-only and has no broker-order authority.
 
 ## Commands
 
@@ -258,6 +265,7 @@ COORDINATOR_INITIAL_LOOKBACK_DAYS=2192
 COORDINATOR_DOCUMENT_LOOKBACK_DAYS=1826
 COORDINATOR_DOCUMENT_PARTITION_DAYS=90
 COORDINATOR_DOCUMENT_MAX_PAGES=100
+COORDINATOR_AUTO_SHADOW_ENABLED=false
 MARKET_SCANNER_ENABLED=false
 MARKET_SCANNER_LLM_ENABLED=false
 MARKET_SCANNER_AUTO_TRADING_POOL_ENABLED=false

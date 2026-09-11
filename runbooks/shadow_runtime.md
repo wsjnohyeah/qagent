@@ -19,9 +19,11 @@ portfolio events.
    Candidate activity minima are horizon-aware because a multi-year history can contain many
    independent one-session windows but only one annual window. Positive modeled net return
    and the drawdown ceiling remain mandatory at every horizon.
-3. The administrator confirms `strategy.adopt` with the explicit admission tier.
-4. The administrator confirms `shadow.start` for one symbol. Its validated capital must
-   match the shared virtual master account.
+3. With `COORDINATOR_AUTO_SHADOW_ENABLED=true`, the deterministic coordinator adopts the
+   strongest available exact tier and starts one strategy/symbol deployment under the shared
+   virtual account. If disabled, the administrator may use the confirmation-gated manual path.
+4. An explicit operator pause or retirement always blocks automatic reactivation. The
+   validated capital must match the shared virtual master account.
 5. The shadow pipeline and global new-exposure control are enabled.
 
 No override can convert a report that failed the selected tier into an adoption. A strict

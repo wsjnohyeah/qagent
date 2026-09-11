@@ -774,6 +774,43 @@ def test_strictly_rejected_strategy_can_enter_candidate_shadow_only(
 
     assert adoption["admission_tier"] == "CANDIDATE"
     assert deployment["admission_tier"] == "CANDIDATE"
+    shadow.set_adoption_status(
+        strategy_spec_id=spec.strategy_spec_id,
+        status="PAUSED",
+        reason="Operator hold must survive later automated research",
+        approved_by="test-admin",
+    )
+    with pytest.raises(ValueError, match="cannot override an operator hold"):
+        shadow.adopt_strategy(
+            strategy_spec_id=spec.strategy_spec_id,
+            validation_report_id=report.validation_report_id,
+            admission_tier="CANDIDATE",
+            reason="Automated exact-spec Candidate admission",
+            approved_by="research-coordinator",
+            author_kind="system",
+            allow_operator_override=False,
+        )
+    shadow.adopt_strategy(
+        strategy_spec_id=spec.strategy_spec_id,
+        validation_report_id=report.validation_report_id,
+        admission_tier="CANDIDATE",
+        reason="Administrator explicitly cleared the hold",
+        approved_by="test-admin",
+    )
+    with pytest.raises(ValueError, match="cannot override an operator hold"):
+        shadow.start_deployment(
+            strategy_spec_id=spec.strategy_spec_id,
+            symbol="AAPL",
+            initial_cash=Decimal("100000"),
+            requested_by="research-coordinator",
+            allow_operator_resume=False,
+        )
+    deployment = shadow.start_deployment(
+        strategy_spec_id=spec.strategy_spec_id,
+        symbol="AAPL",
+        initial_cash=Decimal("100000"),
+        requested_by="test-admin",
+    )
     result = asyncio.run(
         shadow.tick(
             trigger="candidate-contract-check",

@@ -54,6 +54,12 @@ def test_production_worker_healthchecks_allow_cold_import_latency() -> None:
     assert api_environment["SHADOW_RUNTIME_ENABLED"].endswith(":-true}")
     assert api_environment["PAPER_TRADING_ENABLED"].endswith(":-false}")
     assert api_environment["AUTONOMOUS_COORDINATOR_ENABLED"].endswith(":-true}")
+    assert coordinator_environment["COORDINATOR_AUTO_SHADOW_ENABLED"].endswith(
+        ":-false}"
+    )
+    assert compose["services"]["worker"]["environment"][
+        "COORDINATOR_AUTO_SHADOW_ENABLED"
+    ] == "false"
     assert api_environment["ROBINHOOD_MCP_BRIDGE_ENABLED"].endswith(":-false}")
     assert api_environment["ROBINHOOD_ORDER_SUBMISSION_ENABLED"] == "false"
     assert compose["services"]["worker"]["environment"][
@@ -224,6 +230,11 @@ def test_market_scanner_asset_metadata_is_pinned_to_paper_host() -> None:
             _env_file=None,
             market_scanner_enabled=True,
             market_scanner_auto_trading_pool_enabled=True,
+        )
+    with pytest.raises(ValidationError, match="requires AUTONOMOUS_COORDINATOR"):
+        Settings(
+            _env_file=None,
+            coordinator_auto_shadow_enabled=True,
         )
 
 

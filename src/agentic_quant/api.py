@@ -510,6 +510,9 @@ def create_app(
             "robinhood_mcp": robinhood.status(),
             "new_exposure_paused": runtime_is_paused(),
             "data_operating_scope": app_settings.data_operating_scope,
+            "coordinator_auto_shadow_enabled": (
+                app_settings.coordinator_auto_shadow_enabled
+            ),
             "llm_routing": llm_gateway.status(),
             "llm_budget": llm_budget_manager.summary(),
             "ml_policy": ml_policy.version,
@@ -1109,6 +1112,9 @@ def create_app(
             ),
             "coordinator_paid_research_enabled": (
                 app_settings.coordinator_paid_research_enabled
+            ),
+            "coordinator_auto_shadow_enabled": (
+                app_settings.coordinator_auto_shadow_enabled
             ),
             "coordinator_market_lookback_days": (
                 app_settings.coordinator_initial_lookback_days
@@ -1769,6 +1775,9 @@ def create_app(
     @application.get("/v1/coordinator/status")
     def coordinator_status() -> dict[str, Any]:
         value: dict[str, Any] = application.state.coordinator.status()
+        value["auto_shadow_enabled"] = (
+            app_settings.coordinator_auto_shadow_enabled
+        )
         return value
 
     @application.get("/v1/market-scanner/status")

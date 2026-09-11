@@ -3,6 +3,9 @@
 - Status: accepted for production research remediation.
 - Date: 2026-09-08.
 
+> Amendment: ADR 0041 replaces separate human adoption/start for broker-free Shadow when the
+> opt-in coordinator control is enabled. Operator holds and Paper/live gates remain manual.
+
 ## Context
 
 Production completed many research cycles without surfacing a Shadow-reviewable strategy.
