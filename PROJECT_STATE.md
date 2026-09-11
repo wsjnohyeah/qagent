@@ -8,16 +8,17 @@
   ML + LLM strategy generation, and the authenticated Control Center/System Steward/shadow
   decision lineage. Phase 5 statistical promotion and Phase 6 continuous-operation exit
   criteria have not passed because current reports are Candidate-Shadow-only rather than
-  strictly Qualified and no adopted strategy has accumulated forward observation time.
+  strictly Qualified and forward observation history remains short.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `ec83c09d9898c93a06e9d40b74f24adce6caef73` image, PostgreSQL, Redis, API, Shadow worker,
+  `4fe2d71b372a3731140189a18450a7fa32f74ee6` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
-  and Alpaca Paper infrastructure are enabled. Seventeen explicitly approved Candidate Shadow
-  sleeves are active and every one of their 13 symbols is current through September 9. Eight of
+  and Alpaca Paper infrastructure are enabled. Eighteen Candidate Shadow sleeves are active:
+  one 5-session, twelve 126-session, and five 252-session strategies. Eight of
   the nine pre-open plans became virtual positions and NOK was deterministically cancelled because
-  its DAY limit was not touched. C092 is deployed and the audited runtime is resumed. There are no
+  its DAY limit was not touched. C094 is deployed, deterministic automatic Candidate/Qualified
+  Shadow admission is enabled, and the audited runtime is resumed. There are no
   Paper enrollments or orders. Live money remains structurally disabled.
 - The deployed remediation adds `research_gate@0.4.0`, horizon-specific
   Candidate Shadow activity minima, horizon-specific research-trial accounting, budget-
@@ -28,13 +29,16 @@
 - Autonomous research creates and resumes only 5/20/63/126/252-session groups. One-session
   daily-bar research remains an explicit/manual reproducibility path and is not represented as
   a minute-level intraday strategy.
-- The source now supports opt-in automatic broker-free Shadow admission: a current exact
+- Production now uses opt-in automatic broker-free Shadow admission: a current exact
   Candidate or Qualified result is idempotently adopted and started by the deterministic
   coordinator, while operator holds, Paper enrollment, Robinhood orders, and live money remain
-  outside that automation. This change awaits exact-SHA production deployment.
-- The first post-deployment autonomous group is a fresh 20-session cycle over all 20 Scanner
-  Trading Pool symbols. Its initial 42 completed stages had no failed or exhausted job; exact
-  strategy and validation outcomes remain pending and must not be inferred from job startup.
+  outside that automation.
+- The latest 20-session cycle completed all stages and produced six Candidate-reviewable
+  reports, but its scanner-pool revision became stale before the automatic rollout and was
+  correctly refused. The current 5-session cycle completed ML and Research LLM for all 20
+  symbols and is advancing through generation/validation. Its first current exact Candidate,
+  AAPL, was transition-activated into 5-session Shadow; subsequent current eligible results
+  will enter automatically.
 - Local-lite uses Python 3.12, a project-local `uv`, SQLite, and filesystem object storage.
 - The Control API, single-admin object-centric web console, persistent System Steward,
   append-only event ledger, deterministic risk engine, and shadow runtime exist.

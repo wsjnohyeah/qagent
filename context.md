@@ -6,12 +6,12 @@ Context format: v1
 
 Current phase: the unified research, Shadow, and Alpaca Paper foundations are deployed to a
 fresh production data plane. Paid ML + LLM research and source-specific historical backfill
-are active. The source now supports opt-in automatic admission of exact deterministic
-Candidate/Qualified results to broker-free Shadow; Paper enrollment remains separately
-human-confirmed and live money remains impossible. Off-site backup/alerting and statistical/
+are active. Production automatically admits exact deterministic Candidate/Qualified results
+to broker-free Shadow; Paper enrollment remains separately human-confirmed and live money
+remains impossible. Off-site backup/alerting and statistical/
 elapsed production evidence remain open.
 
-Current documented baseline: C094 — `Automate exact-strategy Shadow admission`
+Current documented baseline: C095 — `Record automatic Shadow admission rollout`
 
 ## Purpose and authority
 
@@ -2506,7 +2506,7 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 ### C028 — `Complete Phase 6.1 review remediation`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `4fe2d71b372a3731140189a18450a7fa32f74ee6`.
 - Date: 2026-09-05 PDT.
 - User intent: complete the locally implementable work before Phase 7, make LLM budget
   controls dollar-only, improve the Phase 6.1 object UI, and apply the independent
@@ -4816,12 +4816,38 @@ lifecycle. No Paper order was used as a build or deployment test.
   remains Paper-ineligible, no Paper enrollment is automatic, Robinhood order tools remain
   unused, and live money remains impossible.
 - Validation: `make check` passed Flake8, strict mypy across 61 source files, and all 214 tests;
-  `make doctor` and the secret scan passed. Exact-SHA CI and production deployment remain pending.
-- Expected global state after commit: code and documentation are ready for an immutable rollout;
-  production remains on C092 until CI and guarded deployment complete.
-- Corrections/follow-ups: after deployment, enable the setting in the protected production
-  environment, reconcile current eligible 20-session candidates, and verify future 5-session
-  results enter Shadow without an administrator confirmation.
+  `make doctor` and the secret scan passed. GitHub Actions run `34589210330` passed and published
+  the exact immutable image.
+- Expected global state after commit: the verified image can enable deterministic automatic
+  Candidate/Qualified Shadow admission without extending authority to Paper or live money.
+- Corrections/follow-ups: C095 records deployment and current-strategy reconciliation.
+
+### C095 — `Record automatic Shadow admission rollout`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-11 PDT.
+- User intent: make broker-free Shadow observation autonomous after ML + LLM construction and
+  exact deterministic validation, without requiring per-strategy human confirmation.
+- Scope: deploy C094, enable `COORDINATOR_AUTO_SHADOW_ENABLED=true` in the protected production
+  environment, resume the previously approved simulation runtime, and reconcile current
+  short-horizon candidates.
+- Architecture/decision impact: none beyond ADR 0041. Automatic admission remains downstream of
+  the current exact validation, universe, restriction, execution-contract, search-count, and
+  deterministic risk gates. Operator holds remain stronger than automation. Paper, Robinhood
+  mutation tools, and live money remain outside the transition.
+- Validation: GitHub Actions run `34589210330` passed for exact image
+  `4fe2d71b372a3731140189a18450a7fa32f74ee6`; guarded deployment passed API, Shadow worker,
+  coordinator, PostgreSQL, and Redis health gates. Public status reports the exact SHA,
+  `live_trading_enabled=false`, and automatic Shadow enabled. Six completed 20-session
+  certificates were correctly refused because their scanner-pool revision had become stale.
+  The current 5-session AAPL exact report passed Candidate eligibility and was transition-
+  activated; production now has 18 active Shadow deployments (1 five-session, 12 126-session,
+  5 252-session), eight open virtual positions, zero Paper enrollments, and zero Paper orders.
+- Global state after commit: future current exact Candidate/Qualified results auto-adopt and
+  auto-start in broker-free Shadow. The current 5-session group continues exact validation;
+  rejected, insufficient, or stale results remain out of Shadow.
+- Corrections/follow-ups: observe the first coordinator-recorded `AUTO_SHADOW_ACTIVE` result and
+  continue collecting forward evidence without describing Candidate status as proven alpha.
 
 ## Template for future commit entries
 
