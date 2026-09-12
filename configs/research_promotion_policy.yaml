@@ -1,7 +1,8 @@
-version: research_gate@0.4.0
+version: research_gate@0.5.0
 
-# These gates only determine eligibility for later human review. They never promote a
-# strategy or authorize shadow/paper execution automatically.
+# These gates determine evidence eligibility. A separately enabled deterministic coordinator
+# may auto-admit an exact eligible strategy to broker-free Shadow; the gate never authorizes
+# Paper, live money, or an LLM-controlled transition.
 minimum_oos_folds: 12
 minimum_active_oos_folds: 8
 minimum_oos_trades: 30
@@ -16,10 +17,13 @@ maximum_allowed_drawdown: -0.20
 # It may omit DSR/PBO thresholds, but still requires an exact static specification,
 # real OOS activity, positive cost-adjusted OOS return, and bounded drawdown.
 candidate_shadow_minimum_oos_folds: 6
-candidate_shadow_minimum_active_oos_folds: 3
-candidate_shadow_minimum_oos_trades: 10
+candidate_shadow_minimum_active_oos_folds: 4
+candidate_shadow_minimum_oos_trades: 30
 candidate_shadow_minimum_compounded_oos_return: 0
 candidate_shadow_maximum_allowed_drawdown: -0.20
+candidate_shadow_minimum_positive_active_oos_fold_rate: 0.50
+candidate_shadow_minimum_profit_factor: 1.10
+candidate_shadow_require_positive_return_without_best_trade: true
 
 # Candidate Shadow exists to collect broker-free forward evidence. Activity minima
 # scale with the number of independent windows a five-year history can actually
@@ -28,16 +32,24 @@ candidate_shadow_maximum_allowed_drawdown: -0.20
 candidate_shadow_horizon_thresholds:
   1:
     minimum_oos_folds: 6
-    minimum_active_oos_folds: 3
-    minimum_oos_trades: 10
+    minimum_active_oos_folds: 4
+    minimum_oos_trades: 30
+  2:
+    minimum_oos_folds: 6
+    minimum_active_oos_folds: 4
+    minimum_oos_trades: 25
   5:
     minimum_oos_folds: 6
-    minimum_active_oos_folds: 3
-    minimum_oos_trades: 8
+    minimum_active_oos_folds: 4
+    minimum_oos_trades: 20
+  10:
+    minimum_oos_folds: 6
+    minimum_active_oos_folds: 4
+    minimum_oos_trades: 15
   20:
     minimum_oos_folds: 5
     minimum_active_oos_folds: 3
-    minimum_oos_trades: 5
+    minimum_oos_trades: 10
   63:
     minimum_oos_folds: 4
     minimum_active_oos_folds: 2

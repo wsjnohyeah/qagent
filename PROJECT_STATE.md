@@ -11,27 +11,30 @@
   strictly Qualified and forward observation history remains short.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `819d41b0f0c3e0dfbe3bc159a7a4bfd4da02e9d6` image, PostgreSQL, Redis, API, Shadow worker,
+  `a84565d78e9bb14562de96d6905b76f1815dc57a` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled. The last pre-migration inspection found 106
   legacy shared-account Shadow deployments before migration. The confirmed migration retired
   97 flat deployments, cancelled the one unfilled plan, and placed nine open virtual positions
   into causal liquidation. New sandbox exposure is resumed behind the
-  `2026-09-14T13:30:00Z` boundary; no sandbox exists yet while new exact certificates are being
-  generated. C094 remains active,
+  `2026-09-14T13:30:00Z` boundary. One exact five-session SMCI sandbox has since been admitted
+  and remains flat before that boundary. C094 remains active,
   deterministic automatic Candidate/Qualified Shadow admission is enabled, and the audited
   runtime is resumed. There are no
   Paper enrollments or orders. Live money remains structurally disabled.
-- The deployed remediation adds `research_gate@0.4.0`, horizon-specific
+- Local source adds `research_gate@0.5.0`, horizon-specific
   Candidate Shadow activity minima, horizon-specific research-trial accounting, budget-
   independent revalidation of accepted specs, scanner-pool authorization at Shadow start,
+  at least 50% positive active OOS folds, profit factor at least 1.10, and a positive
+  compounded OOS return after removing the largest winner,
   a stricter Research LLM output prompt, and `llm_budget@0.2.0` with a `$40` critical/daily
   ceiling that preserves same-day spend across policy versions, single-attempt invalid LLM
   output handling, and leakage-safe annual ML under a six-year daily-bar target.
-- Autonomous research creates and resumes only 5/20/63/126/252-session groups. One-session
-  daily-bar research remains an explicit/manual reproducibility path and is not represented as
-  a minute-level intraday strategy.
+- Local autonomous research supports 1/2/5/10/20/63/126/252-session groups. Its deterministic
+  daily UTC schedule assigns 21 of 24 hourly slots to the 1/2/5/10/20-session core and one
+  background slot to each longer horizon. One-session research is a prior-completed-bar to
+  next-session-close contract, not a minute-level strategy.
 - Production now uses opt-in automatic broker-free Shadow admission: a current exact
   Candidate or Qualified result is idempotently adopted and started by the deterministic
   coordinator, while operator holds, Paper enrollment, Robinhood orders, and live money remain
@@ -158,8 +161,8 @@
   limit touch rechecks reward/risk and quantity, while an untouched order records no fill.
   Missed/late bars never become forward fills. Research-only buy-and-hold cannot be
   shadow-adopted.
-- Generated momentum and mean-reversion specifications may use immutable 1, 5, 20, 63, 126,
-  or 252-session horizons. The ML label, forecast, LLM proposal, replay, and exact validation
+- Generated momentum and mean-reversion specifications may use immutable 1, 2, 5, 10, 20, 63,
+  126, or 252-session horizons. The ML label, forecast, LLM proposal, replay, and exact validation
   share that horizon. Multi-session Shadow persists open-position accounting across restarts,
   checks stop/target on every completed bar, handles recorded splits/dividends, and exits at
   the maximum holding session. Global pause blocks new exposure but continues existing exits.
@@ -217,7 +220,8 @@
   containing the complete current profile and parameters can enroll. Paper remains off by
   default, account-pinned, single-lifecycle-per-symbol, and hard-pinned to the simulated host;
   the live host remains impossible.
-- A persistent hourly coordinator rotates through 5, 20, 63, 126, and 252-session
+- A persistent hourly coordinator allocates 21 of every 24 UTC-hour slots to 1, 2, 5, 10,
+  and 20-session research and one background slot to each 63, 126, and 252-session
   research horizons and owns the gap-repaired market-data → source-specific
   document history →
   feature → ML → forecast → Research LLM → constrained strategy → exact-validation →
@@ -247,8 +251,9 @@
   calibration and model selection, while the final holdout retains its separate 60-row
   promotion minimum. This makes 252-session training achievable for mature issuers without
   overlapping-label leakage; short-history issuers wait explicitly.
-  One-session daily-bar research remains available only as an explicit/manual experiment and
-  is not presented as true intraday research, which requires a separate minute-data contract.
+  One-session daily-bar research is autonomous but remains explicitly distinct from a
+  minute-data intraday strategy; it decides from the prior completed daily bar and exits no
+  later than the following session close.
 - Production daily bars target 2,192 days, while Alpaca News/SEC evidence target 1,826 days.
   News advances backward
   in bounded partitions (90-day default; current production override 180 days) while its
@@ -418,8 +423,8 @@
 2. Replace the temporary `sslip.io` hostname with the operator's permanent domain, select an
    off-site backup target and external alert destination, then automate both retention and
    notification checks.
-3. Deploy the reviewed `research_gate@0.4.0` correction, then let horizon-correct cycles
-   revalidate both new and previously accepted exact strategies,
+3. Deploy the reviewed `research_gate@0.5.0` robustness correction, then let horizon-correct
+   cycles revalidate both new and previously accepted exact strategies,
    and review any Candidate/Qualified Shadow eligibility without
    manufacturing a pass. Candidate deployments may gather broker-free forward evidence;
    only a Qualified one-session deployment may be separately enrolled in Paper.
@@ -491,6 +496,9 @@
 - ADR 0042: evaluate every immutable strategy in an isolated `$10,000` Shadow sandbox with
   2% current-equity risk, volatility-derived stop/target geometry, a 15% stop ceiling, zero
   explicit commission, and permanent retirement at an `$8,800` marked-value floor.
+- ADR 0043: prioritize autonomous 1/2/5/10/20-session research, retain low-frequency long
+  horizons, and require Candidate Shadow evidence to survive positive-fold, profit-factor,
+  and largest-winner-removal robustness checks.
 - ADR 0024: isolate Alpaca Paper behind an exact host, durable idempotent intents, account and
   risk reconciliation, and per-deployment administrator confirmation; retain no live path.
 - ADR 0025: reject Shadow certificates at the Paper boundary; require a separately validated

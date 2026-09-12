@@ -89,14 +89,18 @@ broker authority. An eligible exact strategy may enter broker-free Shadow automa
 that production control is enabled; bounded synthetic evidence is expected to fail its
 minimum-sample requirements.
 
-`research_gate@0.4.0` separates candidate-selection evidence from exact frozen-strategy
+`research_gate@0.5.0` separates candidate-selection evidence from exact frozen-strategy
 evidence. PBO and minimum candidate breadth apply to an adaptive selector; they are explicitly
 N/A for one static spec. Sparse strategies report total folds, active folds, no-trade folds,
 and OOS trades separately; only active folds enter the positive-fold stability ratio. Strict
 qualification still requires the configured coverage, activity, regime, drawdown, and
 search-trial-adjusted Deflated Sharpe thresholds. A separate Candidate Shadow tier may collect
-broker-free forward evidence after horizon-scaled minimum activity, positive
-cost-adjusted OOS performance, and bounded drawdown, but is never eligible for Alpaca Paper.
+broker-free forward evidence only after horizon-scaled minimum activity, positive
+cost-adjusted OOS performance, bounded drawdown, at least 50% positive active OOS folds,
+profit factor of at least 1.10, and positive OOS return after deleting the single largest
+winner. The last two robustness checks also bind strict qualification. Candidate is never
+eligible for Alpaca Paper. Validation also records the trade win rate and
+its 95% confidence interval; win rate is evidence, not a universal admission threshold.
 
 Phase 5A adds fail-closed market-data checks, explicit half-spread fill cost, governed
 corporate-action/universe imports, and durable resumable backfill partitions. These are
@@ -158,10 +162,12 @@ can create new exposure. It contains no broker client or order-submission path. 
 local data validates the workflow; production can run the same partitionable contracts over
 longer history.
 
-Strategy generation supports explicit 1, 5, 20, 63, 126, and 252-session horizons. Autonomous
-production research currently rotates through 5, 20, 63, 126, and 252 sessions; one-session
-research is retained only for explicit experiments until a distinct minute-data intraday
-contract exists. The ML label, forecast, Research LLM analysis, generated spec, backtest, validation certificate, and
+Strategy generation supports explicit 1, 2, 5, 10, 20, 63, 126, and 252-session horizons.
+Autonomous production research assigns 21 of each 24 hourly slots to 1/2/5/10/20-session
+strategies and one daily background slot to each longer horizon. A one-session strategy uses a
+completed prior-day bar, attempts a price-capped next-session entry, and exits no later than
+that session close; it is not a minute-level signal contract. The ML label, forecast, Research
+LLM analysis, generated spec, backtest, validation certificate, and
 Forward Shadow exit all bind to that same horizon. Multi-session Shadow positions persist
 across worker restarts and close on their stop, target, sandbox circuit, or maximum holding
 session. Stop distance is derived deterministically from point-in-time realized volatility,

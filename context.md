@@ -72,9 +72,11 @@ A Git commit cannot contain its own content-derived hash without changing that h
   both in and out of sample, with selection degradation, below-median selection rate, and
   realized-regime summaries retained rather than reporting only the winner.
 - Phase 3D adds combinatorial selection-risk/PBO diagnostics and Deflated Sharpe to every
-  report. `research_gate@0.4.0` distinguishes calendar folds, active folds, no-trade folds,
+  report. `research_gate@0.5.0` distinguishes calendar folds, active folds, no-trade folds,
   and OOS trades; no-trade windows no longer masquerade as losing windows in the stability
-  ratio. Candidate activity requirements scale with the 1/5/20/63/126/252-session horizon,
+  ratio. Candidate activity requirements scale with the 1/2/5/10/20/63/126/252-session
+  horizon. Candidate eligibility also requires at least 50% positive active folds, profit
+  factor of at least 1.10, and positive compounded return after deleting the largest winner,
   while profitability after costs and drawdown limits remain mandatory. A strict Qualified
   gate and a lower-authority Candidate Shadow gate can admit exact static results to configured
   broker-free Shadow automation. Neither gate promotes an ML model or grants Paper/live broker
@@ -100,10 +102,12 @@ A Git commit cannot contain its own content-derived hash without changing that h
   allowlisted momentum/mean-reversion parameters into an immutable research-only spec and
   has no code, sizing, adoption, risk, or order authority. Every accepted, rejected, or failed
   generation attempt is separately audited; unsupported DSL fields fail instead of disappearing.
-- The constrained generator and coordinator support 1, 5, 20, 63, 126, and 252-session
-  horizons. Autonomous production research prioritizes 5, 20, 63, 126, and 252 sessions;
-  one-session daily-bar research remains explicit/manual until a true minute-data intraday
-  contract exists. ML labels, forecasts, LLM analyses, proposals, immutable specs, replays, and exact
+- The constrained generator and coordinator support 1, 2, 5, 10, 20, 63, 126, and
+  252-session horizons. Autonomous production research assigns 21 of every 24 UTC-hour slots
+  to the 1/2/5/10/20-session core and one slot to each longer horizon. One-session daily-bar
+  research decides from the prior completed bar and exits no later than the following session
+  close; it is not a minute-data intraday contract. ML labels, forecasts, LLM analyses,
+  proposals, immutable specs, replays, and exact
   validation contracts must agree on the horizon. One-session strategies retain the original
   MOC profile; multi-session strategies use a separate timed-exit profile. Both derive
   stop/target geometry from point-in-time volatility, horizon, and strategy family, with a
@@ -252,8 +256,9 @@ A Git commit cannot contain its own content-derived hash without changing that h
 - Static exact-spec validation now has a subject-specific gate: multi-candidate breadth and
   PBO are N/A rather than impossible requirements, while total/active folds, OOS trades,
   regimes, drawdown, positive-active-OOS rate and Deflated Sharpe remain enforced. Candidate
-  Shadow separately requires minimum activity, positive cost-adjusted compounded OOS return,
-  and bounded drawdown. Deflated Sharpe uses the recorded market-
+  Shadow separately requires horizon-scaled activity, positive cost-adjusted compounded OOS
+  return, bounded drawdown, at least 50% positive active folds, profit factor of at least 1.10,
+  and positive return after removing the single largest winner. Deflated Sharpe uses the recorded market-
   contract search count, including failed/rejected hybrid attempts, rather than the size of
   the submitted candidate list.
 - Daily ML labels use the real exchange-session entry open and exit availability boundary.
@@ -701,9 +706,11 @@ only training metrics, while every test result is retained for rank and selectio
 analysis. Realized test returns define transparent up/down/sideways report buckets; they do
 not feed the strategy. Phase 3D resamples selection across the already embargoed,
 non-overlapping OOS folds, records PBO and Deflated Sharpe diagnostics, and applies the
-versioned `research_gate@0.4.0` policy. Search trials are counted within one
+versioned `research_gate@0.5.0` policy. Search trials are counted within one
 symbol/timeframe/holding-horizon family. The gate is advisory eligibility only and cannot
-promote a candidate; Candidate Shadow is a separate broker-free observation tier.
+promote a candidate; Candidate Shadow is a separate broker-free observation tier. Its report
+also records OOS trade win rate with a Wilson 95% interval, profit factor, largest-winner
+concentration, and return after removing that winner.
 
 The front-loaded Phase 4A gateway gives OpenAI and Meta one internal Responses-style
 contract. `configs/model_routing.yaml` sends critical research/generation/critique to the
@@ -787,7 +794,8 @@ migration preserves but retires the former shared-account history. Paper remains
 portfolio/broker test.
 
 Strategy horizon is now a first-class immutable contract rather than an implied one-bar
-default. The coordinator rotates through 1/5/20/63/126/252-session ML labels; the Research LLM
+default. The coordinator prioritizes 1/2/5/10/20-session ML labels and runs each
+63/126/252-session horizon once per UTC day; the Research LLM
 and constrained generator must use the same horizon. Each runtime stage reconstructs that
 context from the immutable job payload, so a dependency result cannot silently erase it.
 Replay and validation select either the
@@ -4929,6 +4937,47 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: deploy C097 after exact-SHA CI so the transition UI counts all open
   positions; after Monday's completed bar, verify nine legacy exits and report which newly
   validated sandboxes actually created or filled plans.
+
+### C098 — `Prioritize robust short-horizon research`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-12 PDT.
+- User intent: concentrate autonomous research on strategies that can accumulate forward
+  evidence in days or weeks; add 2/10-session strategies; retain long research at lower
+  frequency; and prevent a small sample or one extraordinary winner from carrying a strategy
+  into Shadow.
+- Scope: extend the immutable ML/LLM/spec/replay/validation/Shadow horizon contract to
+  1/2/5/10/20/63/126/252 sessions; allocate 21 of 24 UTC-hour scheduler slots to the short
+  core and one to each long horizon; add 2/10-session validation windows and volatility
+  multipliers; upgrade to `research_gate@0.5.0`; record OOS trade win rate with a Wilson 95%
+  interval, profit factor, mean/median trade return, largest-winner concentration, and
+  compounded return after removing the largest winner; require horizon-scaled activity,
+  at least 50% positive active folds, profit factor at least 1.10, positive ordinary and
+  best-trade-removed OOS return, and the existing drawdown bound; expose the definitions and
+  metrics in Strategy UI and System Steward evidence; update the ADRs and runbooks.
+- Architecture/decision impact: ADR 0043 supersedes ADR 0039's exclusion of one-session
+  autonomous research and ADR 0035's six-horizon schedule. One-session remains a daily-bar
+  prior-close-to-next-session-close contract rather than a minute-data intraday system. Win
+  rate remains visible but is not a universal cutoff because realized payoff ratio determines
+  break-even probability. Profit-factor and largest-winner checks apply to both Candidate and
+  strict Qualified Shadow so the latter cannot bypass the new robustness invariant. The policy
+  hash invalidates prior admission certificates without rewriting their evidence.
+- Validation: `make release-check` passed Flake8, strict mypy across 61 source files, all 219
+  tests, authenticated local doctor, secret scan, Compose rebuild/doctor, and PostgreSQL
+  Alembic zero-drift. Focused regressions prove 2/10 horizon propagation, the 21/3 scheduler
+  allocation, horizon-specific sample minima, win-rate interval persistence, and rejection of
+  low-stability, low-profit-factor, or largest-winner-dependent candidates. The deterministic
+  validation smoke persisted all new metrics and remained explicitly insufficient at four OOS
+  folds/four trades rather than manufacturing eligibility.
+- Global state after commit: source is ready for exact-SHA CI and guarded deployment. Existing
+  immutable validations remain historical but cannot admit new exposure under
+  `research_gate@0.5.0`; the coordinator must create fresh exact reports. Existing open virtual
+  positions retain their persisted risk-reducing exit contracts. Paper enrollment, Robinhood
+  mutation, and live money are unchanged and remain disabled or separately gated.
+- Corrections/follow-ups: after exact-SHA publication, back up production, deploy paused,
+  verify the existing flat SMCI sandbox becomes revalidation-required under the new policy,
+  resume the already approved broker-free workflow, and record runtime evidence in the next
+  context entry.
 
 ## Template for future commit entries
 

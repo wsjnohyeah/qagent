@@ -131,7 +131,7 @@ assessment can only return `INSUFFICIENT_EVIDENCE`, `REJECTED`, or
 Candidate Shadow eligibility, which is an observation-only deterministic gate rather than a
 statistical qualification. The bounded smoke sample is intentionally too small for either.
 
-`research_gate@0.4.0` distinguishes two subjects. An `adaptive_selector` must satisfy the
+`research_gate@0.5.0` distinguishes two subjects. An `adaptive_selector` must satisfy the
 configured candidate breadth and PBO threshold. A frozen `static_strategy` has no within-
 report selection contest, so candidate count and PBO are explicitly N/A; it must still pass
 the total-fold, active-fold, trade-count, regime, drawdown, positive-active-OOS, and Deflated
@@ -139,8 +139,11 @@ Sharpe requirements. No-trade folds remain counted and displayed but are not tre
 losing folds. Deflated Sharpe uses the recorded search-trial count for the same
 symbol/timeframe/holding-horizon family, including rejected and failed hybrid attempts.
 Candidate Shadow additionally requires an exact static spec, horizon-scaled minimum activity,
-positive cost-adjusted compounded OOS return, and bounded drawdown; it does not satisfy the
-strict gate and cannot reach Paper.
+positive cost-adjusted compounded OOS return, bounded drawdown, at least 50% positive active
+OOS folds, profit factor of at least 1.10, and positive return after removing the single
+largest winning trade. Reports retain trade win rate with a Wilson 95% interval, but do not
+use a universal win-rate cutoff because payoff asymmetry determines break-even win rate. A
+Candidate result does not satisfy the strict gate and cannot reach Paper.
 
 This is a bias-detection baseline, not a claim that the selected strategy generalizes.
 Inspect reports with:

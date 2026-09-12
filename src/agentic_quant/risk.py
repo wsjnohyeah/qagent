@@ -72,13 +72,15 @@ BASELINE_EXECUTION_PROFILE_VERSION = (
 MULTI_SESSION_EXECUTION_PROFILE_VERSION = (
     "next_session_day_limit_bracket_timed_exit@0.1.0"
 )
-SUPPORTED_HOLDING_PERIOD_SESSIONS = (1, 5, 20, 63, 126, 252)
+SUPPORTED_HOLDING_PERIOD_SESSIONS = (1, 2, 5, 10, 20, 63, 126, 252)
 MULTI_SESSION_STOP_FRACTION = Decimal("0.125")
 VOLATILITY_GEOMETRY_VERSION = "realized_volatility_geometry@0.1.0"
 _SQRT_252 = Decimal("252").sqrt()
 _HORIZON_STOP_MULTIPLIERS = {
     1: Decimal("1.50"),
+    2: Decimal("1.75"),
     5: Decimal("2.00"),
+    10: Decimal("2.35"),
     20: Decimal("2.75"),
     63: Decimal("3.50"),
     126: Decimal("4.00"),

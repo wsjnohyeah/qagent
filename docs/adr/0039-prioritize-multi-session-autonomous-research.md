@@ -3,6 +3,10 @@
 - Status: accepted
 - Date: 2026-09-08 PDT
 
+The production scheduling decision below is superseded by ADR 0043. One-session daily-bar
+research is now part of the short-horizon autonomous core, while remaining distinct from a
+minute-data intraday strategy.
+
 ## Context
 
 The one-session strategy contract forms its signal from completed daily bars, enters at the

@@ -22,7 +22,7 @@ Current state: the validator, Shadow simulator, and broker runtime emit and requ
 closed and must be regenerated; never edit a certificate to bypass this check.
 
 This Paper contract is intentionally one-session-only. Research, validation, and Forward
-Shadow also support 5, 20, 63, 126, and 252-session positions, but those deployments cannot
+Shadow also support 2, 5, 10, 20, 63, 126, and 252-session positions, but those deployments cannot
 enroll in Paper yet. Paper needs a separately validated lifecycle that expires an unfilled
 entry after the next session while preserving GTC stop/target protection and a recoverable
 timed exit for a filled position.

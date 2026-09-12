@@ -1173,7 +1173,9 @@ class ResearchCoordinatorHandler:
             )
         train_bars, test_bars = {
             1: (40, 10),
+            2: (60, 15),
             5: (80, 20),
+            10: (120, 40),
             20: (160, 60),
             63: (252, 126),
             126: (378, 252),

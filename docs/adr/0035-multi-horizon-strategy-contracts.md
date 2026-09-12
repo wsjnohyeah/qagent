@@ -5,6 +5,8 @@
 
 The fixed 12.5% stop in decision 5 is superseded by ADR 0042. Multi-session Shadow now uses
 versioned point-in-time volatility geometry with a hard 15% stop-distance ceiling.
+The six-horizon set and equal autonomous rotation in decisions 1–2 are superseded by ADR 0043,
+which adds 2/10-session contracts and prioritizes 1/2/5/10/20-session research.
 
 ## Context
 

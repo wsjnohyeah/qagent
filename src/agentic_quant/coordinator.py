@@ -26,11 +26,48 @@ COORDINATOR_STAGES = (
 COORDINATOR_STAGE_ORDER = {
     stage: order for order, stage in enumerate(COORDINATOR_STAGES)
 }
-COORDINATOR_RESEARCH_HORIZONS = (1, 5, 20, 63, 126, 252)
-# One-session strategies remain available for explicit research and historical
-# comparison, but production automation prioritizes multi-session horizons until
-# a separate minute-data intraday pipeline exists.
-AUTONOMOUS_RESEARCH_HORIZONS = (5, 20, 63, 126, 252)
+COORDINATOR_RESEARCH_HORIZONS = (1, 2, 5, 10, 20, 63, 126, 252)
+AUTONOMOUS_CORE_RESEARCH_HORIZONS = (1, 2, 5, 10, 20)
+AUTONOMOUS_LONG_RESEARCH_HORIZONS = (63, 126, 252)
+AUTONOMOUS_RESEARCH_HORIZONS = COORDINATOR_RESEARCH_HORIZONS
+# Daily bars can support a causally next-session, same-session-close strategy even
+# though they cannot support an intraday signal model. Allocate 21 of 24 hourly
+# cycles to the short research horizons and retain one daily background cycle for
+# each long horizon. The schedule is explicit so a restart cannot silently alter
+# research allocation.
+AUTONOMOUS_RESEARCH_SCHEDULE = (
+    1,
+    2,
+    5,
+    10,
+    20,
+    1,
+    2,
+    5,
+    10,
+    20,
+    1,
+    2,
+    5,
+    10,
+    20,
+    1,
+    2,
+    5,
+    10,
+    20,
+    63,
+    126,
+    252,
+    5,
+)
+
+
+def autonomous_research_horizon(as_of: datetime) -> int:
+    if as_of.tzinfo is None:
+        raise ValueError("Coordinator cutoff must be timezone-aware")
+    return AUTONOMOUS_RESEARCH_SCHEDULE[as_of.astimezone(UTC).hour]
+
 
 CoordinatorHandler = Callable[
     [WorkflowJob, tuple[WorkflowJob, ...]], Awaitable[dict[str, Any]]

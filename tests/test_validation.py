@@ -44,6 +44,7 @@ from agentic_quant.validation import (
     continuous_oos_equity_and_drawdown,
     combinatorial_purged_diagnostics,
     deflated_sharpe_diagnostics,
+    load_promotion_gate_policy,
     promotion_policy_sha256,
     validation_execution_contract,
     validation_input_fingerprint,
@@ -51,6 +52,15 @@ from agentic_quant.validation import (
 from agentic_quant.risk import RestrictionRegistry, RiskPolicy
 from agentic_quant.shadow import ShadowRuntime
 from agentic_quant.virtual_account import MAIN_VIRTUAL_ACCOUNT_ID
+
+
+def test_tracked_promotion_policy_matches_code_default(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    assert (
+        load_promotion_gate_policy(settings.research_promotion_policy_path)
+        == DEFAULT_PROMOTION_GATE_POLICY
+    )
 
 
 def test_continuous_oos_drawdown_keeps_intrafold_loss_and_cross_fold_peak() -> None:
@@ -490,6 +500,9 @@ def test_real_static_validation_can_reach_adoption_and_shadow_start(
         candidate_shadow_minimum_oos_trades=1,
         candidate_shadow_minimum_compounded_oos_return=Decimal("-1"),
         candidate_shadow_maximum_allowed_drawdown=Decimal("-1"),
+        candidate_shadow_minimum_positive_active_oos_fold_rate=Decimal("0"),
+        candidate_shadow_minimum_profit_factor=Decimal("0"),
+        candidate_shadow_require_positive_return_without_best_trade=False,
     )
     validator = WalkForwardValidator(
         store,
@@ -825,6 +838,9 @@ def test_strictly_rejected_strategy_can_enter_candidate_shadow_only(
         candidate_shadow_minimum_oos_trades=1,
         candidate_shadow_minimum_compounded_oos_return=Decimal("-1"),
         candidate_shadow_maximum_allowed_drawdown=Decimal("-1"),
+        candidate_shadow_minimum_positive_active_oos_fold_rate=Decimal("0"),
+        candidate_shadow_minimum_profit_factor=Decimal("0"),
+        candidate_shadow_require_positive_return_without_best_trade=False,
     )
     restrictions = RestrictionRegistry.from_yaml(
         settings.restricted_securities_path
@@ -851,6 +867,18 @@ def test_strictly_rejected_strategy_can_enter_candidate_shadow_only(
     assert report.gate_assessment["candidate_shadow"][
         "eligible_for_human_review"
     ] is True
+    assert report.aggregate_metrics["oos_trade_count"] > 0
+    assert (
+        report.aggregate_metrics["oos_trade_win_rate_lower_95"]
+        <= report.aggregate_metrics["oos_trade_win_rate"]
+        <= report.aggregate_metrics["oos_trade_win_rate_upper_95"]
+    )
+    assert "compounded_oos_return_excluding_best_trade" in (
+        report.aggregate_metrics
+    )
+    assert Decimal(
+        str(report.aggregate_metrics["compounded_oos_return_excluding_best_trade"])
+    ) <= Decimal(str(report.aggregate_metrics["compounded_selected_oos_return"]))
     objects = SystemObjectStore(ledger.engine, ledger)
     objects.ensure_defaults()
     shadow = ShadowRuntime(
@@ -1011,6 +1039,9 @@ def test_validation_cache_and_adoption_require_current_gate_assessment(
         candidate_shadow_minimum_oos_trades=1,
         candidate_shadow_minimum_compounded_oos_return=Decimal("-1"),
         candidate_shadow_maximum_allowed_drawdown=Decimal("-1"),
+        candidate_shadow_minimum_positive_active_oos_fold_rate=Decimal("0"),
+        candidate_shadow_minimum_profit_factor=Decimal("0"),
+        candidate_shadow_require_positive_return_without_best_trade=False,
     )
     restrictions = RestrictionRegistry.from_yaml(
         settings.restricted_securities_path
@@ -1499,6 +1530,9 @@ def test_research_gate_never_auto_promotes_and_requires_enough_evidence() -> Non
         candidate_shadow_minimum_oos_trades=1,
         candidate_shadow_minimum_compounded_oos_return=Decimal("0"),
         candidate_shadow_maximum_allowed_drawdown=Decimal("-0.20"),
+        candidate_shadow_minimum_positive_active_oos_fold_rate=Decimal("0.50"),
+        candidate_shadow_minimum_profit_factor=Decimal("1.10"),
+        candidate_shadow_require_positive_return_without_best_trade=True,
     )
     eligible = assess_research_gate(
         policy=policy,
@@ -1509,6 +1543,8 @@ def test_research_gate_never_auto_promotes_and_requires_enough_evidence() -> Non
         regime_count=3,
         positive_active_fold_rate=Decimal("0.75"),
         compounded_oos_return=Decimal("0.10"),
+        compounded_oos_return_excluding_best_trade=Decimal("0.08"),
+        oos_profit_factor=Decimal("1.50"),
         worst_drawdown=Decimal("-0.10"),
         probability_of_backtest_overfitting=Decimal("0.10"),
         deflated_sharpe_probability=Decimal("0.97"),
@@ -1522,6 +1558,8 @@ def test_research_gate_never_auto_promotes_and_requires_enough_evidence() -> Non
         regime_count=1,
         positive_active_fold_rate=Decimal("0.75"),
         compounded_oos_return=Decimal("0.10"),
+        compounded_oos_return_excluding_best_trade=Decimal("0.08"),
+        oos_profit_factor=Decimal("1.50"),
         worst_drawdown=Decimal("-0.10"),
         probability_of_backtest_overfitting=Decimal("0.10"),
         deflated_sharpe_probability=Decimal("0.97"),
@@ -1548,6 +1586,9 @@ def test_static_strategy_gate_treats_candidate_count_and_pbo_as_not_applicable()
         candidate_shadow_minimum_oos_trades=1,
         candidate_shadow_minimum_compounded_oos_return=Decimal("0"),
         candidate_shadow_maximum_allowed_drawdown=Decimal("-0.20"),
+        candidate_shadow_minimum_positive_active_oos_fold_rate=Decimal("0.50"),
+        candidate_shadow_minimum_profit_factor=Decimal("1.10"),
+        candidate_shadow_require_positive_return_without_best_trade=True,
     )
     result = assess_research_gate(
         policy=policy,
@@ -1558,6 +1599,8 @@ def test_static_strategy_gate_treats_candidate_count_and_pbo_as_not_applicable()
         regime_count=3,
         positive_active_fold_rate=Decimal("0.75"),
         compounded_oos_return=Decimal("0.10"),
+        compounded_oos_return_excluding_best_trade=Decimal("0.08"),
+        oos_profit_factor=Decimal("1.50"),
         worst_drawdown=Decimal("-0.10"),
         probability_of_backtest_overfitting=Decimal("0"),
         deflated_sharpe_probability=Decimal("0.97"),
@@ -1588,6 +1631,9 @@ def test_sparse_strategy_uses_active_folds_and_can_enter_candidate_shadow() -> N
         candidate_shadow_minimum_oos_trades=5,
         candidate_shadow_minimum_compounded_oos_return=Decimal("0"),
         candidate_shadow_maximum_allowed_drawdown=Decimal("-0.20"),
+        candidate_shadow_minimum_positive_active_oos_fold_rate=Decimal("0.50"),
+        candidate_shadow_minimum_profit_factor=Decimal("1.10"),
+        candidate_shadow_require_positive_return_without_best_trade=True,
     )
 
     result = assess_research_gate(
@@ -1599,6 +1645,8 @@ def test_sparse_strategy_uses_active_folds_and_can_enter_candidate_shadow() -> N
         regime_count=3,
         positive_active_fold_rate=Decimal("0.50"),
         compounded_oos_return=Decimal("0.03"),
+        compounded_oos_return_excluding_best_trade=Decimal("0.01"),
+        oos_profit_factor=Decimal("1.20"),
         worst_drawdown=Decimal("-0.10"),
         probability_of_backtest_overfitting=Decimal("0"),
         deflated_sharpe_probability=Decimal("0.40"),
@@ -1617,6 +1665,16 @@ def test_sparse_strategy_uses_active_folds_and_can_enter_candidate_shadow() -> N
 
 
 def test_candidate_shadow_activity_thresholds_scale_with_holding_horizon() -> None:
+    assert DEFAULT_PROMOTION_GATE_POLICY.candidate_thresholds_for(2).model_dump() == {
+        "minimum_oos_folds": 6,
+        "minimum_active_oos_folds": 4,
+        "minimum_oos_trades": 25,
+    }
+    assert DEFAULT_PROMOTION_GATE_POLICY.candidate_thresholds_for(10).model_dump() == {
+        "minimum_oos_folds": 6,
+        "minimum_active_oos_folds": 4,
+        "minimum_oos_trades": 15,
+    }
     short = assess_research_gate(
         policy=DEFAULT_PROMOTION_GATE_POLICY,
         fold_count=7,
@@ -1626,6 +1684,8 @@ def test_candidate_shadow_activity_thresholds_scale_with_holding_horizon() -> No
         regime_count=2,
         positive_active_fold_rate=Decimal("0.8"),
         compounded_oos_return=Decimal("0.004"),
+        compounded_oos_return_excluding_best_trade=Decimal("0.002"),
+        oos_profit_factor=Decimal("1.20"),
         worst_drawdown=Decimal("-0.01"),
         probability_of_backtest_overfitting=Decimal("0"),
         deflated_sharpe_probability=Decimal("0.4"),
@@ -1642,6 +1702,8 @@ def test_candidate_shadow_activity_thresholds_scale_with_holding_horizon() -> No
         regime_count=2,
         positive_active_fold_rate=Decimal("0.8"),
         compounded_oos_return=Decimal("0.004"),
+        compounded_oos_return_excluding_best_trade=Decimal("0.002"),
+        oos_profit_factor=Decimal("1.20"),
         worst_drawdown=Decimal("-0.01"),
         probability_of_backtest_overfitting=Decimal("0"),
         deflated_sharpe_probability=Decimal("0.4"),
@@ -1659,3 +1721,56 @@ def test_candidate_shadow_activity_thresholds_scale_with_holding_horizon() -> No
         "minimum_active_oos_folds": 2,
         "minimum_oos_trades": 3,
     }
+
+
+def test_candidate_shadow_rejects_outlier_dependent_or_unstable_returns() -> None:
+    common = {
+        "policy": DEFAULT_PROMOTION_GATE_POLICY,
+        "fold_count": 12,
+        "active_fold_count": 8,
+        "oos_trade_count": 30,
+        "candidate_count": 1,
+        "regime_count": 3,
+        "compounded_oos_return": Decimal("0.08"),
+        "worst_drawdown": Decimal("-0.10"),
+        "probability_of_backtest_overfitting": Decimal("0"),
+        "deflated_sharpe_probability": Decimal("0.40"),
+        "pbo_applicable": False,
+        "validation_subject": "static_strategy",
+        "holding_period_sessions": 1,
+    }
+    one_hit = assess_research_gate(
+        **common,
+        positive_active_fold_rate=Decimal("0.625"),
+        compounded_oos_return_excluding_best_trade=Decimal("-0.02"),
+        oos_profit_factor=Decimal("1.30"),
+    )
+    unstable = assess_research_gate(
+        **common,
+        positive_active_fold_rate=Decimal("0.375"),
+        compounded_oos_return_excluding_best_trade=Decimal("0.01"),
+        oos_profit_factor=Decimal("1.30"),
+    )
+    weak_payoff = assess_research_gate(
+        **common,
+        positive_active_fold_rate=Decimal("0.625"),
+        compounded_oos_return_excluding_best_trade=Decimal("0.01"),
+        oos_profit_factor=Decimal("1.05"),
+    )
+    robust = assess_research_gate(
+        **common,
+        positive_active_fold_rate=Decimal("0.625"),
+        compounded_oos_return_excluding_best_trade=Decimal("0.01"),
+        oos_profit_factor=Decimal("1.30"),
+    )
+
+    assert one_hit["candidate_shadow"]["status"] == "REJECTED"
+    assert (
+        "compounded_oos_return_excluding_best_trade is not positive"
+        in one_hit["threshold_failures"]
+    )
+    assert unstable["candidate_shadow"]["status"] == "REJECTED"
+    assert weak_payoff["candidate_shadow"]["status"] == "REJECTED"
+    assert robust["candidate_shadow"]["status"] == (
+        "ELIGIBLE_FOR_CANDIDATE_SHADOW_REVIEW"
+    )

@@ -31,6 +31,7 @@ from agentic_quant.control_plane import SystemObjectStore
 from agentic_quant.coordinator import (
     AUTONOMOUS_RESEARCH_HORIZONS,
     AutonomousCoordinator,
+    autonomous_research_horizon,
 )
 from agentic_quant.coordinator_runtime import ResearchCoordinatorHandler
 from agentic_quant.document_ingestion import (
@@ -851,10 +852,9 @@ def create_app(
                                 result = None
                             else:
                                 cycle_as_of = datetime.now(UTC)
-                                research_horizon = AUTONOMOUS_RESEARCH_HORIZONS[
-                                    cycle_as_of.hour
-                                    % len(AUTONOMOUS_RESEARCH_HORIZONS)
-                                ]
+                                research_horizon = autonomous_research_horizon(
+                                    cycle_as_of
+                                )
                                 result = await coordinator.run_once(
                                     symbols=symbols,
                                     as_of=cycle_as_of,

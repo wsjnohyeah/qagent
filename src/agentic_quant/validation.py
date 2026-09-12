@@ -155,6 +155,12 @@ class PromotionGatePolicy(FrozenModel):
     candidate_shadow_minimum_oos_trades: int = Field(ge=1)
     candidate_shadow_minimum_compounded_oos_return: Decimal = Field(ge=-1)
     candidate_shadow_maximum_allowed_drawdown: Decimal = Field(le=0)
+    candidate_shadow_minimum_positive_active_oos_fold_rate: Decimal = Field(
+        ge=0,
+        le=1,
+    )
+    candidate_shadow_minimum_profit_factor: Decimal = Field(ge=0)
+    candidate_shadow_require_positive_return_without_best_trade: bool
     candidate_shadow_horizon_thresholds: dict[int, CandidateShadowThresholds] = (
         Field(default_factory=dict)
     )
@@ -169,7 +175,9 @@ class PromotionGatePolicy(FrozenModel):
             )
         unknown_horizons = set(self.candidate_shadow_horizon_thresholds) - {
             1,
+            2,
             5,
+            10,
             20,
             63,
             126,
@@ -198,7 +206,7 @@ class PromotionGatePolicy(FrozenModel):
 
 
 DEFAULT_PROMOTION_GATE_POLICY = PromotionGatePolicy(
-    version="research_gate@0.4.0",
+    version="research_gate@0.5.0",
     minimum_oos_folds=12,
     minimum_active_oos_folds=8,
     minimum_oos_trades=30,
@@ -209,25 +217,38 @@ DEFAULT_PROMOTION_GATE_POLICY = PromotionGatePolicy(
     minimum_positive_active_oos_fold_rate=Decimal("0.55"),
     maximum_allowed_drawdown=Decimal("-0.20"),
     candidate_shadow_minimum_oos_folds=6,
-    candidate_shadow_minimum_active_oos_folds=3,
-    candidate_shadow_minimum_oos_trades=10,
+    candidate_shadow_minimum_active_oos_folds=4,
+    candidate_shadow_minimum_oos_trades=30,
     candidate_shadow_minimum_compounded_oos_return=Decimal("0"),
     candidate_shadow_maximum_allowed_drawdown=Decimal("-0.20"),
+    candidate_shadow_minimum_positive_active_oos_fold_rate=Decimal("0.50"),
+    candidate_shadow_minimum_profit_factor=Decimal("1.10"),
+    candidate_shadow_require_positive_return_without_best_trade=True,
     candidate_shadow_horizon_thresholds={
         1: CandidateShadowThresholds(
             minimum_oos_folds=6,
-            minimum_active_oos_folds=3,
-            minimum_oos_trades=10,
+            minimum_active_oos_folds=4,
+            minimum_oos_trades=30,
+        ),
+        2: CandidateShadowThresholds(
+            minimum_oos_folds=6,
+            minimum_active_oos_folds=4,
+            minimum_oos_trades=25,
         ),
         5: CandidateShadowThresholds(
             minimum_oos_folds=6,
-            minimum_active_oos_folds=3,
-            minimum_oos_trades=8,
+            minimum_active_oos_folds=4,
+            minimum_oos_trades=20,
+        ),
+        10: CandidateShadowThresholds(
+            minimum_oos_folds=6,
+            minimum_active_oos_folds=4,
+            minimum_oos_trades=15,
         ),
         20: CandidateShadowThresholds(
             minimum_oos_folds=5,
             minimum_active_oos_folds=3,
-            minimum_oos_trades=5,
+            minimum_oos_trades=10,
         ),
         63: CandidateShadowThresholds(
             minimum_oos_folds=4,
@@ -457,6 +478,8 @@ def assess_research_gate(
     regime_count: int,
     positive_active_fold_rate: Decimal,
     compounded_oos_return: Decimal,
+    compounded_oos_return_excluding_best_trade: Decimal,
+    oos_profit_factor: Decimal,
     worst_drawdown: Decimal,
     probability_of_backtest_overfitting: Decimal,
     deflated_sharpe_probability: Decimal,
@@ -511,6 +534,15 @@ def assess_research_gate(
         )
     if worst_drawdown < policy.maximum_allowed_drawdown:
         threshold_failures.append("worst_selected_oos_drawdown exceeds policy loss limit")
+    if oos_profit_factor < policy.candidate_shadow_minimum_profit_factor:
+        threshold_failures.append("oos_profit_factor is below the minimum")
+    if (
+        policy.candidate_shadow_require_positive_return_without_best_trade
+        and compounded_oos_return_excluding_best_trade <= _ZERO
+    ):
+        threshold_failures.append(
+            "compounded_oos_return_excluding_best_trade is not positive"
+        )
     if evidence_shortfalls:
         status = "INSUFFICIENT_EVIDENCE"
     elif threshold_failures:
@@ -546,6 +578,24 @@ def assess_research_gate(
         candidate_threshold_failures.append(
             "compounded_selected_oos_return is not above the candidate minimum"
         )
+    if (
+        positive_active_fold_rate
+        < policy.candidate_shadow_minimum_positive_active_oos_fold_rate
+    ):
+        candidate_threshold_failures.append(
+            "positive_active_oos_fold_rate is below the candidate minimum"
+        )
+    if oos_profit_factor < policy.candidate_shadow_minimum_profit_factor:
+        candidate_threshold_failures.append(
+            "oos_profit_factor is below the candidate minimum"
+        )
+    if (
+        policy.candidate_shadow_require_positive_return_without_best_trade
+        and compounded_oos_return_excluding_best_trade <= _ZERO
+    ):
+        candidate_threshold_failures.append(
+            "compounded_oos_return_excluding_best_trade is not positive"
+        )
     if worst_drawdown < policy.candidate_shadow_maximum_allowed_drawdown:
         candidate_threshold_failures.append(
             "worst_selected_oos_drawdown exceeds the candidate loss limit"
@@ -569,6 +619,17 @@ def assess_research_gate(
         "candidate_shadow": {
             "holding_period_sessions": holding_period_sessions,
             "activity_thresholds": candidate_thresholds.model_dump(mode="json"),
+            "robustness_thresholds": {
+                "minimum_positive_active_oos_fold_rate": str(
+                    policy.candidate_shadow_minimum_positive_active_oos_fold_rate
+                ),
+                "minimum_profit_factor": str(
+                    policy.candidate_shadow_minimum_profit_factor
+                ),
+                "require_positive_return_without_best_trade": (
+                    policy.candidate_shadow_require_positive_return_without_best_trade
+                ),
+            },
             "status": candidate_status,
             "eligible_for_human_review": (
                 candidate_status == "ELIGIBLE_FOR_CANDIDATE_SHADOW_REVIEW"
@@ -582,6 +643,91 @@ def assess_research_gate(
 
 def _mean(values: list[Decimal]) -> Decimal:
     return sum(values, _ZERO) / Decimal(len(values)) if values else _ZERO
+
+
+def oos_trade_robustness(
+    results: tuple[BacktestResult, ...],
+) -> dict[str, Decimal | int | str]:
+    """Summarize selected OOS trades and remove the largest winner once.
+
+    Every validation fold starts with the same capital. Multiplying its final-equity
+    factor reconstructs the report's compounded return. For the sensitivity check,
+    the largest positive trade is subtracted from its own fold before compounding.
+    This makes a one-hit strategy fail even when its unadjusted total is positive.
+    """
+    indexed_trades = [
+        (result_index, trade)
+        for result_index, result in enumerate(results)
+        for trade in result.trades
+    ]
+    trades = [trade for _, trade in indexed_trades]
+    trade_count = len(trades)
+    wins = [trade for trade in trades if trade.net_pnl > _ZERO]
+    losses = [trade for trade in trades if trade.net_pnl < _ZERO]
+    gross_profit = sum((trade.net_pnl for trade in wins), _ZERO)
+    gross_loss = -sum((trade.net_pnl for trade in losses), _ZERO)
+    profit_factor = (
+        gross_profit / gross_loss
+        if gross_loss > _ZERO
+        else (Decimal("999999") if gross_profit > _ZERO else _ZERO)
+    )
+    trade_returns = [
+        trade.net_pnl / (Decimal(trade.quantity) * trade.entry_price)
+        for trade in trades
+    ]
+    best_result_index: int | None = None
+    best_trade_pnl = _ZERO
+    if wins:
+        best_result_index, best_trade = max(
+            ((index, trade) for index, trade in indexed_trades if trade.net_pnl > _ZERO),
+            key=lambda item: item[1].net_pnl,
+        )
+        best_trade_pnl = best_trade.net_pnl
+    adjusted_factor = _ONE
+    for result_index, result in enumerate(results):
+        metrics = result.experiment.metrics
+        final_equity = metrics.final_equity
+        if result_index == best_result_index:
+            final_equity = max(_ZERO, final_equity - best_trade_pnl)
+        adjusted_factor *= final_equity / metrics.initial_equity
+    adjusted_return = adjusted_factor - _ONE if results else _ZERO
+    if trade_count:
+        observed = len(wins) / trade_count
+        z = 1.959963984540054
+        denominator = 1 + z * z / trade_count
+        center = (observed + z * z / (2 * trade_count)) / denominator
+        margin = (
+            z
+            * sqrt(
+                observed * (1 - observed) / trade_count
+                + z * z / (4 * trade_count * trade_count)
+            )
+            / denominator
+        )
+        lower = _decimal(max(0.0, center - margin))
+        upper = _decimal(min(1.0, center + margin))
+    else:
+        lower = _ZERO
+        upper = _ZERO
+    return {
+        "oos_trade_win_count": len(wins),
+        "oos_trade_win_rate": (
+            Decimal(len(wins)) / Decimal(trade_count) if trade_count else _ZERO
+        ),
+        "oos_trade_win_rate_lower_95": lower,
+        "oos_trade_win_rate_upper_95": upper,
+        "oos_profit_factor": profit_factor,
+        "oos_gross_profit": gross_profit,
+        "oos_gross_loss": gross_loss,
+        "oos_mean_trade_return": _mean(trade_returns),
+        "oos_median_trade_return": median(trade_returns) if trade_returns else _ZERO,
+        "largest_oos_winner_pnl": best_trade_pnl,
+        "largest_oos_winner_gross_profit_share": (
+            best_trade_pnl / gross_profit if gross_profit > _ZERO else _ZERO
+        ),
+        "compounded_oos_return_excluding_best_trade": adjusted_return,
+        "profit_factor_unbounded": str(gross_loss == _ZERO and gross_profit > _ZERO).lower(),
+    }
 
 
 def continuous_oos_equity_and_drawdown(
@@ -708,6 +854,7 @@ class WalkForwardValidator:
         )
         strategy_code_hash = research_code_sha256()
         folds: list[WalkForwardFold] = []
+        selected_oos_results: list[BacktestResult] = []
         validated_strategy_spec_ids: dict[str, str] = {}
         candidate_oos_scores: dict[str, list[Decimal]] = {
             strategy_type: [] for strategy_type in strategy_types
@@ -776,6 +923,7 @@ class WalkForwardValidator:
             selected_oos_equity_paths.append(
                 test_results[selected_strategy].equity_curve
             )
+            selected_oos_results.append(test_results[selected_strategy])
             train_start, train_end = self._window_bounds(bars, train_indices)
             test_start, test_end = self._window_bounds(bars, test_indices)
             folds.append(
@@ -821,6 +969,7 @@ class WalkForwardValidator:
                 name: tuple(values) for name, values in candidate_oos_scores.items()
             },
             selected_oos_equity_paths=tuple(selected_oos_equity_paths),
+            selected_oos_results=tuple(selected_oos_results),
             validated_strategy_spec_ids=validated_strategy_spec_ids,
             cost_model=costs,
             initial_equity=initial_equity,
@@ -940,6 +1089,7 @@ class WalkForwardValidator:
         folds: tuple[WalkForwardFold, ...],
         candidate_oos_scores: dict[str, tuple[Decimal, ...]],
         selected_oos_equity_paths: tuple[tuple[Decimal, ...], ...],
+        selected_oos_results: tuple[BacktestResult, ...],
         validated_strategy_spec_ids: dict[str, str],
         cost_model: BacktestCostModel,
         initial_equity: Decimal,
@@ -957,6 +1107,9 @@ class WalkForwardValidator:
         oos_trade_count = sum(
             fold.selected_test_metrics.trade_count for fold in folds
         )
+        trade_robustness = oos_trade_robustness(selected_oos_results)
+        if oos_trade_count != sum(len(result.trades) for result in selected_oos_results):
+            raise ValueError("Selected OOS trade count does not match fold results")
         test_sharpes = [fold.selected_test_metrics.sharpe_ratio for fold in folds]
         degradation = [
             fold.selected_train_metrics.sharpe_ratio
@@ -1003,6 +1156,7 @@ class WalkForwardValidator:
             "selected_oos_below_median_rate": Decimal(below_median)
             / Decimal(len(folds)),
             "strategy_switch_count": switches,
+            **trade_robustness,
         }
         regime_metrics = self._regime_metrics(folds)
         pbo_metrics = combinatorial_purged_diagnostics(candidate_oos_scores)
@@ -1032,6 +1186,7 @@ class WalkForwardValidator:
             ],
             "historical_trial_count_diagnostic": trial_count,
             "selection_search_trial_count": search_trial_count,
+            "oos_trade_robustness": trade_robustness,
             "validation_input": validation_input,
         }
         gate_assessment = assess_research_gate(
@@ -1047,6 +1202,10 @@ class WalkForwardValidator:
             compounded_oos_return=Decimal(
                 str(aggregate["compounded_selected_oos_return"])
             ),
+            compounded_oos_return_excluding_best_trade=Decimal(
+                str(aggregate["compounded_oos_return_excluding_best_trade"])
+            ),
+            oos_profit_factor=Decimal(str(aggregate["oos_profit_factor"])),
             worst_drawdown=Decimal(
                 str(aggregate["worst_selected_oos_drawdown"])
             ),

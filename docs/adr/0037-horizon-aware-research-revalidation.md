@@ -5,6 +5,8 @@
 
 > Amendment: ADR 0041 replaces separate human adoption/start for broker-free Shadow when the
 > opt-in coordinator control is enabled. Operator holds and Paper/live gates remain manual.
+> ADR 0043 adds 2/10-session horizons and supersedes the Candidate activity/performance
+> minimums with explicit stability, profit-factor, and largest-winner sensitivity checks.
 
 ## Context
 

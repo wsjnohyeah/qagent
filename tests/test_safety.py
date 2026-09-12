@@ -119,8 +119,10 @@ def test_multi_session_profile_widens_price_stop_without_expanding_account_caps(
         == account_policy.maximum_concurrent_risk_usd
     )
     assert strategy_holding_period_sessions({}) == 1
+    assert strategy_holding_period_sessions({"holding_period_sessions": 2}) == 2
+    assert strategy_holding_period_sessions({"holding_period_sessions": 10}) == 10
     with pytest.raises(ValueError, match="must be one of"):
-        strategy_holding_period_sessions({"holding_period_sessions": 2})
+        strategy_holding_period_sessions({"holding_period_sessions": 3})
 
 
 def test_deployable_limit_entry_caps_price_and_rejects_untouched_order() -> None:

@@ -22,10 +22,14 @@ from agentic_quant.data_quality import (
     inspect_market_bars,
 )
 from agentic_quant.coordinator import (
+    AUTONOMOUS_CORE_RESEARCH_HORIZONS,
+    AUTONOMOUS_LONG_RESEARCH_HORIZONS,
     AUTONOMOUS_RESEARCH_HORIZONS,
+    AUTONOMOUS_RESEARCH_SCHEDULE,
     AutonomousCoordinator,
     COORDINATOR_RESEARCH_HORIZONS,
     COORDINATOR_STAGES,
+    autonomous_research_horizon,
 )
 from agentic_quant.control_plane import SystemObjectStore
 from agentic_quant.coordinator_runtime import (
@@ -1138,16 +1142,42 @@ def test_autonomous_coordinator_partitions_cycles_by_research_horizon(
     assert annual_group != daily_group
     assert {job.payload["horizon_bars"] for job in daily_jobs} == {1}
     assert {job.payload["horizon_bars"] for job in annual_jobs} == {252}
+    two_day_group, two_day_jobs = coordinator.plan(
+        symbols=("AAPL",),
+        as_of=cutoff,
+        horizon_bars=2,
+    )
+    ten_day_group, ten_day_jobs = coordinator.plan(
+        symbols=("AAPL",),
+        as_of=cutoff,
+        horizon_bars=10,
+    )
+    assert len({daily_group, two_day_group, ten_day_group, annual_group}) == 4
+    assert {job.payload["horizon_bars"] for job in two_day_jobs} == {2}
+    assert {job.payload["horizon_bars"] for job in ten_day_jobs} == {10}
     with pytest.raises(ValueError, match="horizon is not approved"):
-        coordinator.plan(symbols=("AAPL",), as_of=cutoff, horizon_bars=2)
+        coordinator.plan(symbols=("AAPL",), as_of=cutoff, horizon_bars=3)
 
 
-def test_autonomous_rotation_excludes_one_session_research() -> None:
-    assert COORDINATOR_RESEARCH_HORIZONS == (1, 5, 20, 63, 126, 252)
-    assert AUTONOMOUS_RESEARCH_HORIZONS == (5, 20, 63, 126, 252)
+def test_autonomous_rotation_prioritizes_short_horizon_research() -> None:
+    assert COORDINATOR_RESEARCH_HORIZONS == (1, 2, 5, 10, 20, 63, 126, 252)
+    assert AUTONOMOUS_CORE_RESEARCH_HORIZONS == (1, 2, 5, 10, 20)
+    assert AUTONOMOUS_LONG_RESEARCH_HORIZONS == (63, 126, 252)
+    assert AUTONOMOUS_RESEARCH_HORIZONS == COORDINATOR_RESEARCH_HORIZONS
+    assert len(AUTONOMOUS_RESEARCH_SCHEDULE) == 24
+    assert sum(
+        horizon in AUTONOMOUS_CORE_RESEARCH_HORIZONS
+        for horizon in AUTONOMOUS_RESEARCH_SCHEDULE
+    ) == 21
+    assert {
+        autonomous_research_horizon(datetime(2026, 9, 12, hour, tzinfo=UTC))
+        for hour in range(24)
+    } == set(COORDINATOR_RESEARCH_HORIZONS)
+    with pytest.raises(ValueError, match="timezone-aware"):
+        autonomous_research_horizon(datetime(2026, 9, 12))
 
 
-def test_autonomous_run_skips_disabled_horizon_backlog(
+def test_autonomous_run_can_deprioritize_long_horizon_backlog(
     settings,  # type: ignore[no-untyped-def]
 ) -> None:
     upgrade_database(settings.database_url)
@@ -1166,13 +1196,13 @@ def test_autonomous_run_skips_disabled_horizon_backlog(
 
     coordinator = AutonomousCoordinator(jobs, handler=handler)
     cutoff = datetime(2026, 9, 9, tzinfo=UTC)
-    coordinator.plan(symbols=("AAPL",), as_of=cutoff, horizon_bars=1)
+    coordinator.plan(symbols=("AAPL",), as_of=cutoff, horizon_bars=63)
     result = asyncio.run(
         coordinator.run_once(
             symbols=("AAPL",),
             as_of=cutoff + timedelta(hours=1),
             horizon_bars=5,
-            backlog_horizons=AUTONOMOUS_RESEARCH_HORIZONS,
+            backlog_horizons=AUTONOMOUS_CORE_RESEARCH_HORIZONS,
             max_jobs=1,
         )
     )

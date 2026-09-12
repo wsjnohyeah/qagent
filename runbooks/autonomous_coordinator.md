@@ -27,8 +27,10 @@ current exact Candidate/Qualified result may enter broker-free observation.
 
 ## Stages
 
-Each hourly group is partitioned by an approved 1, 5, 20, 63, 126, or 252-session
-`horizon_bars`. Every stage reconstructs that value from the immutable job payload; do not
+Each hourly group is partitioned by an approved 1, 2, 5, 10, 20, 63, 126, or 252-session
+`horizon_bars`. The fixed 24-hour UTC schedule assigns 21 slots to 1/2/5/10/20-session
+research and one daily background slot to each longer horizon. Every stage reconstructs that
+value from the immutable job payload; do not
 infer it from a dependency result or a one-session default. The ML label, forecast, Research
 LLM context, generated holding period, replay, validation window, and Shadow contract must
 all agree. Within a scheduler poll, a separate durable refresh group runs
@@ -66,6 +68,10 @@ Within every group, ready jobs are likewise stage-major.
    current horizon-specific search-trial count. If the paid LLM/generation stage cannot
    produce a new spec in that cycle, rotate through previously accepted immutable specs for
    the same symbol/timeframe/horizon and revalidate them against current data and policy.
+   Candidate eligibility requires horizon-scaled activity, at least 50% positive active OOS
+   folds, profit factor of at least 1.10, and positive compounded OOS return even after the
+   single largest winner is removed. Win rate and its 95% confidence interval remain visible
+   evidence rather than a universal cutoff.
 9. `await_shadow_adoption`: report the strategy/report IDs and available Candidate/Qualified
    admission tiers. With `COORDINATOR_AUTO_SHADOW_ENABLED=true`, idempotently adopt the strongest
    available tier and start broker-free Shadow. An operator pause or retirement blocks automatic

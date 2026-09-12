@@ -7,6 +7,8 @@
 
 > Amendment: ADR 0041 permits configured deterministic automatic admission to either Shadow
 > tier; it does not change either tier's evidence threshold or Paper authority.
+> ADR 0043 upgrades Candidate thresholds to `research_gate@0.5.0` and adds 2/10-session
+> horizons plus trade-level robustness checks.
 
 ## Context
 

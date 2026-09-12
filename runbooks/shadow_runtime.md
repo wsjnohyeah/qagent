@@ -17,8 +17,9 @@ portfolio events.
    - `CANDIDATE`: the candidate gate has `eligible_for_human_review=true`; this is
      observation-only and never Paper-eligible.
    Candidate activity minima are horizon-aware because a multi-year history can contain many
-   independent one-session windows but only one annual window. Positive modeled net return
-   and the drawdown ceiling remain mandatory at every horizon.
+   independent one-session windows but only one annual window. Positive modeled net return,
+   at least 50% positive active OOS folds, profit factor of at least 1.10, positive return after
+   removing the largest winning trade, and the drawdown ceiling remain mandatory.
 3. With `COORDINATOR_AUTO_SHADOW_ENABLED=true`, the deterministic coordinator adopts the
    strongest available exact tier and starts one isolated `$10,000` strategy/symbol sandbox.
    If disabled, the administrator may use the confirmation-gated manual path.
@@ -50,7 +51,7 @@ override and does not claim qualification.
 - The runtime needs at least 21 decision bars and one following execution bar.
 - Each decision uses evidence available by the decision bar's `available_from` timestamp.
 - Momentum and mean-reversion use their immutable `StrategySpec` parameters and one of the
-  approved 1, 5, 20, 63, 126, or 252-session holding horizons. The literal buy-and-hold
+  approved 1, 2, 5, 10, 20, 63, 126, or 252-session holding horizons. The literal buy-and-hold
   benchmark remains research-only because it has no finite deployable exit contract.
 - A long signal becomes a persistent `SignalCandidate`, passes the deterministic sandbox
   risk profile, and becomes a `TradePlan` only on approval. Restriction, data health,
@@ -85,7 +86,8 @@ override and does not claim qualification.
   raw stop = annualized realized_vol_20 / sqrt(252)
              × horizon multiplier × strategy multiplier
 
-  horizon multiplier: 1=1.50, 5=2.00, 20=2.75, 63=3.50, 126=4.00, 252=4.50
+  horizon multiplier: 1=1.50, 2=1.75, 5=2.00, 10=2.35,
+                      20=2.75, 63=3.50, 126=4.00, 252=4.50
   strategy multiplier: buy_and_hold=1.00, mean_reversion=0.90, momentum=1.10
   target R: buy_and_hold=2.00, mean_reversion=1.75, momentum=2.25
   ```

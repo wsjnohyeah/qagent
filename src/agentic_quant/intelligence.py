@@ -381,6 +381,12 @@ class ResearchEvidenceRetriever:
                             "active_oos_fold_count",
                             "zero_trade_oos_fold_count",
                             "oos_trade_count",
+                            "oos_trade_win_rate",
+                            "oos_trade_win_rate_lower_95",
+                            "oos_trade_win_rate_upper_95",
+                            "oos_profit_factor",
+                            "compounded_oos_return_excluding_best_trade",
+                            "largest_oos_winner_gross_profit_share",
                             "mean_train_to_test_sharpe_degradation",
                         )
                         if key in aggregate
