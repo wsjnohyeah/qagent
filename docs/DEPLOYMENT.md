@@ -49,6 +49,8 @@ SESSION_SECRET=AT_LEAST_32_RANDOM_CHARACTERS
 SESSION_MAX_AGE_DAYS=90
 SHADOW_RUNTIME_ENABLED=true
 SHADOW_POLL_SECONDS=30
+# Optional rollout boundary; must be timezone-aware. Exits are never blocked by it.
+SHADOW_NEW_EXPOSURE_NOT_BEFORE=
 # Keep false for the first deployment. Paper activation is a later reviewed step.
 PAPER_TRADING_ENABLED=false
 PAPER_POLL_SECONDS=30
@@ -155,8 +157,9 @@ CSRF, and logout behavior through that proxy. Do not expose ports 5432 or 6379.
 
 The guarded deploy script starts PostgreSQL, waits for readiness, applies Alembic migrations,
 and runs `python -m agentic_quant.production_bootstrap` as one-shot tasks. Bootstrap registers
-the immutable production environment ID, creates governed lists and the shared virtual
-account idempotently, and forces new exposure paused. It then replaces the API, shadow worker,
+the immutable production environment ID, creates governed lists and the legacy shared virtual
+account idempotently, and forces new exposure paused. New Shadow deployments receive isolated
+`$10,000` accounts. It then replaces the API, shadow worker,
 and separate research-coordinator worker so CPU-heavy training cannot delay shadow ticks. The
 API does not own production schedulers. Deployment fails if API readiness or either worker
 heartbeat is unhealthy. `AUTO_MIGRATE` remains false in long-running services.
@@ -209,6 +212,10 @@ Verify and record:
 - Exact Git commit and image digest.
 - `/health/live` and `/health/ready` responses.
 - `APP_ENV=production`, `TRADING_MODE=shadow|paper`, live disabled, exposure paused.
+- `GET /v1/shadow/account` reports isolated sandbox mode, the `$10,000` initial value,
+  `$8,800` circuit floor, and no unexpected legacy nonterminal deployments. During a planned
+  migration, confirm `shadow.migrate_to_sandboxes` while paused, then verify flat legacy rows
+  are `RETIRED_LEGACY` and open rows are `LIQUIDATION_PENDING` until their causal exit.
 - The bootstrap output says `ready_paused` and the stored environment ID matches this stack.
 - `GET /v1/coordinator/status` is readable and the coordinator heartbeat is present when
   enabled. `WAITING_PAID_RESEARCH_ENABLEMENT` is expected until paid automation is approved.

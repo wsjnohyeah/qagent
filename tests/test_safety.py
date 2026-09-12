@@ -38,6 +38,7 @@ from agentic_quant.risk import (
     evaluate_candidate,
     strategy_execution_profile,
     strategy_holding_period_sessions,
+    strategy_signal_risk_policy,
 )
 
 
@@ -96,12 +97,22 @@ def test_multi_session_profile_widens_price_stop_without_expanding_account_caps(
     profile, parameters, effective = strategy_execution_profile(
         data_requirements={"holding_period_sessions": 252},
         account_policy=account_policy,
+        strategy_type="momentum",
     )
 
     assert profile == MULTI_SESSION_EXECUTION_PROFILE_VERSION
     assert parameters["maximum_holding_sessions"] == 252
     assert parameters["scheduled_exit"]["paper_compatible"] is False
-    assert effective.baseline_stop_fraction == Decimal("0.125")
+    assert effective.baseline_stop_fraction == Decimal("0.15")
+    assert parameters["price_stop_fraction"] == "point_in_time_volatility_derived"
+    signal_policy = strategy_signal_risk_policy(
+        data_requirements={"holding_period_sessions": 252},
+        strategy_type="momentum",
+        feature_values={"realized_vol_20": "0.80"},
+        account_policy=account_policy,
+    )
+    assert signal_policy.baseline_stop_fraction == Decimal("0.15")
+    assert signal_policy.baseline_target_r_multiple == Decimal("2.25")
     assert effective.maximum_trade_risk_usd == account_policy.maximum_trade_risk_usd
     assert (
         effective.maximum_concurrent_risk_usd
@@ -144,6 +155,48 @@ def test_intraday_limit_fill_never_claims_ambiguous_profit_target() -> None:
         target=Decimal("104"),
     )
     assert (price, reason) == (Decimal("101"), "market_on_close")
+
+
+def test_sandbox_position_risk_is_two_percent_of_current_marked_equity(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    item = candidate(stop="90")
+    policy = RiskPolicy.from_yaml(settings.risk_policy_path).model_copy(
+        update={
+            "position_sizing_mode": "equity_fraction",
+            "initial_risk_fraction": Decimal("0.02"),
+            "daily_loss_limit_enabled": False,
+        }
+    )
+    decision = evaluate_candidate(
+        candidate=item.model_copy(
+            update={
+                "planned_entry": Decimal("100"),
+                "invalidation": Decimal("90"),
+                "targets": (Decimal("122.50"),),
+            }
+        ),
+        features=features().model_copy(
+            update={"feature_snapshot_id": item.feature_snapshot_id}
+        ),
+        account=AccountState(
+            equity=Decimal("9500"),
+            daily_pnl=Decimal("-500"),
+            concurrent_planned_risk=Decimal("9000"),
+        ),
+        mode=TradingMode.SHADOW,
+        policy=policy,
+        restrictions=RestrictionRegistry.from_yaml(
+            settings.restricted_securities_path
+        ),
+        context=risk_context(),
+        evaluated_at=item.as_of,
+        new_exposure_paused=False,
+    )
+
+    assert decision.verdict == Verdict.APPROVE
+    assert decision.risk_budget_usd == Decimal("190.00")
+    assert decision.max_quantity == 18
 
 
 def candidate(symbol: str = "DEMO", stop: str = "16.65") -> SignalCandidate:

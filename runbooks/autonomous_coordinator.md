@@ -61,8 +61,8 @@ Within every group, ready jobs are likewise stage-major.
    `COORDINATOR_PAID_RESEARCH_ENABLED=true`.
 7. `generate_strategy`: run constrained proposal plus adversarial critique; no model code or
    sizing is accepted.
-8. `validate_strategy`: run exact-spec walk-forward validation under the current shared
-   account risk contract. Cached admission also requires the current promotion policy and
+8. `validate_strategy`: run exact-spec walk-forward validation under the current isolated
+   `$10,000` Shadow sandbox risk/cost contract. Cached admission also requires the current promotion policy and
    current horizon-specific search-trial count. If the paid LLM/generation stage cannot
    produce a new spec in that cycle, rotate through previously accepted immutable specs for
    the same symbol/timeframe/horizon and revalidate them against current data and policy.

@@ -63,9 +63,12 @@ from agentic_quant.risk import (
     normalize_deployable_long_prices,
     strategy_execution_profile,
     strategy_holding_period_sessions,
+    strategy_signal_risk_policy,
 )
 from agentic_quant.virtual_account import (
     MAIN_VIRTUAL_ACCOUNT_ID,
+    STRATEGY_SANDBOX_ACCOUNT_TYPE,
+    STRATEGY_SANDBOX_INITIAL_EQUITY,
     VirtualAccountStore,
 )
 from agentic_quant.validation import (
@@ -79,6 +82,11 @@ from agentic_quant.validation import (
 
 _ZERO = Decimal("0")
 _ONE = Decimal("1")
+_TERMINAL_DEPLOYMENT_STATUSES = {
+    "RETIRED",
+    "RETIRED_LEGACY",
+    "RETIRED_SHADOW_FAILED",
+}
 
 
 def _utc(value: datetime | None) -> datetime | None:
@@ -102,6 +110,7 @@ class ShadowRuntime:
         now_provider: Callable[[], datetime] | None = None,
         promotion_policy: PromotionGatePolicy | None = None,
         promotion_policy_path: Path | None = None,
+        new_exposure_not_before: datetime | None = None,
     ) -> None:
         self.engine = engine
         self.research_store = research_store
@@ -115,11 +124,21 @@ class ShadowRuntime:
             engine,
             calendar_name=calendar_name,
         )
-        self.costs = BacktestCostModel()
+        # Robinhood equity trading is commission-free. Keep spread, slippage,
+        # impact, and liquidity constraints because they remain market costs.
+        self.costs = BacktestCostModel(
+            commission_per_share=_ZERO,
+            minimum_commission_per_order=_ZERO,
+        )
         self.accounts = VirtualAccountStore(engine)
         self._now_provider = now_provider or (lambda: datetime.now(UTC))
         self._promotion_policy = promotion_policy or DEFAULT_PROMOTION_GATE_POLICY
         self._promotion_policy_path = promotion_policy_path
+        self.new_exposure_not_before = (
+            new_exposure_not_before.astimezone(UTC)
+            if new_exposure_not_before is not None
+            else None
+        )
         self._tick_lock = asyncio.Lock()
 
     def _now(self) -> datetime:
@@ -141,8 +160,62 @@ class ShadowRuntime:
     def virtual_account(self) -> dict[str, Any]:
         return self.accounts.account(MAIN_VIRTUAL_ACCOUNT_ID)
 
-    def effective_risk_policy(self) -> RiskPolicy:
-        return self.accounts.effective_risk_policy(self.risk_policy)
+    def sandbox_summary(self) -> dict[str, Any]:
+        deployments = self.deployments(limit=10_000)
+        legacy = self.virtual_account()
+        sandboxes = [
+            item
+            for item in deployments
+            if item.get("account_mode") == STRATEGY_SANDBOX_ACCOUNT_TYPE
+        ]
+        active = [item for item in sandboxes if item["status"] == "ACTIVE"]
+        liquidating = [
+            item for item in sandboxes if item["status"] == "LIQUIDATION_PENDING"
+        ]
+        retired_failed = [
+            item for item in sandboxes if item["status"] == "RETIRED_SHADOW_FAILED"
+        ]
+        legacy_nonterminal = [
+            item
+            for item in deployments
+            if item.get("account_mode") != STRATEGY_SANDBOX_ACCOUNT_TYPE
+            and item["status"] not in _TERMINAL_DEPLOYMENT_STATUSES
+        ]
+        return {
+            **legacy,
+            "account_mode": "ISOLATED_STRATEGY_SANDBOXES",
+            "sandbox_initial_equity": str(STRATEGY_SANDBOX_INITIAL_EQUITY),
+            "circuit_breaker_fraction": "0.12",
+            "circuit_breaker_value": "8800.00",
+            "active_sandboxes": len(active),
+            "liquidation_pending_sandboxes": len(liquidating),
+            "retired_failed_sandboxes": len(retired_failed),
+            "total_sandboxes": len(sandboxes),
+            "legacy_nonterminal_deployments": len(legacy_nonterminal),
+            "total_sandbox_value": str(
+                sum(
+                    (Decimal(str(item["sandbox_total_value"])) for item in sandboxes),
+                    _ZERO,
+                )
+            ),
+            "open_position_count": sum(
+                Decimal(str(item["position_quantity"])) != _ZERO
+                for item in sandboxes
+            ),
+            "legacy_shared_account": legacy,
+        }
+
+    def effective_risk_policy(
+        self,
+        account_id: str = MAIN_VIRTUAL_ACCOUNT_ID,
+    ) -> RiskPolicy:
+        return self.accounts.effective_risk_policy(
+            self.risk_policy,
+            account_id=account_id,
+        )
+
+    def sandbox_risk_policy(self) -> RiskPolicy:
+        return self.risk_policy
 
     def preview_account_risk(self, limits: dict[str, Any]) -> dict[str, Any]:
         return self.accounts.preview_risk_update(
@@ -231,13 +304,18 @@ class ShadowRuntime:
                 str(strategy_spec.strategy_type): strategy_spec_id
             },
             cost_model=self.costs,
-            risk_policy=self.effective_risk_policy(),
+            risk_policy=self.sandbox_risk_policy(),
             restriction_registry_version=self.restrictions.version,
-            initial_equity=Decimal(
-                str(dict(report.execution_contract_json or {}).get("initial_equity"))
-            ),
+            initial_equity=STRATEGY_SANDBOX_INITIAL_EQUITY,
             strategy_spec=strategy_spec,
         )
+        validated_equity = dict(report.execution_contract_json or {}).get(
+            "initial_equity"
+        )
+        if Decimal(str(validated_equity)) != STRATEGY_SANDBOX_INITIAL_EQUITY:
+            raise ValueError(
+                "Shadow validation must use the isolated $10,000 sandbox capital"
+            )
         if dict(report.execution_contract_json or {}) != expected_contract:
             raise ValueError(
                 "Validation execution contract does not match the current shadow runtime"
@@ -420,6 +498,15 @@ class ShadowRuntime:
             ).one_or_none()
             if (
                 existing is not None
+                and existing.status == "RETIRED"
+                and str(existing.reason).startswith("SANDBOX_CIRCUIT_BREAKER:")
+            ):
+                raise ValueError(
+                    "A strategy retired by its Shadow sandbox circuit breaker "
+                    "cannot be re-adopted; generate and validate a new strategy version"
+                )
+            if (
+                existing is not None
                 and existing.status in {"PAUSED", "RETIRED"}
                 and not allow_operator_override
             ):
@@ -539,7 +626,12 @@ class ShadowRuntime:
             )
             connection.execute(
                 update(shadow_deployments)
-                .where(shadow_deployments.c.strategy_spec_id == strategy_spec_id)
+                .where(
+                    (shadow_deployments.c.strategy_spec_id == strategy_spec_id)
+                    & shadow_deployments.c.status.not_in(
+                        tuple(_TERMINAL_DEPLOYMENT_STATUSES)
+                    )
+                )
                 .values(status=status, updated_at=now)
             )
             self._cancel_open_plans(
@@ -610,22 +702,37 @@ class ShadowRuntime:
             if adoption is None or adoption.status != "ADOPTED_FOR_SHADOW":
                 raise ValueError("Strategy must be adopted before shadow deployment")
             existing = connection.execute(
-                select(shadow_deployments).where(
+                select(shadow_deployments)
+                .where(
                     (shadow_deployments.c.strategy_spec_id == strategy_spec_id)
                     & (shadow_deployments.c.symbol == normalized_symbol)
+                    & shadow_deployments.c.status.not_in(
+                        tuple(_TERMINAL_DEPLOYMENT_STATUSES)
+                    )
                 )
+                .order_by(shadow_deployments.c.created_at.desc())
+                .limit(1)
             ).one_or_none()
             if existing is None:
                 deployment_id = uuid7()
+                account_id = self.accounts.ensure_strategy_sandbox(
+                    deployment_id=deployment_id,
+                    strategy_spec_id=strategy_spec_id,
+                    symbol=normalized_symbol,
+                    initial_cash=initial_cash,
+                    risk_policy=self.sandbox_risk_policy(),
+                    connection=connection,
+                )
                 sleeve_id = self.accounts.ensure_sleeve(
                     strategy_spec_id=strategy_spec_id,
                     symbol=normalized_symbol,
+                    account_id=account_id,
                     connection=connection,
                 )
                 connection.execute(
                     insert(shadow_deployments).values(
                         shadow_deployment_id=deployment_id,
-                        virtual_account_id=MAIN_VIRTUAL_ACCOUNT_ID,
+                        virtual_account_id=account_id,
                         strategy_sleeve_id=sleeve_id,
                         strategy_spec_id=strategy_spec_id,
                         adoption_id=adoption.adoption_id,
@@ -638,6 +745,8 @@ class ShadowRuntime:
                         last_price=None,
                         realized_pnl=_ZERO,
                         unrealized_pnl=_ZERO,
+                        liquidation_requested_at=None,
+                        retired_reason=None,
                         last_processed_bar_time=initial_cursor,
                         created_at=now,
                         updated_at=now,
@@ -645,8 +754,10 @@ class ShadowRuntime:
                 )
                 prime_preopen = preopen_bar is not None
             else:
-                if existing.status == "RETIRED":
-                    raise ValueError("Retired deployments are immutable; create a new strategy")
+                if existing.status == "LIQUIDATION_PENDING":
+                    raise ValueError(
+                        "Prior Shadow deployment is awaiting deterministic liquidation"
+                    )
                 if existing.status == "PAUSED" and not allow_operator_resume:
                     raise ValueError(
                         "Automatic Shadow admission cannot override an operator hold"
@@ -655,6 +766,7 @@ class ShadowRuntime:
                 sleeve_id = self.accounts.ensure_sleeve(
                     strategy_spec_id=strategy_spec_id,
                     symbol=normalized_symbol,
+                    account_id=str(existing.virtual_account_id),
                     connection=connection,
                 )
                 marker_exists = False
@@ -696,8 +808,9 @@ class ShadowRuntime:
                     )
                     .values(
                         status="ACTIVE",
-                        virtual_account_id=MAIN_VIRTUAL_ACCOUNT_ID,
                         strategy_sleeve_id=sleeve_id,
+                        liquidation_requested_at=None,
+                        retired_reason=None,
                         last_processed_bar_time=(
                             initial_cursor
                             if prime_preopen
@@ -760,13 +873,8 @@ class ShadowRuntime:
         symbol: str,
         initial_cash: Decimal,
     ) -> dict[str, Any]:
-        if initial_cash <= 0:
-            raise ValueError("Initial shadow cash must be positive")
-        master = self.virtual_account()
-        if Decimal(str(master["initial_cash"])) != initial_cash:
-            raise ValueError(
-                "Shadow capital must match the shared virtual master account"
-            )
+        if initial_cash != STRATEGY_SANDBOX_INITIAL_EQUITY:
+            raise ValueError("Strategy Shadow sandboxes require exactly $10,000")
         normalized_symbol = symbol.strip().upper()
         if not normalized_symbol or len(normalized_symbol) > 24:
             raise ValueError("Shadow symbol is invalid")
@@ -843,7 +951,7 @@ class ShadowRuntime:
             ).one_or_none()
             if row is None:
                 raise ValueError("Shadow deployment not found")
-            if row.status == "RETIRED":
+            if row.status in _TERMINAL_DEPLOYMENT_STATUSES:
                 raise ValueError("Retired shadow deployments cannot be changed")
             if status != "ACTIVE":
                 position_open = connection.execute(
@@ -890,6 +998,20 @@ class ShadowRuntime:
                 .where(shadow_deployments.c.shadow_deployment_id == deployment_id)
                 .values(status=status, updated_at=datetime.now(UTC))
             )
+            if status == "RETIRED":
+                connection.execute(
+                    update(strategy_adoptions)
+                    .where(
+                        strategy_adoptions.c.strategy_spec_id
+                        == row.strategy_spec_id
+                    )
+                    .values(
+                        status="RETIRED",
+                        reason=f"OPERATOR_DEPLOYMENT_RETIREMENT: {reason}",
+                        approved_by=requested_by,
+                        updated_at=datetime.now(UTC),
+                    )
+                )
             if status != "ACTIVE":
                 self._cancel_open_plans(
                     connection,
@@ -902,6 +1024,181 @@ class ShadowRuntime:
             reason=f"Shadow deployment {status.lower()}: {reason} ({requested_by})",
         )
         return self.deployment(deployment_id)
+
+    def sandbox_migration_preview(self) -> dict[str, Any]:
+        with self.engine.connect() as connection:
+            rows = connection.execute(
+                select(
+                    shadow_deployments.c.shadow_deployment_id,
+                    shadow_deployments.c.symbol,
+                    shadow_deployments.c.status,
+                    shadow_deployments.c.position_quantity,
+                )
+                .join(
+                    virtual_accounts,
+                    virtual_accounts.c.virtual_account_id
+                    == shadow_deployments.c.virtual_account_id,
+                )
+                .where(
+                    (virtual_accounts.c.account_type != STRATEGY_SANDBOX_ACCOUNT_TYPE)
+                    & shadow_deployments.c.status.not_in(
+                        tuple(_TERMINAL_DEPLOYMENT_STATUSES)
+                    )
+                )
+            ).all()
+        return {
+            "summary": "Stop legacy shared-account Shadow and move to isolated sandboxes",
+            "legacy_deployment_count": len(rows),
+            "open_position_count": sum(
+                Decimal(str(row.position_quantity)) != _ZERO for row in rows
+            ),
+            "flat_retire_count": sum(
+                Decimal(str(row.position_quantity)) == _ZERO for row in rows
+            ),
+            "symbols": sorted({str(row.symbol) for row in rows}),
+            "new_sandbox_initial_equity": str(STRATEGY_SANDBOX_INITIAL_EQUITY),
+            "live_broker_effect": False,
+            "paper_broker_effect": False,
+        }
+
+    def begin_sandbox_migration(
+        self,
+        *,
+        reason: str,
+        requested_by: str,
+    ) -> dict[str, Any]:
+        """Stop legacy entries and retire them after deterministic flattening."""
+        token = self._acquire_runtime_lease(owner=f"sandbox-migration:{uuid7()}")
+        if token is None:
+            raise ValueError(
+                "Shadow runtime is processing; retry the sandbox migration"
+            )
+        try:
+            return self._begin_sandbox_migration_locked(
+                reason=reason,
+                requested_by=requested_by,
+                lease_token=token,
+            )
+        finally:
+            self._release_runtime_lease(token)
+
+    def _begin_sandbox_migration_locked(
+        self,
+        *,
+        reason: str,
+        requested_by: str,
+        lease_token: str,
+    ) -> dict[str, Any]:
+        preview = self.sandbox_migration_preview()
+        now = self._now()
+        with self.engine.begin() as connection:
+            self._assert_runtime_lease(connection, lease_token)
+            rows = connection.execute(
+                select(shadow_deployments)
+                .join(
+                    virtual_accounts,
+                    virtual_accounts.c.virtual_account_id
+                    == shadow_deployments.c.virtual_account_id,
+                )
+                .where(
+                    (virtual_accounts.c.account_type != STRATEGY_SANDBOX_ACCOUNT_TYPE)
+                    & shadow_deployments.c.status.not_in(
+                        tuple(_TERMINAL_DEPLOYMENT_STATUSES)
+                    )
+                )
+            ).all()
+            deployment_ids = tuple(str(row.shadow_deployment_id) for row in rows)
+            self._cancel_open_plans(
+                connection,
+                deployment_ids=deployment_ids,
+                closed_at=now,
+            )
+            liquidating = 0
+            retired = 0
+            symbols: set[str] = set()
+            for row in rows:
+                deployment_id = str(row.shadow_deployment_id)
+                symbols.add(str(row.symbol))
+                position_open = bool(
+                    connection.execute(
+                        select(func.count())
+                        .select_from(shadow_trade_plans)
+                        .join(
+                            shadow_signal_candidates,
+                            shadow_signal_candidates.c.candidate_id
+                            == shadow_trade_plans.c.candidate_id,
+                        )
+                        .where(
+                            (
+                                shadow_signal_candidates.c.shadow_deployment_id
+                                == deployment_id
+                            )
+                            & (shadow_trade_plans.c.status == "POSITION_OPEN")
+                        )
+                    ).scalar_one()
+                )
+                status = "LIQUIDATION_PENDING" if position_open else "RETIRED_LEGACY"
+                liquidating += int(position_open)
+                retired += int(not position_open)
+                connection.execute(
+                    update(shadow_deployments)
+                    .where(
+                        shadow_deployments.c.shadow_deployment_id == deployment_id
+                    )
+                    .values(
+                        status=status,
+                        liquidation_requested_at=now if position_open else None,
+                        retired_reason="SANDBOX_MIGRATION",
+                        updated_at=now,
+                    )
+                )
+                sequence = int(
+                    connection.execute(
+                        select(func.max(shadow_events.c.sequence)).where(
+                            shadow_events.c.shadow_deployment_id == deployment_id
+                        )
+                    ).scalar_one_or_none()
+                    or 0
+                ) + 1
+                connection.execute(
+                    insert(shadow_events).values(
+                        shadow_event_id=uuid7(),
+                        shadow_deployment_id=deployment_id,
+                        shadow_run_id=None,
+                        sequence=sequence,
+                        event_type=(
+                            "LEGACY_LIQUIDATION_REQUESTED"
+                            if position_open
+                            else "LEGACY_SANDBOX_RETIRED"
+                        ),
+                        event_time=now,
+                        symbol=row.symbol,
+                        bar_id=None,
+                        cash_balance=row.cash_balance,
+                        position_quantity=row.position_quantity,
+                        price=row.last_price,
+                        realized_pnl_delta=_ZERO,
+                        payload_json={
+                            "reason": reason,
+                            "requested_by": requested_by,
+                            "next_account_model": STRATEGY_SANDBOX_ACCOUNT_TYPE,
+                            "virtual_only": True,
+                        },
+                        created_at=now,
+                    )
+                )
+        for symbol in symbols:
+            self._sync_active_symbols(
+                symbol,
+                add=False,
+                reason=f"Legacy Shadow migration requested by {requested_by}",
+            )
+        return {
+            **preview,
+            "legacy_liquidation_pending": liquidating,
+            "legacy_retired": retired,
+            "requested_at": now,
+        }
 
     def _cancel_open_plans(
         self,
@@ -989,16 +1286,46 @@ class ShadowRuntime:
         )
         with self.engine.connect() as connection:
             values = [dict(row._mapping) for row in connection.execute(statement)]
-        master = self.virtual_account()
+            account_ids = {
+                str(value["virtual_account_id"]) for value in values
+            }
+            accounts = {
+                str(row.virtual_account_id): dict(row._mapping)
+                for row in connection.execute(
+                    select(virtual_accounts).where(
+                        virtual_accounts.c.virtual_account_id.in_(account_ids)
+                    )
+                )
+            }
+            unrealized = {
+                str(row.virtual_account_id): Decimal(str(row.total))
+                for row in connection.execute(
+                    select(
+                        shadow_deployments.c.virtual_account_id,
+                        func.coalesce(
+                            func.sum(shadow_deployments.c.unrealized_pnl), 0
+                        ).label("total"),
+                    )
+                    .where(shadow_deployments.c.virtual_account_id.in_(account_ids))
+                    .group_by(shadow_deployments.c.virtual_account_id)
+                )
+            }
         for value in values:
-            value["account_mode"] = "SHARED_MASTER"
+            account_id = str(value["virtual_account_id"])
+            account = accounts[account_id]
+            account_unrealized = unrealized.get(account_id, _ZERO)
+            account_equity = Decimal(str(account["cash_balance"])) + account_unrealized
+            value["account_mode"] = str(account["account_type"])
             value["sleeve_cash_balance"] = value["cash_balance"]
-            value["cash_balance"] = master["cash_balance"]
+            value["cash_balance"] = account["cash_balance"]
             value["sleeve_realized_pnl"] = value["realized_pnl"]
-            value["account_cash_balance"] = master["cash_balance"]
-            value["account_realized_pnl"] = master["realized_pnl"]
-            value["account_reserved_cash"] = master["reserved_cash"]
-            value["account_reserved_risk_usd"] = master["reserved_risk_usd"]
+            value["account_cash_balance"] = account["cash_balance"]
+            value["account_realized_pnl"] = account["realized_pnl"]
+            value["account_unrealized_pnl"] = account_unrealized
+            value["sandbox_total_value"] = account_equity
+            value["sandbox_floor_value"] = account["account_floor_usd"]
+            value["account_reserved_cash"] = account["reserved_cash"]
+            value["account_reserved_risk_usd"] = account["reserved_risk_usd"]
             try:
                 self.adoption_preview(
                     strategy_spec_id=str(value["strategy_spec_id"]),
@@ -1304,7 +1631,9 @@ class ShadowRuntime:
         started_at = datetime.now(UTC)
         run_id = uuid7()
         deployments = [
-            item for item in self.deployments(limit=1_000) if item["status"] == "ACTIVE"
+            item
+            for item in self.deployments(limit=10_000)
+            if item["status"] in {"ACTIVE", "LIQUIDATION_PENDING"}
         ]
         bars_processed = 0
         events_created = 0
@@ -1415,6 +1744,121 @@ class ShadowRuntime:
             ).scalar_one()
         return int(count) > 0
 
+    def _enforce_sandbox_circuit_breaker(
+        self,
+        *,
+        deployment_id: str,
+        run_id: str,
+        lease_token: str,
+    ) -> int:
+        deployment = self.deployment(deployment_id)
+        if deployment.get("account_mode") != STRATEGY_SANDBOX_ACCOUNT_TYPE:
+            return 0
+        if deployment["status"] in _TERMINAL_DEPLOYMENT_STATUSES:
+            return 0
+        total_value = Decimal(str(deployment["sandbox_total_value"]))
+        floor = Decimal(str(deployment["sandbox_floor_value"]))
+        if total_value > floor:
+            return 0
+        now = self._now()
+        position_open = self._position_is_open(deployment_id)
+        next_status = (
+            "LIQUIDATION_PENDING" if position_open else "RETIRED_SHADOW_FAILED"
+        )
+        with self.engine.begin() as connection:
+            self._assert_runtime_lease(connection, lease_token)
+            current = connection.execute(
+                select(shadow_deployments.c.status).where(
+                    shadow_deployments.c.shadow_deployment_id == deployment_id
+                )
+            ).scalar_one()
+            if str(current) in _TERMINAL_DEPLOYMENT_STATUSES or str(current) == (
+                "LIQUIDATION_PENDING"
+            ):
+                return 0
+            connection.execute(
+                update(shadow_deployments)
+                .where(shadow_deployments.c.shadow_deployment_id == deployment_id)
+                .values(
+                    status=next_status,
+                    liquidation_requested_at=now if position_open else None,
+                    retired_reason="SANDBOX_CIRCUIT_BREAKER",
+                    updated_at=now,
+                )
+            )
+            connection.execute(
+                update(strategy_adoptions)
+                .where(
+                    strategy_adoptions.c.strategy_spec_id
+                    == deployment["strategy_spec_id"]
+                )
+                .values(
+                    status="RETIRED",
+                    reason=(
+                        "SANDBOX_CIRCUIT_BREAKER: isolated sandbox total value "
+                        f"reached {total_value} at or below {floor}"
+                    ),
+                    approved_by="shadow-runtime",
+                    updated_at=now,
+                )
+            )
+            if not position_open:
+                connection.execute(
+                    update(virtual_accounts)
+                    .where(
+                        virtual_accounts.c.virtual_account_id
+                        == deployment["virtual_account_id"]
+                    )
+                    .values(status="FAILED", updated_at=now)
+                )
+            sequence = int(
+                connection.execute(
+                    select(func.max(shadow_events.c.sequence)).where(
+                        shadow_events.c.shadow_deployment_id == deployment_id
+                    )
+                ).scalar_one_or_none()
+                or 0
+            ) + 1
+            connection.execute(
+                insert(shadow_events).values(
+                    shadow_event_id=uuid7(),
+                    shadow_deployment_id=deployment_id,
+                    shadow_run_id=run_id,
+                    sequence=sequence,
+                    event_type=(
+                        "SANDBOX_CIRCUIT_LIQUIDATION_REQUESTED"
+                        if position_open
+                        else "SANDBOX_CIRCUIT_RETIRED"
+                    ),
+                    event_time=now,
+                    symbol=deployment["symbol"],
+                    bar_id=None,
+                    cash_balance=deployment["sleeve_cash_balance"],
+                    position_quantity=deployment["position_quantity"],
+                    price=deployment["last_price"],
+                    realized_pnl_delta=_ZERO,
+                    payload_json={
+                        "sandbox_total_value": str(total_value),
+                        "sandbox_floor_value": str(floor),
+                        "loss_fraction_from_initial": str(
+                            (
+                                STRATEGY_SANDBOX_INITIAL_EQUITY - total_value
+                            )
+                            / STRATEGY_SANDBOX_INITIAL_EQUITY
+                        ),
+                        "virtual_only": True,
+                    },
+                    created_at=now,
+                )
+            )
+        if not position_open:
+            self._sync_active_symbols(
+                str(deployment["symbol"]),
+                add=False,
+                reason="Strategy sandbox failed its permanent 12% equity floor",
+            )
+        return 1
+
     def _record_deployment_processing_failure(
         self,
         *,
@@ -1512,10 +1956,28 @@ class ShadowRuntime:
         *,
         new_exposure_paused: bool,
     ) -> tuple[int, int]:
+        created = 0
         position_open = self._position_is_open(
             str(deployment["shadow_deployment_id"])
         )
-        if not position_open:
+        if deployment["status"] == "ACTIVE":
+            created += self._enforce_sandbox_circuit_breaker(
+                deployment_id=str(deployment["shadow_deployment_id"]),
+                run_id=run_id,
+                lease_token=lease_token,
+            )
+            if created:
+                deployment = self.deployment(
+                    str(deployment["shadow_deployment_id"])
+                )
+                position_open = self._position_is_open(
+                    str(deployment["shadow_deployment_id"])
+                )
+                if deployment["status"] in _TERMINAL_DEPLOYMENT_STATUSES:
+                    return 0, created
+        if not position_open and deployment["status"] == "LIQUIDATION_PENDING":
+            raise RuntimeError("Liquidation-pending Shadow deployment has no open position")
+        if not position_open and deployment["status"] == "ACTIVE":
             try:
                 self.adoption_preview(
                     strategy_spec_id=str(deployment["strategy_spec_id"]),
@@ -1529,9 +1991,9 @@ class ShadowRuntime:
                     deployment,
                     reason=str(exc),
                 )
-                return 0, 0
+                return 0, created
         observed_at = self._now()
-        created = self._cancel_interrupted_plan_activations(
+        created += self._cancel_interrupted_plan_activations(
             deployment=deployment,
             run_id=run_id,
             lease_token=lease_token,
@@ -1577,6 +2039,11 @@ class ShadowRuntime:
                     missed_bar_count=0,
                 )
                 processed += 1
+                created += self._enforce_sandbox_circuit_breaker(
+                    deployment_id=str(deployment["shadow_deployment_id"]),
+                    run_id=run_id,
+                    lease_token=lease_token,
+                )
                 if not self._position_is_open(
                     str(deployment["shadow_deployment_id"])
                 ):
@@ -1632,6 +2099,29 @@ class ShadowRuntime:
                 if decision_bar.timeframe == "1Day"
                 else snapshot.as_of + timedelta(minutes=5)
             )
+            if (
+                self.new_exposure_not_before is not None
+                and earliest_execution_at < self.new_exposure_not_before
+            ):
+                lineage_values.append(
+                    self._operational_event(
+                        deployment=refreshed,
+                        run_id=run_id,
+                        bar_id=decision_bar.bar_id,
+                        event_type="SHADOW_ACTIVATION_WINDOW_NOT_REACHED",
+                        event_time=decision_completed_at,
+                        payload={
+                            "earliest_execution_at": earliest_execution_at.isoformat(),
+                            "new_exposure_not_before": (
+                                self.new_exposure_not_before.isoformat()
+                            ),
+                            "virtual_only": True,
+                        },
+                    )
+                )
+                action = SignalAction.FLAT
+        if action == SignalAction.LONG:
+            assert earliest_execution_at is not None
             (
                 candidate,
                 decision,
@@ -1856,6 +2346,11 @@ class ShadowRuntime:
                     self._assert_runtime_lease(connection, lease_token)
                     connection.execute(insert(shadow_events).values(**late_event))
                 created += 1
+        created += self._enforce_sandbox_circuit_breaker(
+            deployment_id=str(refreshed["shadow_deployment_id"]),
+            run_id=run_id,
+            lease_token=lease_token,
+        )
         return 1, created + len(lineage_values)
 
     def _cancel_interrupted_plan_activations(
@@ -2026,13 +2521,32 @@ class ShadowRuntime:
             rejection_reasons.append("MISSED_EARLIEST_FILL_BAR")
         if entry_time > expires_at:
             rejection_reasons.append("PLAN_EXPIRED")
-        profile_version, _, policy = strategy_execution_profile(
+        snapshot = self.research_store.feature_snapshot(
+            str(pending["feature_snapshot_id"])
+        )
+        if snapshot is None:
+            raise RuntimeError("Persisted Shadow plan feature snapshot is missing")
+        profile_version, _, _ = strategy_execution_profile(
             data_requirements=dict(deployment.get("data_requirements_json") or {}),
-            account_policy=self.effective_risk_policy(),
+            account_policy=self.effective_risk_policy(
+                str(deployment["virtual_account_id"])
+            ),
+            strategy_type=str(deployment["strategy_type"]),
+        )
+        policy = strategy_signal_risk_policy(
+            data_requirements=dict(deployment.get("data_requirements_json") or {}),
+            strategy_type=str(deployment["strategy_type"]),
+            feature_values=dict(snapshot.values),
+            account_policy=self.effective_risk_policy(
+                str(deployment["virtual_account_id"])
+            ),
         )
         if account.equity <= policy.account_floor_usd:
             rejection_reasons.append("ACCOUNT_FLOOR_REACHED_AT_EXECUTION")
-        if account.daily_pnl <= -policy.daily_loss_stop_usd:
+        if (
+            policy.daily_loss_limit_enabled
+            and account.daily_pnl <= -policy.daily_loss_stop_usd
+        ):
             rejection_reasons.append("DAILY_LOSS_HALT_AT_EXECUTION")
         if self.restrictions.is_restricted(
             str(deployment["symbol"]), entry_time.astimezone(UTC).date()
@@ -2482,6 +2996,19 @@ class ShadowRuntime:
         assert bar_close is not None
         if execution_bar.event_time < opened_at:
             return 0
+        bar_open = (
+            self.session_clock.daily_bar_session_open(execution_bar.event_time)
+            if execution_bar.timeframe == "1Day"
+            else execution_bar.event_time
+        )
+        liquidation_requested_at = _utc(
+            deployment.get("liquidation_requested_at")
+        )
+        forced_liquidation = bool(
+            deployment.get("status") == "LIQUIDATION_PENDING"
+            and liquidation_requested_at is not None
+            and liquidation_requested_at < bar_open
+        )
 
         quantity = Decimal(str(pending["filled_quantity"]))
         entry_raw = Decimal(str(pending["entry_raw_price"]))
@@ -2581,7 +3108,9 @@ class ShadowRuntime:
         bracket_triggered = exit_reason != "session_close"
         timed_exit = bar_close >= expires_at
         emergency_exit = not market_data_healthy
-        close_position = bracket_triggered or timed_exit or emergency_exit
+        close_position = (
+            forced_liquidation or bracket_triggered or timed_exit or emergency_exit
+        )
         events = action_events
         final_cash = cash_after_entry
         realized_delta = _ZERO
@@ -2590,7 +3119,7 @@ class ShadowRuntime:
         if close_position:
             raw_exit = (
                 execution_bar.open
-                if emergency_exit
+                if emergency_exit or forced_liquidation
                 else exit_price
                 if bracket_triggered
                 else execution_bar.close
@@ -2646,7 +3175,13 @@ class ShadowRuntime:
                             "raw_price": str(raw_exit),
                             "commission": str(exit_commission),
                             "exit_reason": (
-                                "market_data_gap_emergency_exit"
+                                "sandbox_circuit_forced_exit"
+                                if forced_liquidation
+                                and deployment.get("retired_reason")
+                                == "SANDBOX_CIRCUIT_BREAKER"
+                                else "legacy_shadow_migration_forced_exit"
+                                if forced_liquidation
+                                else "market_data_gap_emergency_exit"
                                 if emergency_exit
                                 else exit_reason
                                 if bracket_triggered
@@ -2713,25 +3248,55 @@ class ShadowRuntime:
                     connection=connection,
                 )
             connection.execute(insert(shadow_events), events)
+            deployment_values: dict[str, Any] = {
+                "cash_balance": final_cash,
+                "position_quantity": _ZERO if close_position else quantity,
+                "average_entry_price": None if close_position else entry_fill,
+                "last_price": execution_bar.close,
+                "realized_pnl": cumulative_realized,
+                "unrealized_pnl": unrealized,
+                "last_processed_bar_time": execution_bar.event_time,
+                "updated_at": self._now(),
+            }
+            if close_position and deployment.get("status") == "LIQUIDATION_PENDING":
+                deployment_values["status"] = (
+                    "RETIRED_SHADOW_FAILED"
+                    if deployment.get("retired_reason")
+                    == "SANDBOX_CIRCUIT_BREAKER"
+                    else "RETIRED_LEGACY"
+                )
             connection.execute(
                 update(shadow_deployments)
                 .where(
                     shadow_deployments.c.shadow_deployment_id
                     == deployment["shadow_deployment_id"]
                 )
-                .values(
-                    cash_balance=final_cash,
-                    position_quantity=_ZERO if close_position else quantity,
-                    average_entry_price=None if close_position else entry_fill,
-                    last_price=execution_bar.close,
-                    realized_pnl=cumulative_realized,
-                    unrealized_pnl=unrealized,
-                    last_processed_bar_time=execution_bar.event_time,
-                    updated_at=self._now(),
-                )
+                .values(**deployment_values)
             )
+            if (
+                close_position
+                and deployment.get("status") == "LIQUIDATION_PENDING"
+                and deployment.get("account_mode") == STRATEGY_SANDBOX_ACCOUNT_TYPE
+            ):
+                connection.execute(
+                    update(virtual_accounts)
+                    .where(
+                        virtual_accounts.c.virtual_account_id
+                        == deployment["virtual_account_id"]
+                    )
+                    .values(status="FAILED", updated_at=self._now())
+                )
         deployment["sleeve_cash_balance"] = final_cash
         deployment["realized_pnl"] = cumulative_realized
+        if close_position and deployment.get("status") == "LIQUIDATION_PENDING":
+            self._sync_active_symbols(
+                str(deployment["symbol"]),
+                add=False,
+                reason=str(
+                    deployment.get("retired_reason")
+                    or "Shadow liquidation completed"
+                ),
+            )
         return len(events)
 
     @staticmethod
@@ -2954,9 +3519,13 @@ class ShadowRuntime:
         RiskEvaluationContext,
         list[dict[str, Any]],
     ]:
-        _, _, policy = strategy_execution_profile(
+        policy = strategy_signal_risk_policy(
             data_requirements=dict(deployment.get("data_requirements_json") or {}),
-            account_policy=self.effective_risk_policy(),
+            strategy_type=str(deployment["strategy_type"]),
+            feature_values=snapshot_values,
+            account_policy=self.effective_risk_policy(
+                str(deployment["virtual_account_id"])
+            ),
         )
         raw_invalidation, raw_target = baseline_long_geometry(
             planned_entry,
@@ -3118,8 +3687,19 @@ class ShadowRuntime:
                     == deployment["virtual_account_id"]
                 )
             ).one()
+            unrealized_pnl = connection.execute(
+                select(
+                    func.coalesce(func.sum(shadow_deployments.c.unrealized_pnl), 0)
+                ).where(
+                    shadow_deployments.c.virtual_account_id
+                    == deployment["virtual_account_id"]
+                )
+            ).scalar_one()
         return AccountState(
-            equity=Decimal(str(account.cash_balance)),
+            equity=(
+                Decimal(str(account.cash_balance))
+                + Decimal(str(unrealized_pnl))
+            ),
             daily_pnl=daily_pnl,
             concurrent_planned_risk=Decimal(str(account.reserved_risk_usd)),
         )
@@ -3273,7 +3853,9 @@ class ShadowRuntime:
                     .select_from(shadow_deployments)
                     .where(
                         (shadow_deployments.c.symbol == symbol)
-                        & (shadow_deployments.c.status == "ACTIVE")
+                        & shadow_deployments.c.status.in_(
+                            ("ACTIVE", "LIQUIDATION_PENDING")
+                        )
                     )
                 ).scalar_one()
             if int(remaining) == 0:

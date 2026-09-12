@@ -94,12 +94,12 @@ and code-change sessions. A failed
 handler is retained as `FAILED` with a bounded error code. Strategy deletion means retirement,
 not record removal.
 
-Shared-account risk changes use `account.risk.update` and the same two-step confirmation.
-The editor distinguishes price stop distance and target R multiple from account-dollar risk,
-concurrent risk, and daily loss limits. They are blocked while any trade plan has reserved
-account capacity. A successful revision changes the exact execution contract, so affected
-strategies must be revalidated before a new adoption. The current profile still exits at the
-same session close; widening the protective stop does not silently create a swing strategy.
+The Shadow page presents each strategy's isolated `$10,000` sandbox, current marked value,
+`$8,800` failure floor, position, and lifecycle state. Stop/target geometry is versioned and
+derived from point-in-time volatility, horizon, and strategy family; the UI reports it rather
+than offering a shared-account risk editor. A confirmed `shadow.migrate_to_sandboxes` action
+is available only while legacy shared-account deployments remain. It retires flat rows and
+requests causal liquidation for open virtual positions without erasing history.
 
 The Pipelines page also shows the autonomous coordinator and its durable stage jobs. Use
 `GET /v1/coordinator/status` for the complete recent cycle view; `WAITING_*` outcomes explain

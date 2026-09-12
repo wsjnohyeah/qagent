@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -42,6 +42,13 @@ class RiskPolicy(BaseModel):
     slippage_buffer_per_share_usd: Decimal = Field(ge=0)
     maximum_equity_quantity: int = Field(ge=1)
     allowed_execution_modes: tuple[TradingMode, ...] = Field(min_length=1)
+    position_sizing_mode: Literal["portfolio_caps", "equity_fraction"] = (
+        "portfolio_caps"
+    )
+    daily_loss_limit_enabled: bool = True
+    volatility_geometry_enabled: bool = False
+    minimum_stop_fraction: Decimal = Field(default=Decimal("0.03"), gt=0, lt=1)
+    maximum_stop_fraction: Decimal = Field(default=Decimal("0.15"), gt=0, lt=1)
 
     @classmethod
     def from_yaml(cls, path: Path) -> RiskPolicy:
@@ -49,8 +56,13 @@ class RiskPolicy(BaseModel):
 
     @model_validator(mode="after")
     def limits_are_coherent(self) -> RiskPolicy:
-        if self.maximum_trade_risk_usd > self.maximum_concurrent_risk_usd:
+        if (
+            self.position_sizing_mode == "portfolio_caps"
+            and self.maximum_trade_risk_usd > self.maximum_concurrent_risk_usd
+        ):
             raise ValueError("Per-trade risk cannot exceed concurrent portfolio risk")
+        if self.minimum_stop_fraction > self.maximum_stop_fraction:
+            raise ValueError("Minimum stop fraction cannot exceed maximum stop fraction")
         return self
 
 
@@ -62,6 +74,26 @@ MULTI_SESSION_EXECUTION_PROFILE_VERSION = (
 )
 SUPPORTED_HOLDING_PERIOD_SESSIONS = (1, 5, 20, 63, 126, 252)
 MULTI_SESSION_STOP_FRACTION = Decimal("0.125")
+VOLATILITY_GEOMETRY_VERSION = "realized_volatility_geometry@0.1.0"
+_SQRT_252 = Decimal("252").sqrt()
+_HORIZON_STOP_MULTIPLIERS = {
+    1: Decimal("1.50"),
+    5: Decimal("2.00"),
+    20: Decimal("2.75"),
+    63: Decimal("3.50"),
+    126: Decimal("4.00"),
+    252: Decimal("4.50"),
+}
+_STRATEGY_STOP_MULTIPLIERS = {
+    "buy_and_hold": Decimal("1.00"),
+    "mean_reversion": Decimal("0.90"),
+    "momentum": Decimal("1.10"),
+}
+_STRATEGY_TARGET_R_MULTIPLES = {
+    "buy_and_hold": Decimal("2.00"),
+    "mean_reversion": Decimal("1.75"),
+    "momentum": Decimal("2.25"),
+}
 
 
 def deployable_execution_profile_parameters() -> dict[str, Any]:
@@ -125,39 +157,140 @@ def strategy_execution_profile(
     *,
     data_requirements: dict[str, Any],
     account_policy: RiskPolicy,
+    strategy_type: str | None = None,
 ) -> tuple[str, dict[str, Any], RiskPolicy]:
     """Bind a strategy horizon to deterministic price geometry and account limits."""
     holding_sessions = strategy_holding_period_sessions(data_requirements)
-    if holding_sessions == 1:
-        return (
-            BASELINE_EXECUTION_PROFILE_VERSION,
-            deployable_execution_profile_parameters(),
-            account_policy,
+    dynamic_geometry = account_policy.volatility_geometry_enabled
+    stop_fraction = (
+        account_policy.maximum_stop_fraction
+        if dynamic_geometry
+        else MULTI_SESSION_STOP_FRACTION
+    )
+    target_r_multiple = (
+        _STRATEGY_TARGET_R_MULTIPLES.get(
+            str(strategy_type), account_policy.baseline_target_r_multiple
         )
+        if dynamic_geometry
+        else account_policy.baseline_target_r_multiple
+    )
     effective_policy = account_policy.model_copy(
         update={
             "version": (
-                f"{account_policy.version}+multi_session_"
-                f"{holding_sessions}x{MULTI_SESSION_STOP_FRACTION}"
+                f"{account_policy.version}+{VOLATILITY_GEOMETRY_VERSION}"
+                if dynamic_geometry
+                else (
+                    f"{account_policy.version}+multi_session_"
+                    f"{holding_sessions}x{MULTI_SESSION_STOP_FRACTION}"
+                )
             ),
-            "baseline_stop_fraction": MULTI_SESSION_STOP_FRACTION,
+            "baseline_stop_fraction": stop_fraction,
+            "baseline_target_r_multiple": target_r_multiple,
         }
     )
     parameters = deployable_execution_profile_parameters()
+    if holding_sessions == 1:
+        if dynamic_geometry:
+            parameters["risk_geometry"] = {
+                "version": VOLATILITY_GEOMETRY_VERSION,
+                "feature": "realized_vol_20",
+                "annualization_periods": 252,
+                "minimum_stop_fraction": str(
+                    account_policy.minimum_stop_fraction
+                ),
+                "maximum_stop_fraction": str(
+                    account_policy.maximum_stop_fraction
+                ),
+                "horizon_stop_multiplier": str(
+                    _HORIZON_STOP_MULTIPLIERS[holding_sessions]
+                ),
+                "strategy_stop_multiplier": str(
+                    _STRATEGY_STOP_MULTIPLIERS.get(
+                        str(strategy_type), Decimal("1")
+                    )
+                ),
+                "target_r_multiple": str(target_r_multiple),
+            }
+            parameters["price_stop_fraction"] = (
+                "point_in_time_volatility_derived"
+            )
+            parameters["target_r_multiple"] = str(target_r_multiple)
+            return BASELINE_EXECUTION_PROFILE_VERSION, parameters, effective_policy
+        return BASELINE_EXECUTION_PROFILE_VERSION, parameters, account_policy
     attached = dict(parameters["attached_exits"])
     attached["same_session"] = False
     parameters["attached_exits"] = attached
     parameters["maximum_holding_sessions"] = holding_sessions
-    parameters["price_stop_fraction"] = str(MULTI_SESSION_STOP_FRACTION)
-    parameters["target_r_multiple"] = str(
-        effective_policy.baseline_target_r_multiple
-    )
+    if dynamic_geometry:
+        parameters["risk_geometry"] = {
+            "version": VOLATILITY_GEOMETRY_VERSION,
+            "feature": "realized_vol_20",
+            "annualization_periods": 252,
+            "minimum_stop_fraction": str(account_policy.minimum_stop_fraction),
+            "maximum_stop_fraction": str(account_policy.maximum_stop_fraction),
+            "horizon_stop_multiplier": str(
+                _HORIZON_STOP_MULTIPLIERS[holding_sessions]
+            ),
+            "strategy_stop_multiplier": str(
+                _STRATEGY_STOP_MULTIPLIERS.get(str(strategy_type), Decimal("1"))
+            ),
+            "target_r_multiple": str(target_r_multiple),
+        }
+        parameters["price_stop_fraction"] = "point_in_time_volatility_derived"
+    else:
+        parameters["price_stop_fraction"] = str(MULTI_SESSION_STOP_FRACTION)
+    parameters["target_r_multiple"] = str(target_r_multiple)
     parameters["scheduled_exit"] = {
         "type": "market_on_close",
         "after_completed_sessions": holding_sessions,
         "paper_compatible": False,
     }
     return MULTI_SESSION_EXECUTION_PROFILE_VERSION, parameters, effective_policy
+
+
+def strategy_signal_risk_policy(
+    *,
+    data_requirements: dict[str, Any],
+    strategy_type: str,
+    feature_values: dict[str, Any],
+    account_policy: RiskPolicy,
+) -> RiskPolicy:
+    """Resolve deterministic point-in-time stop/target geometry for one signal."""
+    _, _, effective = strategy_execution_profile(
+        data_requirements=data_requirements,
+        account_policy=account_policy,
+        strategy_type=strategy_type,
+    )
+    if not account_policy.volatility_geometry_enabled:
+        return effective
+    annualized_volatility = Decimal(str(feature_values["realized_vol_20"]))
+    if annualized_volatility < 0:
+        raise ValueError("Realized volatility cannot be negative")
+    holding_sessions = strategy_holding_period_sessions(data_requirements)
+    raw_stop = (
+        annualized_volatility
+        / _SQRT_252
+        * _HORIZON_STOP_MULTIPLIERS[holding_sessions]
+        * _STRATEGY_STOP_MULTIPLIERS.get(strategy_type, Decimal("1"))
+    )
+    stop = min(
+        account_policy.maximum_stop_fraction,
+        max(account_policy.minimum_stop_fraction, raw_stop),
+    )
+    target_r = _STRATEGY_TARGET_R_MULTIPLES.get(
+        strategy_type,
+        account_policy.baseline_target_r_multiple,
+    )
+    return effective.model_copy(
+        update={
+            "version": (
+                f"{account_policy.version}+{VOLATILITY_GEOMETRY_VERSION}"
+                f"+{holding_sessions}s+{strategy_type}+stop-{stop}"
+            ),
+            "baseline_stop_fraction": stop,
+            "baseline_target_r_multiple": target_r,
+        }
+    )
 
 
 def deployable_price_increment(price: Decimal) -> Decimal:
@@ -366,9 +499,15 @@ def evaluate_candidate(
         reasons.append("DECISION_TOO_LATE_FOR_EARLIEST_EXECUTION")
     if account.equity <= policy.account_floor_usd:
         reasons.append("ACCOUNT_FLOOR_REACHED")
-    if account.daily_pnl <= -policy.daily_loss_stop_usd:
+    if (
+        policy.daily_loss_limit_enabled
+        and account.daily_pnl <= -policy.daily_loss_stop_usd
+    ):
         reasons.append("DAILY_LOSS_HALT")
-    if account.concurrent_planned_risk >= policy.maximum_concurrent_risk_usd:
+    if (
+        policy.position_sizing_mode == "portfolio_caps"
+        and account.concurrent_planned_risk >= policy.maximum_concurrent_risk_usd
+    ):
         reasons.append("PORTFOLIO_RISK_LIMIT")
     if tactical:
         if features.relative_volume < policy.minimum_relative_volume:
@@ -393,14 +532,20 @@ def evaluate_candidate(
         if reward_risk < policy.minimum_reward_risk:
             reasons.append("REWARD_RISK_TOO_LOW")
 
-    remaining_portfolio_risk = max(
-        Decimal("0"), policy.maximum_concurrent_risk_usd - account.concurrent_planned_risk
-    )
-    risk_budget = min(
-        account.equity * policy.initial_risk_fraction,
-        policy.maximum_trade_risk_usd,
-        remaining_portfolio_risk,
-    ).quantize(Decimal("0.01"))
+    if policy.position_sizing_mode == "equity_fraction":
+        risk_budget = (account.equity * policy.initial_risk_fraction).quantize(
+            Decimal("0.01")
+        )
+    else:
+        remaining_portfolio_risk = max(
+            Decimal("0"),
+            policy.maximum_concurrent_risk_usd - account.concurrent_planned_risk,
+        )
+        risk_budget = min(
+            account.equity * policy.initial_risk_fraction,
+            policy.maximum_trade_risk_usd,
+            remaining_portfolio_risk,
+        ).quantize(Decimal("0.01"))
     quantity = 0
     if per_share_risk > 0 and risk_budget > 0:
         quantity = min(

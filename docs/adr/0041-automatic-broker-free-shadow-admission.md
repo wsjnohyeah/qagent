@@ -18,8 +18,8 @@ broker-free observation environment.
    otherwise `CANDIDATE`, record the adoption, and start the matching strategy/symbol Shadow
    sleeve idempotently.
 3. Preserve the exact current validation contract, horizon-specific search count, current
-   promotion policy, governed universe/scanner lineage, restriction checks, shared virtual
-   account, deterministic sizing, and risk limits.
+   promotion policy, governed universe/scanner lineage, restriction checks, isolated Shadow
+   sandbox, deterministic sizing, and risk limits.
 4. Treat an operator `PAUSED` or `RETIRED` adoption/deployment as an authoritative hold that
    automation cannot reverse.
 5. Candidate remains observation-only. Automatic Shadow admission does not enroll Alpaca Paper,

@@ -20,10 +20,10 @@ portfolio events.
    independent one-session windows but only one annual window. Positive modeled net return
    and the drawdown ceiling remain mandatory at every horizon.
 3. With `COORDINATOR_AUTO_SHADOW_ENABLED=true`, the deterministic coordinator adopts the
-   strongest available exact tier and starts one strategy/symbol deployment under the shared
-   virtual account. If disabled, the administrator may use the confirmation-gated manual path.
+   strongest available exact tier and starts one isolated `$10,000` strategy/symbol sandbox.
+   If disabled, the administrator may use the confirmation-gated manual path.
 4. An explicit operator pause or retirement always blocks automatic reactivation. The
-   validated capital must match the shared virtual master account.
+   validated capital must be exactly `$10,000` and its contract must match the sandbox policy.
 5. The shadow pipeline and global new-exposure control are enabled.
 
 No override can convert a report that failed the selected tier into an adoption. A strict
@@ -36,7 +36,8 @@ override and does not claim qualification.
 - The runtime entry point rejects a paused tick when there is no position to manage. If a
   multi-session position is already open, the tick continues only its deterministic stop,
   target, mark, and timed-exit processing; it cannot create new exposure.
-- Only `ACTIVE` deployments are evaluated.
+- `ACTIVE` deployments are evaluated for entries and exits. `LIQUIDATION_PENDING`
+  deployments are exit-only until their next causally executable virtual fill.
 - One deployment fault is persisted as `DEPLOYMENT_PROCESSING_FAILED` and makes that run
   `DEGRADED`; the runtime continues evaluating the other active deployments. A run is `FAILED`
   and contributes to worker restart protection only when every eligible deployment fails.
@@ -51,17 +52,17 @@ override and does not claim qualification.
 - Momentum and mean-reversion use their immutable `StrategySpec` parameters and one of the
   approved 1, 5, 20, 63, 126, or 252-session holding horizons. The literal buy-and-hold
   benchmark remains research-only because it has no finite deployable exit contract.
-- A long signal becomes a persistent `SignalCandidate`, passes the deterministic baseline
-  shadow risk profile, and becomes a `TradePlan` only on approval. Account floor, daily loss,
-  concurrent risk, restriction, data health, liquidity, duplicate intent, expiry, reward/risk,
-  and position sizing are evaluated before any virtual order is recorded.
+- A long signal becomes a persistent `SignalCandidate`, passes the deterministic sandbox
+  risk profile, and becomes a `TradePlan` only on approval. Restriction, data health,
+  liquidity, duplicate intent, expiry, reward/risk, account floor, and position sizing are
+  evaluated before any virtual order is recorded.
 - `SignalCandidate.created_at`, `RiskDecision.evaluated_at`, and
   `TradePlan.created_at` are actual runtime observation/approval/persistence times; the
   candidate `as_of` remains the market-information cutoff. A plan cannot fill unless it was
   durably persisted before the simulated market open. Delayed historical arrivals therefore
   cannot enter the forward P&L ledger.
 - The plan uses `next_session_day_limit_bracket_moc@0.1.0`: a DAY limit capped at the
-  completed decision-bar close, fixed stop/target geometry, and same-session close. The
+  completed decision-bar close, volatility-derived stop/target geometry, and same-session close. The
   actual fill price triggers a second reward/risk and quantity check. An untouched limit is
   recorded as `DAY_LIMIT_NOT_FILLED`; a fill is closed by stop, target, or modeled MOC.
 - Multi-session plans use `next_session_day_limit_bracket_timed_exit@0.1.0`. The next-session
@@ -71,12 +72,29 @@ override and does not claim qualification.
 - Research, Shadow, and Paper share the same price-increment rounding. When only a daily bar
   proves an intraday limit touch, replay never credits an ambiguous target print that may
   have occurred before entry; it uses a later stop or the close.
-- Every deployment is an attribution sleeve under one `SHARED_MASTER` virtual account.
-  Approved plans atomically reserve account cash and risk; fills/cancellations release the
-  reservation, and realized P&L settles once into the master account. Strategies therefore
-  cannot each spend a duplicate copy of the same capital.
-- Account limits are immutable revisions changed through `account.risk.update`. A new risk
-  revision changes the execution contract, so old validation certificates fail closed.
+- Every immutable strategy/symbol deployment owns one isolated virtual account initialized at
+  `$10,000`. Its planned risk is exactly 2% of current marked equity, recalculated for each
+  signal and again at execution. It has no shared cash or concurrent-risk budget with another
+  strategy. Portfolio allocation is deliberately outside Shadow and belongs to Paper.
+- Stop distance is derived only from the point-in-time `realized_vol_20` feature, holding
+  horizon, and strategy family. The result is clamped to 3%–15%; no stop may be wider than
+  15%. The target is a versioned strategy-family R multiple. These parameters and the exact
+  zero-commission cost model are part of the validation certificate.
+
+  ```text
+  raw stop = annualized realized_vol_20 / sqrt(252)
+             × horizon multiplier × strategy multiplier
+
+  horizon multiplier: 1=1.50, 5=2.00, 20=2.75, 63=3.50, 126=4.00, 252=4.50
+  strategy multiplier: buy_and_hold=1.00, mean_reversion=0.90, momentum=1.10
+  target R: buy_and_hold=2.00, mean_reversion=1.75, momentum=2.25
+  ```
+- A sandbox circuit breaker compares current cash plus marked unrealized P&L with `$8,800`.
+  At or below the floor, no new entry is possible. A flat sandbox is immediately marked
+  `RETIRED_SHADOW_FAILED`; an open sandbox becomes `LIQUIDATION_PENDING`, exits at the next
+  causally executable virtual price, and is then retired. The immutable strategy version's
+  adoption is also retired and cannot be automatically or manually re-adopted; research must
+  generate and validate a new version.
 - Every flat active deployment rechecks that certificate before a tick. A mismatch moves it to
   `REVALIDATION_REQUIRED`, cancels any open plan without erasing account history, and cannot
   be resumed until a current exact validation has been adopted. An already-filled
@@ -85,8 +103,9 @@ override and does not claim qualification.
 - The research-search count is frozen into the administrator-approved validation certificate.
   New, unrelated experiments after adoption do not invalidate an active Shadow deployment;
   current policy, risk, cost, feature, restriction, and execution contracts still do.
-- Virtual fills model commission, half-spread, slippage, fixed impact, and maximum bar-volume
-  participation through the deterministic event-driven portfolio engine. Quantity is fixed
+- Virtual fills use zero explicit commission while retaining half-spread, slippage, fixed
+  impact, gap behavior, and maximum bar-volume participation through the deterministic
+  event-driven portfolio engine. Quantity is fixed
   before the session from completed-bar evidence; execution-bar volume is used only to model
   whether that already bounded order could fill.
 - Deployment/bar/event uniqueness and `last_processed_bar_time` make reruns idempotent.
@@ -114,7 +133,20 @@ GET /v1/runtime/controls
 ```
 
 Every state-changing request is created through `/v1/actions` and finalized through the
-confirmation endpoint. The `shadow-active` system list is synchronized with active symbols.
+confirmation endpoint. `shadow.migrate_to_sandboxes` cancels unfilled legacy plans, retires
+flat legacy deployments, and places open legacy positions into deterministic liquidation.
+The `shadow-active` system list is synchronized with active or liquidating symbols.
+
+For a scheduled transition, set a timezone-aware boundary before deployment, for example:
+
+```dotenv
+SHADOW_NEW_EXPOSURE_NOT_BEFORE=2026-09-14T13:30:00Z
+```
+
+The boundary blocks only plans whose earliest execution would precede it. It does not block
+risk-reducing exits. Keep the global pause on while running the migration action, verify that
+`legacy_nonterminal_deployments` reaches zero, then resume the already approved Shadow-only
+workflow. Starting sandboxes before the boundary is allowed; they cannot create early exposure.
 
 ## Known limitations
 

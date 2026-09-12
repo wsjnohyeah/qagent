@@ -15,6 +15,7 @@ from agentic_quant.config import Settings
 from agentic_quant.database import (
     admin_sessions,
     event_outbox,
+    strategy_adoptions,
     validation_reports,
     virtual_accounts,
 )
@@ -26,23 +27,13 @@ from agentic_quant.llm import LLMProviderResult, LLMRequest, ResponsesAPIProvide
 from agentic_quant.market_calendar import MarketSessionClock
 from agentic_quant.market_store import MarketDataStore
 from agentic_quant.migrations import upgrade_database
-from agentic_quant.research import (
-    BACKTEST_ENGINE_VERSION,
-    FEATURE_SET_VERSION,
-    ResearchBacktester,
-    default_strategy_spec,
-    research_code_sha256,
-)
+from agentic_quant.research import ResearchBacktester, default_strategy_spec, research_code_sha256
 from agentic_quant.research_store import ResearchStore, _canonical_hash
-from agentic_quant.risk import (
-    BASELINE_EXECUTION_PROFILE_VERSION,
-    RestrictionRegistry,
-    RiskPolicy,
-    deployable_execution_profile_parameters,
-)
+from agentic_quant.risk import RestrictionRegistry, RiskPolicy
 from agentic_quant.validation import (
     load_promotion_gate_policy,
     promotion_policy_sha256,
+    validation_execution_contract,
 )
 
 
@@ -343,7 +334,7 @@ def test_shared_account_risk_update_requires_confirmation(settings: Settings) ->
         ).json()
         unchanged = client.get("/v1/shadow/account").json()
         assert unchanged["maximum_trade_risk_usd"] == "130.00000000"
-        assert unchanged["effective_risk_policy"]["baseline_stop_fraction"] == "0.02"
+        assert unchanged["effective_risk_policy"]["baseline_stop_fraction"] == "0.15"
         confirmed = client.post(
             f"/v1/actions/{proposal['action_request_id']}/confirm",
             json={"confirmation_phrase": proposal["confirmation_phrase"]},
@@ -352,7 +343,8 @@ def test_shared_account_risk_update_requires_confirmation(settings: Settings) ->
         changed = client.get("/v1/shadow/account").json()
         assert changed["maximum_trade_risk_usd"] == "180.00000000"
         assert changed["risk_revision"] == 2
-        assert changed["effective_risk_policy"]["baseline_stop_fraction"] == (
+        assert changed["effective_risk_policy"]["baseline_stop_fraction"] == "0.15"
+        assert changed["legacy_shared_account"]["baseline_stop_fraction"] == (
             "0.12500000"
         )
         assert changed["risk_explanation"]["execution_profile"] == (
@@ -540,22 +532,19 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
         )
     )
     report_id = uuid7()
-    execution_contract = {
-        "subject": "static_strategy",
-        "strategy_spec_ids": {"momentum": spec.strategy_spec_id},
-        "feature_set_version": FEATURE_SET_VERSION,
-        "backtest_engine_version": BACKTEST_ENGINE_VERSION,
-        "cost_model": BacktestCostModel().model_dump(mode="json"),
-        "risk_policy": RiskPolicy.from_yaml(
-            settings.risk_policy_path
-        ).model_dump(mode="json"),
-        "restriction_registry_version": RestrictionRegistry.from_yaml(
-            settings.restricted_securities_path
-        ).version,
-        "initial_equity": "100000",
-        "execution_profile": BASELINE_EXECUTION_PROFILE_VERSION,
-        "execution_profile_parameters": deployable_execution_profile_parameters(),
-    }
+    policy = RiskPolicy.from_yaml(settings.risk_policy_path)
+    restrictions = RestrictionRegistry.from_yaml(
+        settings.restricted_securities_path
+    )
+    execution_contract = validation_execution_contract(
+        validation_subject="static_strategy",
+        validated_strategy_spec_ids={"momentum": spec.strategy_spec_id},
+        cost_model=BacktestCostModel(),
+        risk_policy=policy,
+        restriction_registry_version=restrictions.version,
+        initial_equity=Decimal("10000"),
+        strategy_spec=spec,
+    )
     with ledger.engine.begin() as connection:
         connection.execute(
             insert(validation_reports).values(
@@ -650,7 +639,7 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
                 "parameters": {
                     "strategy_spec_id": spec.strategy_spec_id,
                     "symbol": "AAPL",
-                    "initial_cash": "100000",
+                    "initial_cash": "10000",
                 },
                 "reason": "Start the validated broker-free shadow deployment",
             },
@@ -764,7 +753,7 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
             as_of_start=bars[-3].available_from,
             as_of_end=bars[-2].available_from,
             code_git_sha="test-git-sha",
-            initial_equity=Decimal("100000"),
+            initial_equity=Decimal("10000"),
             cost_model=BacktestCostModel(),
         )
         entry_fill = next(
@@ -773,7 +762,7 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
         active_after_trade = client.get("/v1/shadow/deployments").json()[0]
         assert int(Decimal(str(entry_fill["position_quantity"]))) == replay.trades[0].quantity
         assert Decimal(str(active_after_trade["cash_balance"])) == (
-            Decimal("100000") + replay.trades[0].net_pnl
+            Decimal("10000") + replay.trades[0].net_pnl
         ).quantize(Decimal("0.00000001"))
 
         active = active_after_trade
@@ -784,7 +773,7 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
                     virtual_accounts.c.virtual_account_id
                     == active["virtual_account_id"]
                 )
-                .values(cash_balance=Decimal("30000"))
+                .values(cash_balance=Decimal("8799"))
             )
         market.insert_bars((bars[-1],), raw_object_id="TEST_RAW")
         shadow_now[0] = bars[-1].available_from + timedelta(minutes=1)
@@ -806,18 +795,32 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
         assert sum(
             event["event_type"] == "VIRTUAL_FILL" for event in after_floor
         ) == sum(event["event_type"] == "VIRTUAL_FILL" for event in events)
-        rejected = client.get("/v1/shadow/decisions").json()[0]
-        assert rejected["verdict"] == "REJECT"
-        assert "ACCOUNT_FLOOR_REACHED" in rejected["reason_codes_json"]
-        assert rejected["trade_plan_id"] is None
+        assert any(
+            event["event_type"] == "SANDBOX_CIRCUIT_RETIRED"
+            for event in after_floor
+        )
+        retired = client.get("/v1/shadow/deployments").json()[0]
+        assert retired["status"] == "RETIRED_SHADOW_FAILED"
+        assert retired["retired_reason"] == "SANDBOX_CIRCUIT_BREAKER"
+        with ledger.engine.connect() as connection:
+            adoption_status = connection.execute(
+                select(strategy_adoptions.c.status).where(
+                    strategy_adoptions.c.strategy_spec_id == spec.strategy_spec_id
+                )
+            ).scalar_one()
+        assert adoption_status == "RETIRED"
+        with pytest.raises(ValueError, match="cannot be re-adopted"):
+            client.app.state.shadow.adopt_strategy(
+                strategy_spec_id=spec.strategy_spec_id,
+                validation_report_id=report_id,
+                reason="A failed immutable strategy must not restart",
+                approved_by="test-admin",
+            )
         reports = client.get("/v1/shadow/reports?period=daily").json()
-        assert sum(item["candidate_count"] for item in reports) == 3
+        assert sum(item["candidate_count"] for item in reports) == 2
         assert sum(item["approved_count"] for item in reports) == 2
-        assert sum(item["rejected_count"] for item in reports) == 1
+        assert sum(item["rejected_count"] for item in reports) == 0
         assert sum(item["round_trip_count"] for item in reports) == 1
-        alerts = client.get("/v1/shadow/alerts").json()
-        assert alerts[0]["kind"] == "RISK_REJECTION"
-        assert alerts[0]["occurrence_count"] == 1
         second_tick = client.post(
             "/v1/actions",
             json={
@@ -833,22 +836,6 @@ def test_shadow_runtime_processes_stored_bars_without_a_broker(
             json={"confirmation_phrase": second_tick["confirmation_phrase"]},
         ).status_code == 200
         assert len(client.get("/v1/shadow/events").json()) == len(after_floor)
-
-        client.app.state.shadow.risk_policy = current_policy.model_copy(
-            update={
-                "version": "risk_policy@0.3.1",
-                "maximum_trade_risk_usd": Decimal("80"),
-            }
-        )
-        asyncio.run(
-            client.app.state.shadow.tick(
-                trigger="contract-change-test",
-                new_exposure_paused=False,
-            )
-        )
-        quarantined = client.get("/v1/shadow/deployments").json()[0]
-        assert quarantined["status"] == "REVALIDATION_REQUIRED"
-        assert quarantined["contract_status"] == "REVALIDATION_REQUIRED"
 
 
 def test_system_steward_cites_snapshot_and_only_proposes_actions(

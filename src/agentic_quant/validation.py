@@ -71,6 +71,7 @@ def validation_execution_contract(
             strategy_execution_profile(
                 data_requirements=strategy_spec.data_requirements,
                 account_policy=risk_policy,
+                strategy_type=strategy_spec.strategy_type,
             )
         )
     return {
@@ -652,7 +653,7 @@ class WalkForwardValidator:
         test_bars: int = 10,
         step_bars: int = 10,
         embargo_bars: int = 1,
-        initial_equity: Decimal = Decimal("100000"),
+        initial_equity: Decimal = Decimal("10000"),
         cost_model: BacktestCostModel | None = None,
         strategy_spec: StrategySpec | None = None,
         history_start: datetime | None = None,

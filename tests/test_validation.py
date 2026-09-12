@@ -18,6 +18,7 @@ from agentic_quant.database import (
     shadow_events,
     shadow_runs,
     shadow_trade_plans,
+    strategy_sleeves,
     validation_reports,
     workflow_jobs,
 )
@@ -49,6 +50,7 @@ from agentic_quant.validation import (
 )
 from agentic_quant.risk import RestrictionRegistry, RiskPolicy
 from agentic_quant.shadow import ShadowRuntime
+from agentic_quant.virtual_account import MAIN_VIRTUAL_ACCOUNT_ID
 
 
 def test_continuous_oos_drawdown_keeps_intrafold_loss_and_cross_fold_peak() -> None:
@@ -183,7 +185,7 @@ def _seed_eligible_report(
         cost_model=BacktestCostModel(),
         risk_policy=risk_policy,
         restriction_registry_version=restrictions.version,
-        initial_equity=Decimal("100000"),
+        initial_equity=Decimal("10000"),
         strategy_spec=spec,
     )
     with ledger.engine.begin() as connection:
@@ -219,6 +221,109 @@ def _seed_eligible_report(
             )
         )
     return report_id
+
+
+def test_legacy_shared_shadow_migration_retires_flat_deployment(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    store = ResearchStore(ledger.engine)
+    objects = SystemObjectStore(ledger.engine, ledger)
+    objects.ensure_defaults()
+    policy = RiskPolicy.from_yaml(settings.risk_policy_path)
+    restrictions = RestrictionRegistry.from_yaml(
+        settings.restricted_securities_path
+    )
+    shadow = ShadowRuntime(
+        ledger.engine,
+        store,
+        objects,
+        risk_policy=policy,
+        restrictions=restrictions,
+    )
+    shadow.initialize_virtual_account()
+    spec = store.record_strategy_spec(
+        default_strategy_spec(
+            "momentum",
+            timeframe="1Day",
+            code_sha256=research_code_sha256(),
+        )
+    )
+    report_id = _seed_eligible_report(
+        ledger,
+        spec=spec,
+        timeframe="1Day",
+        risk_policy=policy,
+        restrictions=restrictions,
+    )
+    shadow.adopt_strategy(
+        strategy_spec_id=spec.strategy_spec_id,
+        validation_report_id=report_id,
+        reason="Seed migration fixture",
+        approved_by="test-admin",
+    )
+    deployment = shadow.start_deployment(
+        strategy_spec_id=spec.strategy_spec_id,
+        symbol="AAPL",
+        initial_cash=Decimal("10000"),
+        requested_by="test-admin",
+    )
+    with ledger.engine.begin() as connection:
+        connection.execute(
+            update(strategy_sleeves)
+            .where(
+                strategy_sleeves.c.strategy_sleeve_id
+                == deployment["strategy_sleeve_id"]
+            )
+            .values(virtual_account_id=MAIN_VIRTUAL_ACCOUNT_ID)
+        )
+        connection.execute(
+            update(shadow_deployments)
+            .where(
+                shadow_deployments.c.shadow_deployment_id
+                == deployment["shadow_deployment_id"]
+            )
+            .values(virtual_account_id=MAIN_VIRTUAL_ACCOUNT_ID)
+        )
+
+    assert shadow.sandbox_migration_preview()["legacy_deployment_count"] == 1
+    migrated = shadow.begin_sandbox_migration(
+        reason="Replace the obsolete shared Shadow account",
+        requested_by="test-admin",
+    )
+    assert migrated["legacy_retired"] == 1
+    assert migrated["legacy_liquidation_pending"] == 0
+    retired = shadow.deployment(str(deployment["shadow_deployment_id"]))
+    assert retired["status"] == "RETIRED_LEGACY"
+    assert retired["retired_reason"] == "SANDBOX_MIGRATION"
+    assert shadow.begin_sandbox_migration(
+        reason="Verify migration replay is idempotent",
+        requested_by="test-admin",
+    )["legacy_deployment_count"] == 0
+    replacement = shadow.start_deployment(
+        strategy_spec_id=spec.strategy_spec_id,
+        symbol="AAPL",
+        initial_cash=Decimal("10000"),
+        requested_by="test-admin",
+    )
+    assert replacement["account_mode"] == "STRATEGY_SANDBOX"
+    assert replacement["virtual_account_id"] != MAIN_VIRTUAL_ACCOUNT_ID
+    shadow.set_deployment_status(
+        deployment_id=str(replacement["shadow_deployment_id"]),
+        status="RETIRED",
+        reason="Operator rejected this exact strategy version",
+        requested_by="test-admin",
+    )
+    with pytest.raises(ValueError, match="operator hold"):
+        shadow.adopt_strategy(
+            strategy_spec_id=spec.strategy_spec_id,
+            validation_report_id=report_id,
+            reason="Automation must not restart an operator retirement",
+            approved_by="research-coordinator",
+            author_kind="system",
+            allow_operator_override=False,
+        )
 
 
 def test_walk_forward_validation_preserves_embargo_and_all_candidates(
@@ -430,7 +535,7 @@ def test_real_static_validation_can_reach_adoption_and_shadow_start(
     deployment = shadow.start_deployment(
         strategy_spec_id=spec.strategy_spec_id,
         symbol="AAPL",
-        initial_cash=Decimal("100000"),
+        initial_cash=Decimal("10000"),
         requested_by="test-admin",
     )
     assert adoption["status"] == "ADOPTED_FOR_SHADOW"
@@ -516,7 +621,7 @@ def test_shadow_start_arms_latest_close_before_the_next_session_open(
     deployment = shadow.start_deployment(
         strategy_spec_id=spec.strategy_spec_id,
         symbol="AAPL",
-        initial_cash=Decimal("100000"),
+        initial_cash=Decimal("10000"),
         requested_by="test-admin",
     )
     assert deployment["last_processed_bar_time"].replace(tzinfo=UTC) == (
@@ -541,7 +646,7 @@ def test_shadow_start_arms_latest_close_before_the_next_session_open(
     rearmed = shadow.start_deployment(
         strategy_spec_id=spec.strategy_spec_id,
         symbol="AAPL",
-        initial_cash=Decimal("100000"),
+        initial_cash=Decimal("10000"),
         requested_by="test-admin",
     )
     assert rearmed["last_processed_bar_time"].replace(tzinfo=UTC) == (
@@ -560,7 +665,7 @@ def test_shadow_start_arms_latest_close_before_the_next_session_open(
     repeated = shadow.start_deployment(
         strategy_spec_id=spec.strategy_spec_id,
         symbol="AAPL",
-        initial_cash=Decimal("100000"),
+        initial_cash=Decimal("10000"),
         requested_by="test-admin",
     )
     assert repeated["last_processed_bar_time"].replace(tzinfo=UTC) == (
@@ -679,7 +784,7 @@ def test_scanner_pool_lineage_can_authorize_confirmed_shadow_start(
     preview = shadow.deployment_preview(
         strategy_spec_id=spec.strategy_spec_id,
         symbol="SNDK",
-        initial_cash=Decimal("100000"),
+        initial_cash=Decimal("10000"),
     )
 
     assert adoption["status"] == "ADOPTED_FOR_SHADOW"
@@ -768,7 +873,7 @@ def test_strictly_rejected_strategy_can_enter_candidate_shadow_only(
     deployment = shadow.start_deployment(
         strategy_spec_id=spec.strategy_spec_id,
         symbol="AAPL",
-        initial_cash=Decimal("100000"),
+        initial_cash=Decimal("10000"),
         requested_by="test-admin",
     )
 
@@ -801,14 +906,14 @@ def test_strictly_rejected_strategy_can_enter_candidate_shadow_only(
         shadow.start_deployment(
             strategy_spec_id=spec.strategy_spec_id,
             symbol="AAPL",
-            initial_cash=Decimal("100000"),
+            initial_cash=Decimal("10000"),
             requested_by="research-coordinator",
             allow_operator_resume=False,
         )
     deployment = shadow.start_deployment(
         strategy_spec_id=spec.strategy_spec_id,
         symbol="AAPL",
-        initial_cash=Decimal("100000"),
+        initial_cash=Decimal("10000"),
         requested_by="test-admin",
     )
     result = asyncio.run(
@@ -1179,7 +1284,7 @@ def test_shadow_computation_crossing_open_cannot_create_a_late_fill(
     shadow.start_deployment(
         strategy_spec_id=spec.strategy_spec_id,
         symbol="AAPL",
-        initial_cash=Decimal("100000"),
+        initial_cash=Decimal("10000"),
         requested_by="test-admin",
     )
     market.insert_bars((bars[-2],), raw_object_id="TEST_RAW")
@@ -1268,7 +1373,7 @@ def test_multi_session_shadow_position_survives_ticks_and_global_pause(
     deployment = shadow.start_deployment(
         strategy_spec_id=spec.strategy_spec_id,
         symbol="AAPL",
-        initial_cash=Decimal("100000"),
+        initial_cash=Decimal("10000"),
         requested_by="test-admin",
     )
 

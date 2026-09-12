@@ -3,6 +3,9 @@
 - Status: accepted
 - Date: 2026-09-08
 
+The fixed 12.5% stop in decision 5 is superseded by ADR 0042. Multi-session Shadow now uses
+versioned point-in-time volatility geometry with a hard 15% stop-distance ceiling.
+
 ## Context
 
 The first deployable strategy contract was intentionally limited to a next-session entry and

@@ -39,7 +39,7 @@ from agentic_quant.document_ingestion import (
 )
 from agentic_quant.document_store import DocumentStore
 from agentic_quant.data_quality import MarketDataQualityService
-from agentic_quant.domain import BacktestCostModel, LLMProviderName, LLMWorkload
+from agentic_quant.domain import LLMProviderName, LLMWorkload
 from agentic_quant.event_bus import NullEventPublisher, RedisStreamPublisher
 from agentic_quant.environment import EnvironmentRegistry
 from agentic_quant.intelligence import (
@@ -110,6 +110,7 @@ from agentic_quant.shadow import ShadowRuntime
 from agentic_quant.steward import SystemSteward
 from agentic_quant.strategy_generation import HybridStrategyGenerator
 from agentic_quant.validation import WalkForwardValidator, load_promotion_gate_policy
+from agentic_quant.virtual_account import STRATEGY_SANDBOX_INITIAL_EQUITY
 from agentic_quant.workflow import WorkflowJobStore
 
 
@@ -275,7 +276,10 @@ class ExactStrategyValidationRequest(BaseModel):
     test_bars: int = Field(default=10, ge=1)
     step_bars: int = Field(default=10, ge=1)
     embargo_bars: int = Field(default=1, ge=1)
-    initial_equity: Decimal = Field(default=Decimal("100000"), gt=0)
+    initial_equity: Decimal = Field(
+        default=STRATEGY_SANDBOX_INITIAL_EQUITY,
+        gt=0,
+    )
 
 
 class MLTrainingRequest(BaseModel):
@@ -376,6 +380,7 @@ def create_app(
         calendar_name=app_settings.market_calendar,
         now_provider=shadow_now_provider,
         promotion_policy_path=app_settings.research_promotion_policy_path,
+        new_exposure_not_before=app_settings.shadow_new_exposure_not_before,
     )
     resolved_paper_factory = paper_broker_factory
     if (
@@ -509,6 +514,11 @@ def create_app(
             "paper": paper.status(),
             "robinhood_mcp": robinhood.status(),
             "new_exposure_paused": runtime_is_paused(),
+            "shadow_new_exposure_not_before": (
+                app_settings.shadow_new_exposure_not_before.isoformat()
+                if app_settings.shadow_new_exposure_not_before is not None
+                else None
+            ),
             "data_operating_scope": app_settings.data_operating_scope,
             "coordinator_auto_shadow_enabled": (
                 app_settings.coordinator_auto_shadow_enabled
@@ -516,6 +526,7 @@ def create_app(
             "llm_routing": llm_gateway.status(),
             "llm_budget": llm_budget_manager.summary(),
             "ml_policy": ml_policy.version,
+            "shadow_sandboxes": shadow.sandbox_summary(),
         }
 
     steward = SystemSteward(
@@ -1092,6 +1103,11 @@ def create_app(
             "paper_submission_ready": paper.status()["submission_ready"],
             "robinhood_mcp": robinhood.status(),
             "new_exposure_paused": runtime_is_paused(),
+            "shadow_new_exposure_not_before": (
+                app_settings.shadow_new_exposure_not_before.isoformat()
+                if app_settings.shadow_new_exposure_not_before is not None
+                else None
+            ),
             "database": "healthy" if ledger.health() else "unhealthy",
             "phase": "phase7-paper-integration",
             "source_git_sha": app_settings.source_git_sha or "UNAVAILABLE",
@@ -1178,8 +1194,7 @@ def create_app(
 
     @application.get("/v1/control/summary")
     def control_summary() -> dict[str, Any]:
-        account = shadow.virtual_account()
-        account["sleeve_count"] = len(account.pop("sleeves", []))
+        account = shadow.sandbox_summary()
         return {
             "counts": objects.object_summary(),
             "lists": objects.lists(),
@@ -1405,8 +1420,8 @@ def create_app(
 
     @application.get("/v1/shadow/account")
     def shadow_virtual_account() -> dict[str, Any]:
-        value = shadow.virtual_account()
-        effective = shadow.effective_risk_policy()
+        value = shadow.sandbox_summary()
+        effective = shadow.sandbox_risk_policy()
         value["effective_risk_policy"] = effective.model_dump(mode="json")
         value["risk_explanation"] = {
             "stop_distance": (
@@ -1414,13 +1429,14 @@ def create_app(
                 "maximum dollar loss."
             ),
             "dollar_risk": (
-                "Quantity is sized so entry-to-stop loss plus slippage stays within "
-                "the smaller of equity fraction, per-trade USD cap, and remaining "
-                "concurrent-risk capacity."
+                "Each strategy owns an isolated $10,000 sandbox. Quantity is sized "
+                "from 2% of that sandbox's current marked equity; no other strategy "
+                "can consume its capacity."
             ),
             "holding_period": (
-                "The current deployable profile exits any remaining position at the "
-                "same session close; a wider stop does not create a multi-day holding."
+                "Stop distance is derived deterministically from point-in-time "
+                "volatility and strategy horizon, capped at 15%. The strategy exits "
+                "on stop, target, circuit liquidation, or its maximum holding period."
             ),
             "execution_profile": BASELINE_EXECUTION_PROFILE_VERSION,
         }
@@ -1831,7 +1847,7 @@ def create_app(
                 promotion_policy=load_promotion_gate_policy(
                     app_settings.research_promotion_policy_path
                 ),
-                risk_policy=shadow.effective_risk_policy(),
+                risk_policy=shadow.sandbox_risk_policy(),
                 restrictions=restrictions,
             ).run(
                 symbol=payload.symbol.upper(),
@@ -1845,7 +1861,7 @@ def create_app(
                 step_bars=payload.step_bars,
                 embargo_bars=payload.embargo_bars,
                 initial_equity=payload.initial_equity,
-                cost_model=BacktestCostModel(),
+                cost_model=shadow.costs,
                 strategy_spec=spec,
             )
         except ValueError as exc:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, time, timedelta
-from decimal import Decimal
 import hashlib
 from typing import Any, Callable
 
@@ -18,7 +17,6 @@ from agentic_quant.document_ingestion import (
 from agentic_quant.document_store import DocumentStore
 from agentic_quant.database import ledger_events
 from agentic_quant.domain import (
-    BacktestCostModel,
     EventEnvelope,
     ResearchAnalysisStatus,
     StockBar,
@@ -72,6 +70,7 @@ from agentic_quant.validation import (
     validation_execution_contract,
     validation_input_fingerprint,
 )
+from agentic_quant.virtual_account import STRATEGY_SANDBOX_INITIAL_EQUITY
 
 
 MARKET_HISTORY_BOUNDARY_EVENT = "market.history.boundary.observed.v1"
@@ -1190,17 +1189,15 @@ class ResearchCoordinatorHandler:
                 "required_bars": required_bars,
             }
         validation_start = bars[20].available_from
-        costs = BacktestCostModel()
-        initial_equity = Decimal(
-            str(self.shadow.virtual_account()["initial_cash"])
-        )
+        costs = self.shadow.costs
+        initial_equity = STRATEGY_SANDBOX_INITIAL_EQUITY
         expected_contract = validation_execution_contract(
             validation_subject="static_strategy",
             validated_strategy_spec_ids={
                 str(spec.strategy_type): spec.strategy_spec_id
             },
             cost_model=costs,
-            risk_policy=self.shadow.effective_risk_policy(),
+            risk_policy=self.shadow.sandbox_risk_policy(),
             restriction_registry_version=self.restrictions.version,
             initial_equity=initial_equity,
             strategy_spec=spec,
@@ -1273,7 +1270,7 @@ class ResearchCoordinatorHandler:
                 self.ledger,
                 calendar_name=self.settings.market_calendar,
                 promotion_policy=promotion_policy,
-                risk_policy=self.shadow.effective_risk_policy(),
+                risk_policy=self.shadow.sandbox_risk_policy(),
                 restrictions=self.restrictions,
             ).run(
                 symbol=str(context["symbol"]),
@@ -1389,9 +1386,7 @@ class ResearchCoordinatorHandler:
                 deployment = self.shadow.start_deployment(
                     strategy_spec_id=strategy_spec_id,
                     symbol=symbol,
-                    initial_cash=Decimal(
-                        str(self.shadow.virtual_account()["initial_cash"])
-                    ),
+                    initial_cash=STRATEGY_SANDBOX_INITIAL_EQUITY,
                     requested_by="research-coordinator",
                     allow_operator_resume=False,
                 )

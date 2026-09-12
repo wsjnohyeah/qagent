@@ -4,11 +4,12 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Connection, Engine, insert, select, update
+from sqlalchemy import Connection, Engine, func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from agentic_quant.database import (
+    shadow_deployments,
     strategy_sleeves,
     virtual_account_risk_revisions,
     virtual_accounts,
@@ -19,11 +20,13 @@ from agentic_quant.risk import RiskPolicy
 
 MAIN_VIRTUAL_ACCOUNT_ID = "cffdf661-b2c0-5e58-a49c-13f8a2403d98"
 MAIN_VIRTUAL_ACCOUNT_SLUG = "shadow-main"
+STRATEGY_SANDBOX_ACCOUNT_TYPE = "STRATEGY_SANDBOX"
+STRATEGY_SANDBOX_INITIAL_EQUITY = Decimal("10000")
 _ZERO = Decimal("0")
 
 
 class VirtualAccountStore:
-    """Shared virtual cash and portfolio-risk ledger for all strategy sleeves."""
+    """Virtual cash/risk ledgers for legacy shared and isolated strategy accounts."""
 
     def __init__(self, engine: Engine) -> None:
         self.engine = engine
@@ -108,6 +111,90 @@ class VirtualAccountStore:
             )
         return self.account(MAIN_VIRTUAL_ACCOUNT_ID)
 
+    def ensure_strategy_sandbox(
+        self,
+        *,
+        deployment_id: str,
+        strategy_spec_id: str,
+        symbol: str,
+        risk_policy: RiskPolicy,
+        initial_cash: Decimal = STRATEGY_SANDBOX_INITIAL_EQUITY,
+        connection: Connection | None = None,
+    ) -> str:
+        if initial_cash != STRATEGY_SANDBOX_INITIAL_EQUITY:
+            raise ValueError("Strategy Shadow sandboxes require exactly $10,000")
+        account_id = stable_uuid("shadow-sandbox-account", deployment_id)
+        now = datetime.now(UTC)
+        values = {
+            "virtual_account_id": account_id,
+            "slug": f"shadow-sandbox-{deployment_id}",
+            "name": f"{symbol.upper()} strategy sandbox",
+            "account_type": STRATEGY_SANDBOX_ACCOUNT_TYPE,
+            "currency": "USD",
+            "status": "ACTIVE",
+            "initial_cash": initial_cash,
+            "cash_balance": initial_cash,
+            "realized_pnl": _ZERO,
+            "reserved_cash": _ZERO,
+            "reserved_risk_usd": _ZERO,
+            "base_policy_version": risk_policy.version,
+            "risk_revision": 1,
+            "baseline_stop_fraction": risk_policy.baseline_stop_fraction,
+            "baseline_target_r_multiple": risk_policy.baseline_target_r_multiple,
+            "initial_risk_fraction": risk_policy.initial_risk_fraction,
+            "maximum_trade_risk_usd": initial_cash,
+            "maximum_concurrent_risk_usd": initial_cash,
+            "daily_loss_stop_usd": initial_cash,
+            "account_floor_usd": (
+                initial_cash * (Decimal("1") - Decimal("0.12"))
+            ),
+            "created_at": now,
+            "updated_at": now,
+        }
+        owned = connection is None
+        target = connection or self.engine.connect()
+        try:
+            target.execute(
+                self._insert_ignore(
+                    virtual_accounts,
+                    values,
+                    conflict_columns=("virtual_account_id",),
+                )
+            )
+            target.execute(
+                self._insert_ignore(
+                    virtual_account_risk_revisions,
+                    {
+                        "risk_revision_id": stable_uuid(
+                            "virtual-account-risk", account_id, 1
+                        ),
+                        "virtual_account_id": account_id,
+                        "revision_number": 1,
+                        "baseline_stop_fraction": risk_policy.baseline_stop_fraction,
+                        "baseline_target_r_multiple": (
+                            risk_policy.baseline_target_r_multiple
+                        ),
+                        "initial_risk_fraction": risk_policy.initial_risk_fraction,
+                        "maximum_trade_risk_usd": initial_cash,
+                        "maximum_concurrent_risk_usd": initial_cash,
+                        "daily_loss_stop_usd": initial_cash,
+                        "account_floor_usd": values["account_floor_usd"],
+                        "reason": (
+                            "Initial isolated strategy Shadow sandbox risk policy"
+                        ),
+                        "created_by": "shadow-runtime",
+                        "created_at": now,
+                    },
+                    conflict_columns=("virtual_account_id", "revision_number"),
+                )
+            )
+            if owned:
+                target.commit()
+        finally:
+            if owned:
+                target.close()
+        return account_id
+
     def account(self, account_id: str = MAIN_VIRTUAL_ACCOUNT_ID) -> dict[str, Any]:
         with self.engine.connect() as connection:
             row = connection.execute(
@@ -122,7 +209,22 @@ class VirtualAccountStore:
                 .where(strategy_sleeves.c.virtual_account_id == account_id)
                 .order_by(strategy_sleeves.c.created_at.asc())
             ).all()
+            unrealized_pnl = connection.execute(
+                select(func.coalesce(func.sum(shadow_deployments.c.unrealized_pnl), 0))
+                .where(shadow_deployments.c.virtual_account_id == account_id)
+            ).scalar_one()
         value = dict(row._mapping)
+        value["unrealized_pnl"] = Decimal(str(unrealized_pnl))
+        value["equity"] = (
+            Decimal(str(value["cash_balance"])) + value["unrealized_pnl"]
+        )
+        value["loss_from_initial_fraction"] = (
+            max(
+                _ZERO,
+                Decimal(str(value["initial_cash"])) - value["equity"],
+            )
+            / Decimal(str(value["initial_cash"]))
+        )
         value["available_cash"] = max(
             _ZERO,
             Decimal(str(value["cash_balance"]))
@@ -143,11 +245,11 @@ class VirtualAccountStore:
         account_id: str = MAIN_VIRTUAL_ACCOUNT_ID,
     ) -> RiskPolicy:
         account = self.account(account_id)
-        revision = int(account["risk_revision"])
-        if revision == 1:
-            return base_policy
         version = str(account["base_policy_version"])
-        version = f"{version}+account-r{revision}"
+        revision = int(account["risk_revision"])
+        if revision > 1:
+            version = f"{version}+account-r{revision}"
+        sandbox = str(account["account_type"]) == STRATEGY_SANDBOX_ACCOUNT_TYPE
         return base_policy.model_copy(
             update={
                 "version": version,
@@ -170,6 +272,11 @@ class VirtualAccountStore:
                     str(account["daily_loss_stop_usd"])
                 ),
                 "account_floor_usd": Decimal(str(account["account_floor_usd"])),
+                "position_sizing_mode": (
+                    "equity_fraction" if sandbox else "portfolio_caps"
+                ),
+                "daily_loss_limit_enabled": False if sandbox else True,
+                "volatility_geometry_enabled": sandbox,
             }
         )
 

@@ -5,13 +5,14 @@ Last updated: 2026-09-11 PDT
 Context format: v1
 
 Current phase: the unified research, Shadow, and Alpaca Paper foundations are deployed to a
-fresh production data plane. Paid ML + LLM research and source-specific historical backfill
-are active. Production automatically admits exact deterministic Candidate/Qualified results
-to broker-free Shadow; Paper enrollment remains separately human-confirmed and live money
-remains impossible. Off-site backup/alerting and statistical/
-elapsed production evidence remain open.
+fresh production data plane. The source now replaces shared-capital Shadow with isolated
+per-strategy `$10,000` sandboxes under ADR 0042; exact-SHA deployment and the confirmed legacy
+shutdown remain pending. Paid ML + LLM research and source-specific historical backfill are
+active. Production automatically admits exact deterministic Candidate/Qualified results to
+broker-free Shadow; Paper enrollment remains separately human-confirmed and live money remains
+impossible. Off-site backup/alerting and statistical/elapsed production evidence remain open.
 
-Current documented baseline: C095 — `Record automatic Shadow admission rollout`
+Current documented baseline: C096 — `Isolate strategy Shadow sandboxes`
 
 ## Purpose and authority
 
@@ -58,7 +59,8 @@ A Git commit cannot contain its own content-derived hash without changing that h
   live-money adapter or mode exists.
 - Phase 3A persists immutable evidence packets, feature snapshots, strategy specifications,
   experiment runs, and backtest trades. Three deterministic baselines run with next-bar
-  execution and nonzero commission/slippage; their output is infrastructure evidence only.
+  execution, zero explicit commission, and modeled spread/slippage/impact; their output is
+  infrastructure evidence only.
 - Phase 3A.2 adds exact XNYS session-close availability, immutable corporate actions and
   historical-universe membership, split-adjusted point-in-time features, and persisted
   offline/online feature-parity checks.
@@ -102,8 +104,9 @@ A Git commit cannot contain its own content-derived hash without changing that h
   one-session daily-bar research remains explicit/manual until a true minute-data intraday
   contract exists. ML labels, forecasts, LLM analyses, proposals, immutable specs, replays, and exact
   validation contracts must agree on the horizon. One-session strategies retain the original
-  MOC profile; multi-session strategies use a separate timed-exit profile and a deterministic
-  12.5% price stop without increasing shared account-dollar risk limits.
+  MOC profile; multi-session strategies use a separate timed-exit profile. Both derive
+  stop/target geometry from point-in-time volatility, horizon, and strategy family, with a
+  hard 15% stop-distance ceiling.
 - Phase 6 authenticates one administrator with a revocable server-side cookie session and
   CSRF protection. All non-health system interaction is locked when authentication is enabled;
   production requires an Argon2 password hash.
@@ -149,10 +152,11 @@ A Git commit cannot contain its own content-derived hash without changing that h
   Active deployments recheck their exact contract before every tick and move to
   `REVALIDATION_REQUIRED` after an engine/config mismatch. The approved research-search count
   is frozen at adoption, so later unrelated experiments do not interrupt an otherwise current
-  deployment. Every strategy/symbol deployment is
-  now an attribution sleeve under one
-  `SHARED_MASTER` virtual account; open plans atomically reserve shared cash and concurrent
-  risk and settle P&L once. Multi-session position state, marks, stop/target checks, timed exits,
+  deployment. Every new strategy/symbol deployment owns an isolated `$10,000` virtual
+  sandbox. A position risks 2% of current marked sandbox equity and cannot consume another
+  strategy's capacity. At `$8,800` total value, new entries stop, an open position is
+  liquidated at the next causal virtual price, and the immutable strategy version is retired.
+  Multi-session position state, marks, stop/target checks, timed exits,
   and applied split/dividend lineage survive worker restarts. Global pause blocks new entries
   while allowing an existing position to exit. The literal unbounded buy-and-hold benchmark
   remains research-only. Shadow itself makes no broker call.
@@ -660,10 +664,10 @@ flowchart LR
     COORD --> ANALYST
     COORD --> GENERATE
     COORD --> VALIDATE
-    REPORT --> ADOPT["Human-confirmed adoption"]
-    ADOPT --> SLEEVE["Strategy/symbol sleeve"]
-    ACCOUNT["Shared virtual master account"] --> SLEEVE
-    SLEEVE --> SHRUNTIME["Persistent broker-free shadow runtime"]
+    REPORT --> ADOPT["Exact deterministic Shadow admission"]
+    ADOPT --> SANDBOX["Isolated $10k strategy sandbox"]
+    SANDBOX --> SHRUNTIME["Persistent broker-free shadow runtime"]
+    SHRUNTIME --> CIRCUIT["$8.8k floor → causal liquidation + retirement"]
     PITFEATURES --> SHRUNTIME
     SHRUNTIME --> SHLINEAGE["Candidate → risk → persisted plan → open-price review"]
     SHLINEAGE --> SHEVENTS["Virtual event journal + P&L"]
@@ -770,6 +774,16 @@ gate. Candidate deployments are hard-blocked from Paper. The future execution ba
 volume cannot size an entry. Scheduler and manual ticks share one lock and one idempotent bar
 cursor. Production gives the scheduler to a dedicated heartbeat-reporting worker; the API is
 not a second scheduler owner. The runtime contains no broker SDK or order-submission route.
+
+ADR 0042 makes Shadow a strategy-evaluation layer rather than a portfolio simulation. Every
+new immutable strategy/symbol deployment receives an isolated `$10,000` virtual account and
+risks 2% of its current marked equity per position. The stop and target are derived
+deterministically from point-in-time realized volatility, holding horizon, and strategy family;
+the stop is clamped to 3%–15%. Explicit commission is zero, while spread, slippage, impact,
+liquidity, and gap behavior remain. At `$8,800` total value the sandbox stops entries, causally
+liquidates any open position, and permanently retires that strategy version. A confirmed
+migration preserves but retires the former shared-account history. Paper remains the distinct
+portfolio/broker test.
 
 Strategy horizon is now a first-class immutable contract rather than an implied one-bar
 default. The coordinator rotates through 1/5/20/63/126/252-session ML labels; the Research LLM
@@ -942,27 +956,25 @@ year or more of data.
 
 ## Current executable risk baseline
 
-The Phase 0 configuration uses the lower conservative inherited caps where applicable:
+The active Shadow policy is `risk_policy@0.4.0`:
 
 | Control | Current value |
 |---|---:|
-| Minimum reward/risk | 1.50 |
-| Minimum relative volume | 2.00 |
-| Maximum quote age | 15 seconds |
-| Major macro-event blackout | 24 hours unless separately validated |
-| Initial risk fraction | 0.25% of equity |
-| Maximum trade risk | $130 |
-| Maximum concurrent planned risk | $780 |
-| Daily loss stop | $520 |
-| Account floor | $40,000 |
-| Equity slippage buffer | $0.05/share |
+| Sandbox initial value | $10,000 |
+| Position risk budget | 2% of current marked sandbox equity |
+| Permanent sandbox failure floor | $8,800 total value |
+| Stop distance | PIT-volatility derived; 3% minimum, 15% maximum |
+| Target | Strategy-family R multiple (1.75R–2.25R) |
+| Explicit commission | $0 |
+| Spread / slippage / impact | Retained |
 | Maximum equity quantity | 250 shares |
 
-These are baseline configuration values, not authorization for paper submission. The inherited percentage and later dollar limits still require reconciliation before a paper broker adapter may submit orders.
+Each strategy/symbol pair owns its own capital and risk budget. These values are Shadow
+evaluation rules, not authorization for Paper submission or live money. The former shared
+master account and its `$130`/`$780` revision remain only as historical migration state and
+as the separately enforced portfolio cap used by the current Paper adapter.
 
-The active policy is `risk_policy@0.3.0`. It versions the baseline 2% invalidation and 2R
-target used by both replay and shadow, including conservative stop-first resolution when one
-bar crosses both levels. A caller must provide `RiskEvaluationContext`; the
+A caller must provide `RiskEvaluationContext`; the
 gate rejects unknown restriction or macro-calendar state, unverified required catalysts,
 unconfirmed liquidity, unhealthy market data, duplicate intent, and applicable macro
 blackouts. It also rejects mismatched feature IDs and future signal/feature timestamps. The
@@ -2604,23 +2616,30 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 Ordered near-term work:
 
-1. Replace the temporary `sslip.io` hostname with the operator's permanent domain, select an
+1. Complete exact-SHA CI and guarded deployment of ADR 0042, keep new exposure paused, run the
+   confirmed legacy Shadow migration, set
+   `SHADOW_NEW_EXPOSURE_NOT_BEFORE=2026-09-14T13:30:00Z`, verify old positions are flat or
+   explicitly liquidation-pending, then resume only the broker-free workflow.
+2. Replace the temporary `sslip.io` hostname with the operator's permanent domain, select an
    off-site backup target and external notification destination, and automate retention plus
    alert checks. The fresh production bootstrap, TLS path, local backup, and isolated restore
    drill are complete.
-2. Run a read-only Alpaca Paper probe in the intended environment. Build and validate the
+3. Run a read-only Alpaca Paper probe in the intended environment. Build and validate the
    separate Paper execution profile, nested-child lifecycle, and deterministic session-close
    exit before any enrollment or external order.
-3. Roll out C061, let new cycles replace the invalid one-session fallbacks with genuinely
-   horizon-bound evidence, and review exact specs offered for Candidate or Qualified Shadow.
-   Candidate observation may collect broker-free forward evidence but cannot enter Paper.
+4. Let new cycles replace stale pre-sandbox certificates with exact `risk_policy@0.4.0`
+   sandbox certificates and review the resulting Candidate/Qualified evidence.
    Continue controlled ML-only versus ML+LLM ablations without manufacturing a gate pass.
-4. Continue interactive UI review and add account/coordinator affordances where operator use
+5. Continue interactive UI review and add account/coordinator affordances where operator use
    shows they are needed.
-5. Add a governed point-in-time macro-event calendar and remaining licensed data sources.
-6. Extend fill realism and add an operator-selected provider-lag/sequence notification channel.
+6. Add a governed point-in-time macro-event calendar and remaining licensed data sources.
+7. Extend fill realism and add an operator-selected provider-lag/sequence notification channel.
    Dead-letter inspection and single-event requeue are now confirmation-gated.
-7. Build a labeled corpus and measure catalyst-dedup precision/recall.
+8. Build a labeled corpus and measure catalyst-dedup precision/recall.
+
+Historical note: C061 first replaced invalid one-session fallbacks with genuinely
+horizon-bound evidence. Candidate observation may collect broker-free forward evidence but
+cannot enter Paper.
 
 ## Blocked or unresolved decisions
 
@@ -4848,6 +4867,40 @@ lifecycle. No Paper order was used as a build or deployment test.
   rejected, insufficient, or stale results remain out of Shadow.
 - Corrections/follow-ups: observe the first coordinator-recorded `AUTO_SHADOW_ACTIVE` result and
   continue collecting forward evidence without describing Candidate status as proven alpha.
+
+### C096 — `Isolate strategy Shadow sandboxes`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-11 PDT.
+- User intent: make Shadow evaluate each strategy independently instead of simulating a shared
+  portfolio; give every strategy `$10,000`, risk 2% of current sandbox equity per trade, derive
+  stock/strategy stop and target geometry with an absolute 15% stop ceiling, ignore explicit
+  commission, retire a sandbox at `$8,800`, stop all legacy Shadow, and begin the new model no
+  earlier than the September 14 market open.
+- Scope: add isolated virtual accounts and nonterminal deployment uniqueness; version the
+  volatility/horizon/strategy geometry in exact validation; set commission to zero while
+  retaining spread/slippage/impact/liquidity/gap effects; mark current equity with unrealized
+  P&L; add permanent circuit retirement and next-causal-bar liquidation; add a confirmation-
+  gated, lease-fenced legacy migration; add a timezone-aware new-exposure boundary; update the
+  Control Center, runbooks, deployment instructions, state, and ADR 0042.
+- Architecture/decision impact: Shadow is now a strategy test, not a portfolio allocation
+  model. Paper remains the portfolio/broker layer. A circuit failure retires the immutable
+  strategy version so automatic research cannot silently restart it; a changed hypothesis must
+  produce a new exact spec and certificate. ADR 0042 supersedes ADR 0022's shared-capital Shadow
+  topology and ADR 0035's fixed 12.5% stop, without changing their coordinator, environment, or
+  multi-session decisions.
+- Validation: `make release-check` passed Flake8, strict mypy across 61 source files, all 217
+  tests, local authenticated doctor, secret scan, Compose rebuild/doctor, and PostgreSQL
+  Alembic zero-drift. A fresh SQLite schema upgraded to `20260911_0037`, downgraded to
+  `20260909_0036`, and re-upgraded successfully. Focused regressions cover isolated capital,
+  2% marked-equity sizing, 15% geometry cap, flat circuit retirement with permanent adoption
+  retirement, and idempotent legacy migration.
+- Global state after commit: source and documentation are ready for exact-SHA CI. Production
+  remains on `4fe2d71b372a3731140189a18450a7fa32f74ee6` with legacy shared Shadow until the guarded
+  rollout. Paper enrollments/orders and all live-money paths remain absent or disabled.
+- Corrections/follow-ups: after CI, deploy paused, set the September 14 activation boundary,
+  run the confirmed migration, verify legacy positions and new sandbox counts, resume the
+  broker-free workflow, and record exact production evidence in C097.
 
 ## Template for future commit entries
 

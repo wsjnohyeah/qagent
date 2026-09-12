@@ -48,6 +48,7 @@ from agentic_quant.risk import (
     evaluate_candidate,
     normalize_deployable_long_prices,
     strategy_execution_profile,
+    strategy_signal_risk_policy,
 )
 from agentic_quant.config import TradingMode
 
@@ -609,9 +610,10 @@ class ResearchBacktester:
         action_index = 0
         day_start_cash = initial_equity
         current_day = None
-        _, profile, effective_policy = strategy_execution_profile(
+        _, profile, _ = strategy_execution_profile(
             data_requirements=spec.data_requirements,
             account_policy=self.risk_policy,
+            strategy_type=spec.strategy_type,
         )
         holding_sessions = int(profile.get("maximum_holding_sessions", 1))
         final_execution_index = decision_indices[-1] + 1
@@ -634,6 +636,12 @@ class ResearchBacktester:
             )
             entered = False
             if should_trade and index + holding_sessions <= final_execution_index:
+                effective_policy = strategy_signal_risk_policy(
+                    data_requirements=spec.data_requirements,
+                    strategy_type=spec.strategy_type,
+                    feature_values=dict(snapshot.values),
+                    account_policy=self.risk_policy,
+                )
                 day = entry_time.astimezone(UTC).date()
                 if day != current_day:
                     current_day = day

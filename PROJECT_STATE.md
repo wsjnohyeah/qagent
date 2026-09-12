@@ -14,11 +14,12 @@
   `4fe2d71b372a3731140189a18450a7fa32f74ee6` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
-  and Alpaca Paper infrastructure are enabled. Eighteen Candidate Shadow sleeves are active:
-  one 5-session, twelve 126-session, and five 252-session strategies. Eight of
-  the nine pre-open plans became virtual positions and NOK was deterministically cancelled because
-  its DAY limit was not touched. C094 is deployed, deterministic automatic Candidate/Qualified
-  Shadow admission is enabled, and the audited runtime is resumed. There are no
+  and Alpaca Paper infrastructure are enabled. The last pre-migration inspection found 106
+  active legacy shared-account Shadow deployments. The operator authorized retiring all of
+  them and starting the isolated-sandbox policy no earlier than the September 14 open; that
+  production rollout is pending exact-SHA CI and guarded deployment. C094 is deployed,
+  deterministic automatic Candidate/Qualified Shadow admission is enabled, and the audited
+  runtime is resumed. There are no
   Paper enrollments or orders. Live money remains structurally disabled.
 - The deployed remediation adds `research_gate@0.4.0`, horizon-specific
   Candidate Shadow activity minima, horizon-specific research-trial accounting, budget-
@@ -56,7 +57,13 @@
   agent-accessible. Sixteen ordinary equity/crypto watchlists are readable; Robinhood currently
   rejects item expansion for its special empty Options Watchlist, which is isolated as an
   unavailable list rather than failing the complete read.
-- Local lint, strict type checking, all 214 tests, API readiness, the authenticated HTTP
+- Local source now implements ADR 0042: each immutable strategy/symbol Shadow deployment gets
+  an isolated `$10,000` sandbox, risks 2% of current marked equity per position, uses
+  point-in-time volatility/horizon/strategy stop geometry capped at 15%, and permanently
+  retires at a `$8,800` marked-value floor. Explicit commission is zero while spread,
+  slippage, impact, liquidity, and gap behavior remain modeled. The legacy migration is
+  confirmation-gated and a deployment-time exposure boundary can stage Monday activation.
+- Local lint, strict type checking, API readiness, the authenticated HTTP
   vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
 - The full Compose stack is healthy: PostgreSQL 17, Redis 8, MinIO, and the API all passed direct checks; the PostgreSQL-backed shadow slice recorded six lineage events.
@@ -89,11 +96,12 @@
 - Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
   experiment runs, backtest trades, corporate actions, historical universe membership,
   feature parity checks, and walk-forward reports are stored through Alembic revision
-  `20260909_0036`, including exact validation and ML-training contracts, normalized Paper
+  `20260911_0037`, including exact validation and ML-training contracts, normalized Paper
   order legs, shadow risk lineage, fenced workflow
   attempts, generation-attempt audit, runtime leases, and the event outbox.
 - The Phase 3 runner provides buy-and-hold, long/cash momentum, and long/cash
-  mean-reversion baselines with next-bar execution, commission, slippage, metrics, hashes,
+  mean-reversion baselines with next-bar execution, zero explicit commission, modeled market
+  execution costs, metrics, hashes,
   and append-only completion events.
 - `make research-smoke` exercises the complete research path in an isolated local database.
 - Daily bars become available at the exact XNYS close, including early closes; split-adjusted
@@ -102,7 +110,8 @@
   hashes.
 - The Phase 3B portfolio engine persists signal/order/fill/mark/action events, uses exact
   exchange open/close timestamps, models splits and gross cash dividends, and applies
-  commission, slippage, fixed market impact, and a volume-participation cap.
+  zero explicit commission, slippage, spread, fixed market impact, and a volume-participation
+  cap.
 - Phase 3C persists rolling train/embargo/test folds, evaluates every candidate both in and
   out of sample, reports train-to-test degradation and selection failures, and separates
   selected out-of-sample results into up/down/sideways realized regimes.
@@ -161,14 +170,14 @@
 - Candidate and Qualified Shadow certificates retain their exact admission tier during every
   runtime recheck. Candidate sleeves are no longer incorrectly quarantined as though they had
   claimed strict qualification.
-- All shadow deployments are attribution sleeves of one shared virtual master account. Open
-  plans atomically reserve its cash and concurrent risk; fills/cancellations settle once.
-  Account stop distance, target R multiple, per-trade dollars, equity fraction, concurrent
-  risk, daily loss stop, and account floor are an administrator-confirmed immutable revision,
-  and changing any of them invalidates older exact validation contracts. The UI explicitly
-  separates price-stop distance from account-dollar loss. One-session strategies use the
-  base geometry; multi-session strategies begin with a 12.5% price stop while retaining the
-  same account-dollar caps, so their share quantity is smaller.
+- New Shadow deployments are isolated strategy/symbol sandboxes with `$10,000` initial
+  virtual cash. Each risks 2% of current marked equity per position; another strategy cannot
+  consume its capital or capacity. Stop distance uses point-in-time realized volatility,
+  holding horizon, and strategy family, clamped to 3%–15%, while the target uses a versioned
+  strategy-family R multiple. Explicit commission is zero, but spread, slippage, impact,
+  liquidity, and gap risk remain modeled. At `$8,800` total marked value the sandbox blocks
+  entries, liquidates an open virtual position causally, and permanently retires that exact
+  strategy version. The former shared account is retained only for historical migration.
 - Active deployments recheck the exact execution contract on every tick. Engine, cost, risk,
   feature, or restriction changes move stale deployments to `REVALIDATION_REQUIRED` and
   cancel reserved plans without resetting account history.
@@ -178,7 +187,8 @@
 - A daily Shadow deployment activated after a completed close but before the next exchange open
   can arm that latest bar exactly once for a causally valid next-open decision. The arm is
   journaled; activation after the open still skips the bar and cannot manufacture a late fill.
-- All 17 production Candidate deployments used that guarded path before the September 9 open.
+- Historical pre-migration evidence: 17 production Candidate deployments used that guarded
+  path before the September 9 open.
   The first scheduler tick evaluated 17 bars, produced 15 long candidates, approved nine open
   virtual plans, rejected six when the shared `$780` concurrent-risk ceiling could not support at
   least one share, and left two flat. Post-close processing opened two virtual positions (INTC
@@ -275,23 +285,23 @@
   deterministic risk-reducing mark/exit processing so the kill switch cannot strand risk.
 - Tactical risk evaluation now requires explicit, auditable catalyst, restriction-status,
   liquidity, data-health, macro-calendar, and duplicate-order facts. Unknown/unsafe facts
-  reject, and `risk_policy@0.3.0` applies a 24-hour major-macro-event blackout unless the
+  reject, and `risk_policy@0.4.0` applies a 24-hour major-macro-event blackout unless the
   strategy is separately approved for that event. The policy also owns the baseline
   stop/target geometry used identically by research and shadow. Candidate/snapshot mismatches
   and future signal/feature timestamps also reject.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; production currently runs the
-  verified immutable functional commit `173809e466698ff32a0dd0409313d74d9e51b9a6`.
+  verified immutable functional commit `4fe2d71b372a3731140189a18450a7fa32f74ee6` while the
+  isolated-sandbox release awaits CI and guarded deployment.
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases. A verified `main` push publishes an immutable GHCR
   commit-SHA image with matching embedded/OCI source provenance; deployment rejects mismatches.
 - The source now batches large SEC company-fact writes and resolves their durable IDs in
   bounded queries after a production AAPL response with 5,291 facts exposed PostgreSQL's
   per-statement parameter ceiling. The regression suite contains 188 tests.
-- The current end-to-end audit passes 180 tests, strict typing across 59 source files,
+- The last complete release audit passed lint, strict typing, the full test suite,
   authenticated local and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, fresh schema
-  upgrade and PostgreSQL schema-drift checks through `20260908_0034`,
-  and the repository secret scan. The current source migration head is `20260908_0034`;
-  production is on `20260908_0034`.
+  upgrade and PostgreSQL schema-drift checks. The current source migration head is
+  `20260911_0037`; production remains on `20260909_0036` until this rollout completes.
 - A local real read-only dynamic scan merged 258 source names, retained 40 review candidates
   and 20 deep-research stocks, included SNDK, and excluded sampled leveraged/single-stock
   ETFs. Its budgeted Meta re-rank cost an estimated `$0.008322` and moved SNDK from
@@ -470,11 +480,15 @@
 - ADR 0020: bind exact research/execution contracts and use recoverable Phase 6 operations.
 - ADR 0021: require forward shadow timing, complete execution-contract binding, durable event
   reconciliation, and attempt-level workflow/runtime fencing.
-- ADR 0022: use one shared virtual account, a persistent autonomous research DAG, and immutable
-  development/production environment identities.
+- ADR 0022: originally used one shared virtual account and continues to govern the persistent
+  autonomous research DAG plus immutable development/production environment identities; its
+  Shadow account topology is superseded by ADR 0042.
 - ADR 0023: separate static and selector validation semantics, require actual-time persisted
   plans and next-open risk review, quarantine stale execution contracts, and reconcile legacy
   ingestion IDs without rewriting immutable events.
+- ADR 0042: evaluate every immutable strategy in an isolated `$10,000` Shadow sandbox with
+  2% current-equity risk, volatility-derived stop/target geometry, a 15% stop ceiling, zero
+  explicit commission, and permanent retirement at an `$8,800` marked-value floor.
 - ADR 0024: isolate Alpaca Paper behind an exact host, durable idempotent intents, account and
   risk reconciliation, and per-deployment administrator confirmation; retain no live path.
 - ADR 0025: reject Shadow certificates at the Paper boundary; require a separately validated

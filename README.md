@@ -4,8 +4,8 @@ A safety-first foundation for a cloud-hosted quantitative research, shadow-tradi
 paper-trading platform. The repository contains implemented and locally verified foundations
 through the **Phase 7 broker boundary**: safety controls, read-only market data,
 event/document ingestion, point-in-time research, evidence-bound LLM analysis, ML/registry
-and constrained strategy generation, an authenticated System Steward, a persistent
-broker-free shadow runtime, a shared account/coordinator, and a fail-closed Alpaca Paper
+and constrained strategy generation, an authenticated System Steward, persistent
+broker-free per-strategy Shadow sandboxes, an autonomous coordinator, and a fail-closed Alpaca Paper
 adapter with durable reconciliation. The unified execution profile and automatic
 position-exit lifecycle are implemented. When explicitly enabled, an exact strategy that
 passes the deterministic Candidate or Qualified gate is automatically admitted to broker-free
@@ -65,7 +65,8 @@ entities, and links near-duplicate coverage to one catalyst without using an LLM
 
 Phase 3A adds immutable evidence packets, research feature snapshots, strategy
 specifications, experiment runs, and backtest trades. Its baseline runner enforces
-next-bar execution and nonzero commission/slippage. This is research-infrastructure
+next-bar execution, zero explicit equity commission, and nonzero spread/slippage/impact.
+This is research-infrastructure
 validation, not a profitable-strategy claim. The current correction record is
 `docs/REVIEW_REMEDIATION_2026-09-06.md`.
 
@@ -147,7 +148,7 @@ execution.
 The Phase 6 shadow runtime admits only an exact immutable strategy specification covered by
 an exact execution-contract validation certificate. Each attempted exposure persists its
 signal candidate, deterministic risk decision, approved plan, and virtual order/fill lineage,
-including the account and evidence used by the gate. It models commission, spread, slippage,
+including the account and evidence used by the gate. It models zero commission plus spread, slippage,
 impact, known-liquidity limits, the versioned protective-stop/target rule, cash, and realized
 P&L. Actual observation, approval, and persistence times are distinct from market signal
 time. A plan must be durable before its market open, and both quantity and reward/risk are
@@ -162,19 +163,20 @@ production research currently rotates through 5, 20, 63, 126, and 252 sessions; 
 research is retained only for explicit experiments until a distinct minute-data intraday
 contract exists. The ML label, forecast, Research LLM analysis, generated spec, backtest, validation certificate, and
 Forward Shadow exit all bind to that same horizon. Multi-session Shadow positions persist
-across worker restarts and close on their stop, target, or maximum holding session. Their
-initial 12.5% price stop widens price tolerance but does not raise the account-dollar loss
-caps; deterministic sizing reduces quantity. Alpaca Paper remains one-session-only until a
+across worker restarts and close on their stop, target, sandbox circuit, or maximum holding
+session. Stop distance is derived deterministically from point-in-time realized volatility,
+strategy family, and holding horizon, with an absolute 15% ceiling; target distance uses a
+versioned strategy-family R multiple. Alpaca Paper remains one-session-only until a
 separate next-session-entry/GTC-exit lifecycle is implemented and validated.
 
-All shadow strategy/symbol deployments are sleeves of one shared virtual master account.
-Open plans atomically reserve account cash and concurrent risk, and completion releases the
-reservation and settles P&L once. The default `$130` per-trade and `$780` concurrent risk are
-an editable, versioned starting policy—not hard-coded claims about optimal sizing. A confirmed
-risk revision can change both stop/target geometry and account-dollar limits, and invalidates
-prior execution certificates until exact validation is rerun. Stop distance is not the same
-as dollar risk: quantity is sized from the smaller of the equity-fraction cap, per-trade USD
-cap, and remaining concurrent-risk capacity.
+Every immutable strategy/symbol Shadow deployment owns an isolated `$10,000` virtual sandbox;
+Shadow measures that strategy rather than simulating portfolio allocation. Each new position
+risks 2% of that sandbox's current marked equity, and no strategy can consume another's cash or
+risk capacity. If cash plus marked unrealized P&L reaches `$8,800`, the sandbox blocks new
+entries, liquidates any open virtual position at the next causally executable price, and
+permanently retires that strategy version. Explicit commission is `$0`; spread, slippage,
+market impact, liquidity, and gap risk remain modeled. The legacy shared account is retained
+only as immutable history and as a migration source; Paper remains the portfolio-level test.
 
 The autonomous coordinator persists an hourly, per-symbol nine-stage DAG from full-window,
 gap-repaired market data and source-specific document history through feature/ML/LLM research,
@@ -258,6 +260,8 @@ SESSION_SECRET=generated-64-character-value
 SESSION_MAX_AGE_DAYS=90
 SHADOW_RUNTIME_ENABLED=true
 SHADOW_POLL_SECONDS=30
+# Optional ISO-8601 activation boundary for a planned transition.
+SHADOW_NEW_EXPOSURE_NOT_BEFORE=
 PAPER_TRADING_ENABLED=false
 PAPER_POLL_SECONDS=30
 ALPACA_PAPER_BASE_URL=https://paper-api.alpaca.markets
@@ -533,7 +537,8 @@ The web application is organized around system objects rather than a fixed dashb
   both Candidate and Qualified admission. Candidate Shadow is explicitly observation-only;
   its durable admission tier is visible in Strategy and Shadow views and blocked from Paper.
 - **Shadow** explains the broker-free boundary and exposes candidate → risk → plan → fill
-  lineage, virtual cash/P&L, alerts, reports, diagnostic ticks, and pause/retire controls.
+  lineage, each strategy's independent `$10,000` sandbox value, its `$8,800` failure floor,
+  virtual cash/P&L, alerts, reports, diagnostic ticks, and pause/retire controls.
 - **Pipelines, Models, Audit, and Steward code work** expose worker liveness, jobs, quality
   evidence, invocation prompts/costs, and scoped code-change review state.
 - **System Steward** is the default full-page conversation workspace. It renders safe
@@ -545,9 +550,10 @@ it, once, before expiry. “Delete strategy” is implemented as immutable retir
 requests create scoped sessions with no web shell; an external trusted coding worker must
 produce a diff and passing test record before a separate commit approval can be granted.
 
-See `runbooks/control_center.md`, `runbooks/shadow_runtime.md`, ADR 0017, and ADR 0018.
-Coordinator operation is documented in `runbooks/autonomous_coordinator.md`; shared-account
-and environment-isolation decisions are recorded in ADR 0022; dynamic discovery is recorded
+See `runbooks/control_center.md`, `runbooks/shadow_runtime.md`, ADR 0017, ADR 0018, and
+ADR 0042. Coordinator operation is documented in `runbooks/autonomous_coordinator.md`;
+the superseded shared-account decision and environment isolation are recorded in ADR 0022;
+dynamic discovery is recorded
 in ADR 0028. Provider-observed history starts are governed by ADR 0029. Subject-aware validation and
 open-price execution review are recorded in ADR 0023; tiered Shadow admission and horizon
 propagation are recorded in ADR 0036. The independent review of

@@ -12,7 +12,8 @@ make research-smoke
 
 This command uses the isolated, ignored `work/research-smoke.db`, creates 100 deterministic
 daily bars, builds point-in-time evidence and feature snapshots, and runs buy-and-hold,
-momentum, and mean-reversion baselines with nonzero commission and slippage. It persists each
+momentum, and mean-reversion baselines with zero explicit commission plus modeled spread,
+slippage, and impact. It persists each
 attempt as an immutable experiment, emits a ledger completion event, and verifies that
 offline/full-history and online/as-of feature materialization produce the same hash. Each
 backtest also persists its ordered portfolio events.

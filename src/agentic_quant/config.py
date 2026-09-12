@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     session_max_age_days: int = Field(default=90, ge=1, le=365)
     shadow_runtime_enabled: bool = True
     shadow_poll_seconds: int = Field(default=30, ge=5, le=3_600)
+    shadow_new_exposure_not_before: datetime | None = None
     paper_trading_enabled: bool = False
     paper_poll_seconds: int = Field(default=30, ge=5, le=3_600)
     autonomous_coordinator_enabled: bool = False
@@ -105,6 +106,11 @@ class Settings(BaseSettings):
     def live_execution_is_impossible(self) -> Settings:
         if self.live_trading_enabled:
             raise ValueError("Live trading is prohibited; LIVE_TRADING_ENABLED must remain false")
+        if (
+            self.shadow_new_exposure_not_before is not None
+            and self.shadow_new_exposure_not_before.tzinfo is None
+        ):
+            raise ValueError("SHADOW_NEW_EXPOSURE_NOT_BEFORE must include a timezone")
         if self.robinhood_order_submission_enabled:
             raise ValueError(
                 "Robinhood order submission is prohibited by the current operating contract"

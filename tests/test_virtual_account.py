@@ -9,7 +9,10 @@ from agentic_quant.environment import EnvironmentRegistry
 from agentic_quant.ledger import EventLedger
 from agentic_quant.migrations import upgrade_database
 from agentic_quant.risk import RiskPolicy
-from agentic_quant.virtual_account import VirtualAccountStore
+from agentic_quant.virtual_account import (
+    STRATEGY_SANDBOX_ACCOUNT_TYPE,
+    VirtualAccountStore,
+)
 
 
 def test_shared_account_reservations_are_atomic_and_settle_once(
@@ -73,6 +76,49 @@ def test_risk_revision_changes_effective_contract(settings) -> None:  # type: ig
     assert effective.maximum_trade_risk_usd == Decimal("200.00000000")
     assert effective.baseline_stop_fraction == Decimal("0.12500000")
     assert effective.version == "risk_policy@0.3.0+account-r2"
+
+
+def test_strategy_sandboxes_have_independent_capital_and_risk(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    policy = RiskPolicy.from_yaml(settings.risk_policy_path)
+    store = VirtualAccountStore(ledger.engine)
+    first_id = store.ensure_strategy_sandbox(
+        deployment_id="deployment-a",
+        strategy_spec_id="strategy-a",
+        symbol="AAPL",
+        risk_policy=policy,
+    )
+    second_id = store.ensure_strategy_sandbox(
+        deployment_id="deployment-b",
+        strategy_spec_id="strategy-b",
+        symbol="NVDA",
+        risk_policy=policy,
+    )
+
+    with ledger.engine.begin() as connection:
+        assert store.reserve(
+            account_id=first_id,
+            cash=Decimal("2500"),
+            risk_usd=Decimal("200"),
+            connection=connection,
+        )
+
+    first = store.account(first_id)
+    second = store.account(second_id)
+    assert first_id != second_id
+    assert first["account_type"] == STRATEGY_SANDBOX_ACCOUNT_TYPE
+    assert second["account_type"] == STRATEGY_SANDBOX_ACCOUNT_TYPE
+    assert first["initial_cash"] == Decimal("10000.00000000")
+    assert second["initial_cash"] == Decimal("10000.00000000")
+    assert first["reserved_risk_usd"] == Decimal("200.00000000")
+    assert second["reserved_risk_usd"] == Decimal("0E-8")
+    assert store.effective_risk_policy(
+        policy,
+        account_id=first_id,
+    ).position_sizing_mode == "equity_fraction"
 
 
 def test_database_cannot_switch_environment_identity(

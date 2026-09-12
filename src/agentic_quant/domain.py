@@ -525,8 +525,8 @@ class StrategySpec(FrozenModel):
 
 
 class BacktestCostModel(FrozenModel):
-    commission_per_share: Decimal = Field(default=Decimal("0.0049"), ge=0)
-    minimum_commission_per_order: Decimal = Field(default=Decimal("0.99"), ge=0)
+    commission_per_share: Decimal = Field(default=Decimal("0"), ge=0)
+    minimum_commission_per_order: Decimal = Field(default=Decimal("0"), ge=0)
     slippage_bps_per_side: Decimal = Field(default=Decimal("2.0"), ge=0)
     half_spread_bps_per_side: Decimal = Field(default=Decimal("1.0"), ge=0)
     market_impact_bps_per_side: Decimal = Field(default=Decimal("1.0"), ge=0)

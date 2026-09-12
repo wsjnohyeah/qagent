@@ -37,6 +37,7 @@ ALLOWED_ACTIONS = {
     "shadow.pause",
     "shadow.resume",
     "shadow.retire",
+    "shadow.migrate_to_sandboxes",
     "shadow.tick",
     "paper.enroll",
     "paper.pause",
@@ -347,11 +348,13 @@ class AdminActionService:
                     strategy_spec_id=str(parameters["strategy_spec_id"]),
                     symbol=str(parameters["symbol"]),
                     initial_cash=Decimal(
-                        str(parameters.get("initial_cash", "100000"))
+                        str(parameters.get("initial_cash", "10000"))
                     ),
                 )
             except KeyError as exc:
                 raise ValueError("strategy_spec_id and symbol are required") from exc
+        if action_type == "shadow.migrate_to_sandboxes":
+            return self.shadow.sandbox_migration_preview()
         if action_type == "paper.enroll":
             return self.paper.enrollment_preview(target_id)
         if action_type in {"paper.pause", "paper.resume", "paper.retire"}:
@@ -429,6 +432,10 @@ class AdminActionService:
             "shadow.pause": "Pause this virtual deployment",
             "shadow.resume": "Resume this virtual deployment",
             "shadow.retire": "Permanently retire this virtual deployment",
+            "shadow.migrate_to_sandboxes": (
+                "Stop legacy shared-account Shadow and migrate future research "
+                "to isolated strategy sandboxes"
+            ),
             "shadow.tick": "Process newly available stored bars once",
             "paper.tick": "Reconcile Alpaca paper state and submit eligible new plans",
             "account.risk.update": (
@@ -537,7 +544,12 @@ class AdminActionService:
             return self.shadow.start_deployment(
                 strategy_spec_id=str(parameters["strategy_spec_id"]),
                 symbol=str(parameters["symbol"]),
-                initial_cash=Decimal(str(parameters.get("initial_cash", "100000"))),
+                initial_cash=Decimal(str(parameters.get("initial_cash", "10000"))),
+                requested_by=confirmed_by,
+            )
+        if action_type == "shadow.migrate_to_sandboxes":
+            return self.shadow.begin_sandbox_migration(
+                reason=reason,
                 requested_by=confirmed_by,
             )
         if action_type in {"shadow.pause", "shadow.resume", "shadow.retire"}:

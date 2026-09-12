@@ -6,6 +6,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Index,
     Integer,
     MetaData,
     Numeric,
@@ -1330,13 +1331,23 @@ shadow_deployments = Table(
     Column("last_price", Numeric(20, 8), nullable=True),
     Column("realized_pnl", Numeric(24, 8), nullable=False),
     Column("unrealized_pnl", Numeric(24, 8), nullable=False),
+    Column("liquidation_requested_at", DateTime(timezone=True), nullable=True),
+    Column("retired_reason", String(120), nullable=True),
     Column("last_processed_bar_time", DateTime(timezone=True), nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False, index=True),
-    UniqueConstraint(
-        "strategy_spec_id",
-        "symbol",
-        name="uq_shadow_deployments_strategy_symbol",
+)
+
+Index(
+    "uq_shadow_deployments_nonterminal_strategy_symbol",
+    shadow_deployments.c.strategy_spec_id,
+    shadow_deployments.c.symbol,
+    unique=True,
+    sqlite_where=shadow_deployments.c.status.not_in(
+        ("RETIRED", "RETIRED_LEGACY", "RETIRED_SHADOW_FAILED")
+    ),
+    postgresql_where=shadow_deployments.c.status.not_in(
+        ("RETIRED", "RETIRED_LEGACY", "RETIRED_SHADOW_FAILED")
     ),
 )
 
