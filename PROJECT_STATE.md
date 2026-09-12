@@ -11,19 +11,20 @@
   strictly Qualified and forward observation history remains short.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `a84565d78e9bb14562de96d6905b76f1815dc57a` image, PostgreSQL, Redis, API, Shadow worker,
+  `9471b60479d528669aabdbeb267cb83321439a08` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled. The last pre-migration inspection found 106
   legacy shared-account Shadow deployments before migration. The confirmed migration retired
   97 flat deployments, cancelled the one unfilled plan, and placed nine open virtual positions
   into causal liquidation. New sandbox exposure is resumed behind the
-  `2026-09-14T13:30:00Z` boundary. One exact five-session SMCI sandbox has since been admitted
-  and remains flat before that boundary. C094 remains active,
+  `2026-09-14T13:30:00Z` boundary. The stricter policy quarantined all 63 flat sandboxes that
+  had been admitted under the former certificate as `REVALIDATION_REQUIRED`; no new-policy
+  sandbox is active until a fresh exact report passes. C094 remains active,
   deterministic automatic Candidate/Qualified Shadow admission is enabled, and the audited
   runtime is resumed. There are no
   Paper enrollments or orders. Live money remains structurally disabled.
-- Local source adds `research_gate@0.5.0`, horizon-specific
+- Production runs `research_gate@0.5.0`, horizon-specific
   Candidate Shadow activity minima, horizon-specific research-trial accounting, budget-
   independent revalidation of accepted specs, scanner-pool authorization at Shadow start,
   at least 50% positive active OOS folds, profit factor at least 1.10, and a positive
@@ -31,7 +32,7 @@
   a stricter Research LLM output prompt, and `llm_budget@0.2.0` with a `$40` critical/daily
   ceiling that preserves same-day spend across policy versions, single-attempt invalid LLM
   output handling, and leakage-safe annual ML under a six-year daily-bar target.
-- Local autonomous research supports 1/2/5/10/20/63/126/252-session groups. Its deterministic
+- Autonomous research supports 1/2/5/10/20/63/126/252-session groups. Its deterministic
   daily UTC schedule assigns 21 of 24 hourly slots to the 1/2/5/10/20-session core and one
   background slot to each longer horizon. One-session research is a prior-completed-bar to
   next-session-close contract, not a minute-level strategy.
@@ -39,12 +40,11 @@
   Candidate or Qualified result is idempotently adopted and started by the deterministic
   coordinator, while operator holds, Paper enrollment, Robinhood orders, and live money remain
   outside that automation.
-- The latest 20-session cycle completed all stages and produced six Candidate-reviewable
-  reports, but its scanner-pool revision became stale before the automatic rollout and was
-  correctly refused. The current 5-session cycle completed ML and Research LLM for all 20
-  symbols and is advancing through generation/validation. Its first current exact Candidate,
-  AAPL, was transition-activated into 5-session Shadow; subsequent current eligible results
-  will enter automatically.
+- Historical reports and the 63 flat sandboxes admitted under `research_gate@0.4.0` remain
+  auditable but cannot authorize new exposure. Immediately after rollout the new hourly slot
+  correctly planned a 10-session, 20-symbol research group; fresh `0.5.0` reports are still
+  pending while the durable pre-deployment 126-session backlog completes. Subsequent exact
+  robust Candidate/Qualified results will enter isolated Shadow automatically.
 - Local-lite uses Python 3.12, a project-local `uv`, SQLite, and filesystem object storage.
 - The Control API, single-admin object-centric web console, persistent System Steward,
   append-only event ledger, deterministic risk engine, and shadow runtime exist.
@@ -423,9 +423,8 @@
 2. Replace the temporary `sslip.io` hostname with the operator's permanent domain, select an
    off-site backup target and external alert destination, then automate both retention and
    notification checks.
-3. Deploy the reviewed `research_gate@0.5.0` robustness correction, then let horizon-correct
-   cycles revalidate both new and previously accepted exact strategies,
-   and review any Candidate/Qualified Shadow eligibility without
+3. Let `research_gate@0.5.0` cycles revalidate both new and previously accepted exact
+   strategies, and review any Candidate/Qualified Shadow eligibility without
    manufacturing a pass. Candidate deployments may gather broker-free forward evidence;
    only a Qualified one-session deployment may be separately enrolled in Paper.
 4. Continue production-scale history/evidence coverage and collect Phase 5 statistical plus

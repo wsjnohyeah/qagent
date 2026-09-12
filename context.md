@@ -4912,7 +4912,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C097 — `Report isolated Shadow rollout`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `a84565d78e9bb14562de96d6905b76f1815dc57a`.
 - Date: 2026-09-11 PDT.
 - User intent: retire every old shared-account Shadow experiment and start the new isolated
   policy at the next Monday open.
@@ -4940,7 +4940,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C098 — `Prioritize robust short-horizon research`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `9471b60479d528669aabdbeb267cb83321439a08`.
 - Date: 2026-09-12 PDT.
 - User intent: concentrate autonomous research on strategies that can accumulate forward
   evidence in days or weeks; add 2/10-session strategies; retain long research at lower
@@ -4978,6 +4978,38 @@ lifecycle. No Paper order was used as a build or deployment test.
   verify the existing flat SMCI sandbox becomes revalidation-required under the new policy,
   resume the already approved broker-free workflow, and record runtime evidence in the next
   context entry.
+
+### C099 — `Record robust short-horizon rollout`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-12 PDT.
+- User intent: put the approved short-horizon allocation and outlier-resistant Shadow gate into
+  continuous production operation without carrying any old validation authority forward.
+- Scope: record C098 exact-SHA CI/image publication, the verified pre-deployment backup,
+  confirmation-gated pause/resume actions, guarded deployment, stale-sandbox quarantine,
+  Paper/live safety state, and the first new 10-session coordinator plan.
+- Architecture/decision impact: none beyond ADR 0043. Existing immutable reports and sandbox
+  ledgers remain audit evidence, but their `research_gate@0.4.0` certificate cannot authorize
+  new exposure. Revalidation reuses neither its old gate hash nor its former admission result.
+- Validation: GitHub Actions run `34682004826` passed and published exact image
+  `9471b60479d528669aabdbeb267cb83321439a08`. Backup
+  `/opt/agentic-quant/backups/20260912T080441Z` passed PostgreSQL catalog, object archive, and
+  checksum verification. Audited pause action `01a094aa-d8c1-79c6-b370-217e17ba4058` preceded
+  deployment; the guarded deploy passed migration/bootstrap and healthy API, coordinator,
+  Shadow worker, PostgreSQL, and Redis gates. All 63 flat new-model sandboxes became
+  `REVALIDATION_REQUIRED`; the nine legacy shared-account positions remain exit-only
+  `LIQUIDATION_PENDING`. Audited resume action `01a094af-23b6-7e1c-b56e-7b5578dad6b5`
+  restored the approved research and broker-free Shadow workflow. The new UTC-hour schedule
+  created a 180-job 10-session group and completed its 20 market-data stages at first
+  inspection; zero `research_gate@0.5.0` reports existed yet, so no pass was manufactured.
+- Global state after commit: production is online on the robust short-horizon architecture,
+  new exposure is resumed but remains blocked before `2026-09-14T13:30:00Z`, no sandbox is
+  Active under the new policy yet, Paper has zero enrollments/orders and is not submission-
+  ready, Robinhood mutation remains disabled, and `LIVE_TRADING_ENABLED=false`.
+- Corrections/follow-ups: observe the first exact `0.5.0` reports and report their full OOS
+  activity, win-rate interval, profit factor, best-trade sensitivity, and gate disposition.
+  After Monday's completed bar, reconcile the nine legacy causal exits and any genuinely
+  signaled new sandbox plans; do not promise that a qualified strategy must trade.
 
 ## Template for future commit entries
 
