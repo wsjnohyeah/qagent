@@ -42,6 +42,7 @@ from agentic_quant.document_store import DocumentStore
 from agentic_quant.data_quality import MarketDataQualityService
 from agentic_quant.domain import LLMProviderName, LLMWorkload
 from agentic_quant.event_bus import NullEventPublisher, RedisStreamPublisher
+from agentic_quant.event_alpha import EventAlphaService, EventAlphaStore
 from agentic_quant.environment import EnvironmentRegistry
 from agentic_quant.intelligence import (
     EvidenceBoundResearchAnalyst,
@@ -190,6 +191,18 @@ class NewsBackfillRequest(BaseModel):
     end: datetime | None = None
     limit: int = Field(default=50, ge=1, le=1_000)
     max_pages: int = Field(default=1, ge=1, le=100)
+
+
+class EventAlphaRunRequest(BaseModel):
+    symbols: tuple[str, ...] = Field(min_length=1, max_length=100)
+    as_of: datetime
+    max_cards: int = Field(default=2, ge=1, le=20)
+
+    @model_validator(mode="after")
+    def normalized_symbols(self) -> EventAlphaRunRequest:
+        if any(not symbol or len(symbol) > 24 for symbol in self.symbols):
+            raise ValueError("Event Alpha symbols must be nonempty and at most 24 chars")
+        return self
 
 
 class SecFilingsRequest(BaseModel):
@@ -358,6 +371,17 @@ def create_app(
         intelligence_store,
         code_git_sha=app_settings.source_git_sha or "UNAVAILABLE",
     )
+    event_alpha_store = EventAlphaStore(ledger.engine, ledger)
+    event_alpha = EventAlphaService(
+        event_alpha_store,
+        research_store,
+        llm_gateway,
+        ledger=ledger,
+        code_git_sha=app_settings.source_git_sha or "UNAVAILABLE",
+        calendar_name=app_settings.market_calendar,
+        minimum_analogs=app_settings.event_alpha_minimum_analogs,
+        minimum_symbols=app_settings.event_alpha_minimum_symbols,
+    )
     strategy_generator = HybridStrategyGenerator(
         llm_gateway,
         research_store,
@@ -524,6 +548,7 @@ def create_app(
             "coordinator_auto_shadow_enabled": (
                 app_settings.coordinator_auto_shadow_enabled
             ),
+            "event_alpha": event_alpha.summary(),
             "llm_routing": llm_gateway.status(),
             "llm_budget": llm_budget_manager.summary(),
             "ml_policy": ml_policy.version,
@@ -581,6 +606,7 @@ def create_app(
         application.state.llm_store = llm_store
         application.state.llm_gateway = llm_gateway
         application.state.intelligence_store = intelligence_store
+        application.state.event_alpha = event_alpha
         application.state.ml_store = ml_store
         application.state.new_exposure_paused = (
             True
@@ -848,6 +874,7 @@ def create_app(
                                     }
                                 )
                             )
+                            event_alpha_result = None
                             if not symbols:
                                 result = None
                             else:
@@ -863,6 +890,25 @@ def create_app(
                                     backlog_horizons=AUTONOMOUS_RESEARCH_HORIZONS,
                                     market_refresh_symbols=market_refresh_symbols,
                                 )
+                                if app_settings.event_alpha_enabled:
+                                    try:
+                                        event_alpha_result = await event_alpha.run_cycle(
+                                            symbols=tuple(
+                                                str(value) for value in symbols
+                                            ),
+                                            as_of=cycle_as_of,
+                                            max_cards=(
+                                                app_settings.event_alpha_max_cards_per_cycle
+                                            ),
+                                        )
+                                    except Exception as exc:
+                                        # Event research is an optional sidecar. Its
+                                        # provider, budget, or data failure must never
+                                        # interrupt technical research or Shadow.
+                                        event_alpha_result = {
+                                            "status": "DEGRADED",
+                                            "error": type(exc).__name__,
+                                        }
                         finally:
                             heartbeat_stop.set()
                             await heartbeat_task
@@ -886,7 +932,9 @@ def create_app(
                                     f"scan={universe_scan_id or 'disabled'} "
                                     f"horizon={research_horizon}bars "
                                     f"processed={result['processed_this_run']} "
-                                    f"waiting={result['business_waiting_count']}"
+                                    f"waiting={result['business_waiting_count']} "
+                                    f"event_alpha="
+                                    f"{(event_alpha_result or {}).get('status', 'disabled')}"
                                 ),
                             )
                     failure_streak = 0
@@ -1132,6 +1180,7 @@ def create_app(
             "coordinator_auto_shadow_enabled": (
                 app_settings.coordinator_auto_shadow_enabled
             ),
+            "event_alpha_enabled": app_settings.event_alpha_enabled,
             "coordinator_market_lookback_days": (
                 app_settings.coordinator_initial_lookback_days
             ),
@@ -1168,6 +1217,7 @@ def create_app(
             **llm_store.health_summary(),
             **llm_budget_manager.health_summary(),
             **intelligence_store.health_summary(),
+            **event_alpha_store.health_summary(),
             **ml_store.health_summary(),
             **data_quality_service.health_summary(),
             **workflow_job_store.health_summary(),
@@ -1804,6 +1854,64 @@ def create_app(
     @application.get("/v1/catalysts")
     def catalysts(limit: int = Query(default=50, ge=1, le=500)) -> list[dict[str, Any]]:
         return document_store.recent_catalysts(limit=limit)
+
+    @application.get("/v1/event-alpha/status")
+    def event_alpha_status(
+        limit: int = Query(default=50, ge=1, le=200),
+    ) -> dict[str, Any]:
+        value = event_alpha.status(limit=limit)
+        value["enabled"] = app_settings.event_alpha_enabled
+        value["max_cards_per_cycle"] = app_settings.event_alpha_max_cards_per_cycle
+        return value
+
+    @application.get("/v1/event-alpha/cards")
+    def event_alpha_cards(
+        limit: int = Query(default=100, ge=1, le=500),
+        symbol: str | None = Query(default=None, max_length=24),
+    ) -> list[dict[str, Any]]:
+        return event_alpha_store.cards(limit=limit, symbol=symbol)
+
+    @application.get("/v1/event-alpha/cards/{event_card_id}")
+    def event_alpha_card(event_card_id: str) -> dict[str, Any]:
+        value = event_alpha_store.card(event_card_id)
+        if value is None:
+            raise HTTPException(status_code=404, detail="Event Card not found")
+        value["outcomes"] = event_alpha_store.outcomes(event_card_id)
+        return value
+
+    @application.get("/v1/event-alpha/assessments")
+    def event_alpha_assessments(
+        limit: int = Query(default=100, ge=1, le=500),
+    ) -> list[dict[str, Any]]:
+        return event_alpha_store.assessments(limit=limit)
+
+    @application.get("/v1/event-alpha/playbooks")
+    def event_alpha_playbooks(
+        limit: int = Query(default=100, ge=1, le=500),
+    ) -> list[dict[str, Any]]:
+        return event_alpha_store.playbooks(limit=limit)
+
+    @application.post("/v1/event-alpha/run")
+    async def event_alpha_run(payload: EventAlphaRunRequest) -> dict[str, Any]:
+        require_development()
+        require_pipeline("research")
+        require_pipeline("llm")
+        if payload.as_of.tzinfo is None:
+            raise HTTPException(status_code=422, detail="as_of must include a timezone")
+        try:
+            return await event_alpha.run_cycle(
+                symbols=tuple(symbol.upper() for symbol in payload.symbols),
+                as_of=payload.as_of,
+                max_cards=payload.max_cards,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except LLMConfigurationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except LLMBudgetExceededError as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
+        except LLMProviderError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @application.get("/v1/research/experiments")
     def research_experiments(

@@ -121,6 +121,14 @@ margin, so a process restart cannot permanently consume budget capacity.
 `$40`; same-period consumption is reconstructed from durable reservations across policy
 versions, so deploying a higher ceiling does not reset money already spent that day.
 
+Event Alpha adds a parallel, LLM-led research lane for sparse catalysts without training a
+predictive event classifier. It turns citation-bound catalysts into generalized Event Cards,
+calculates cross-stock 1/2/5-session outcomes and outlier-resistant statistics in deterministic
+code, and lets the LLM propose a case-based Playbook or abstain. Same-symbol history is excluded
+from analogs; future outcomes and corrected historical documents fail closed. A passing
+Playbook is a `RESEARCH_CANDIDATE` only: V1 has no Event Alpha Shadow or broker path. See ADR
+0044 and `runbooks/event_alpha.md`.
+
 Phase 4B exposes that gateway in the local Control Center. The operator can create immutable
 workload-routing revisions and chat through `Auto`, OpenAI, or Meta while preserving model,
 route, token, latency, source, and configuration lineage. Paid research calls remain
@@ -276,6 +284,10 @@ COORDINATOR_DOCUMENT_LOOKBACK_DAYS=1826
 COORDINATOR_DOCUMENT_PARTITION_DAYS=90
 COORDINATOR_DOCUMENT_MAX_PAGES=100
 COORDINATOR_AUTO_SHADOW_ENABLED=false
+EVENT_ALPHA_ENABLED=false
+EVENT_ALPHA_MAX_CARDS_PER_CYCLE=2
+EVENT_ALPHA_MINIMUM_ANALOGS=5
+EVENT_ALPHA_MINIMUM_SYMBOLS=3
 MARKET_SCANNER_ENABLED=false
 MARKET_SCANNER_LLM_ENABLED=false
 MARKET_SCANNER_AUTO_TRADING_POOL_ENABLED=false
@@ -638,6 +650,12 @@ AGENTS.md                mandatory operating rules for coding/deployment agents
 - `GET /v1/market-scanner/status`
 - `GET /v1/documents/search`
 - `GET /v1/catalysts`
+- `GET /v1/event-alpha/status`
+- `GET /v1/event-alpha/cards`
+- `GET /v1/event-alpha/cards/{event_card_id}`
+- `GET /v1/event-alpha/assessments`
+- `GET /v1/event-alpha/playbooks`
+- `POST /v1/event-alpha/run` — development-only bounded research cycle
 - `GET /v1/research/experiments`
 - `GET /v1/research/experiments/{experiment_run_id}/events`
 - `GET /v1/research/validations`

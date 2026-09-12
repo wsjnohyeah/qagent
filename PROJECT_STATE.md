@@ -68,6 +68,12 @@
   retires at a `$8,800` marked-value floor. Explicit commission is zero while spread,
   slippage, impact, liquidity, and gap behavior remain modeled. The legacy migration is
   confirmation-gated and a deployment-time exposure boundary can stage Monday activation.
+- Local source now also implements the safe-off Event Alpha V1 from ADR 0044. A bounded
+  coordinator sidecar creates citation-bound Event Cards, deterministic 1/2/5-session outcomes,
+  cross-stock analog statistics, LLM case assessments, and immutable research Playbooks without
+  a predictive event ML model. Unchanged case sets are idempotent for LLM spend and a sidecar
+  failure cannot interrupt Technical Alpha. Event Playbooks are research candidates only: no
+  Event Alpha replay certificate, Shadow adapter, Paper path, or production enablement exists yet.
 - Local lint, strict type checking, API readiness, the authenticated HTTP
   vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
@@ -100,8 +106,8 @@
 - A bounded set of 250 AAPL SEC XBRL company facts normalized successfully; replay inserted zero duplicates.
 - Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
   experiment runs, backtest trades, corporate actions, historical universe membership,
-  feature parity checks, and walk-forward reports are stored through Alembic revision
-  `20260911_0037`, including exact validation and ML-training contracts, normalized Paper
+  feature parity checks, walk-forward reports, and Event Alpha case memory are stored through
+  Alembic revision `20260912_0038`, including exact validation and ML-training contracts, normalized Paper
   order legs, shadow risk lineage, fenced workflow
   attempts, generation-attempt audit, runtime leases, and the event outbox.
 - The Phase 3 runner provides buy-and-hold, long/cash momentum, and long/cash
@@ -304,11 +310,11 @@
   commit-SHA image with matching embedded/OCI source provenance; deployment rejects mismatches.
 - The source now batches large SEC company-fact writes and resolves their durable IDs in
   bounded queries after a production AAPL response with 5,291 facts exposed PostgreSQL's
-  per-statement parameter ceiling. The regression suite contains 188 tests.
+  per-statement parameter ceiling. The regression suite contains 225 tests.
 - The last complete release audit passed lint, strict typing, the full test suite,
   authenticated local and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, fresh schema
   upgrade and PostgreSQL schema-drift checks. The current source migration head is
-  `20260911_0037`; production is on the same revision.
+  `20260912_0038`; production remains on `20260911_0037` until this safe-off feature is released.
 - A local real read-only dynamic scan merged 258 source names, retained 40 review candidates
   and 20 deep-research stocks, included SNDK, and excluded sampled leveraged/single-stock
   ETFs. Its budgeted Meta re-rank cost an estimated `$0.008322` and moved SNDK from
@@ -435,6 +441,9 @@
    rather than configured spread, and symbol-change/delisting replay.
 7. Add an operator-selected provider-lag/sequence-gap notification channel; dead-letter replay
    is now inspectable and confirmation-gated in the Control Center.
+8. Populate Event Alpha's historical case memory under the existing USD budget, then specify and
+   implement an event-aware walk-forward/execution certificate before considering any broker-free
+   Shadow admission. Do not translate a Playbook directly into a technical `StrategySpec`.
 
 ## Blocked
 
@@ -498,6 +507,9 @@
 - ADR 0043: prioritize autonomous 1/2/5/10/20-session research, retain low-frequency long
   horizons, and require Candidate Shadow evidence to survive positive-fold, profit-factor,
   and largest-winner-removal robustness checks.
+- ADR 0044: use an LLM-led, case-based Event Alpha sidecar without predictive event ML; bind
+  every hypothesis to point-in-time citations and deterministic cross-stock outcome statistics,
+  and keep all playbooks research-only until a separate event replay certificate exists.
 - ADR 0024: isolate Alpaca Paper behind an exact host, durable idempotent intents, account and
   risk reconciliation, and per-deployment administrator confirmation; retain no live path.
 - ADR 0025: reject Shadow certificates at the Paper boundary; require a separately validated

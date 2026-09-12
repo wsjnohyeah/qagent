@@ -65,6 +65,11 @@ COORDINATOR_DOCUMENT_MAX_PAGES=100
 COORDINATOR_PAID_RESEARCH_ENABLED=false
 # Enable only after exact Candidate/Qualified validation and Shadow risk controls are reviewed.
 COORDINATOR_AUTO_SHADOW_ENABLED=false
+# Optional LLM-led event research sidecar. It requires paid research and has no Shadow path.
+EVENT_ALPHA_ENABLED=false
+EVENT_ALPHA_MAX_CARDS_PER_CYCLE=2
+EVENT_ALPHA_MINIMUM_ANALOGS=5
+EVENT_ALPHA_MINIMUM_SYMBOLS=3
 # Enable only after the Alpaca screener/snapshot probe and policy review pass.
 MARKET_SCANNER_ENABLED=false
 # This spends against the routine_pipeline daily USD budget and fails back to deterministic.
@@ -219,6 +224,10 @@ Verify and record:
 - The bootstrap output says `ready_paused` and the stored environment ID matches this stack.
 - `GET /v1/coordinator/status` is readable and the coordinator heartbeat is present when
   enabled. `WAITING_PAID_RESEARCH_ENABLEMENT` is expected until paid automation is approved.
+- If Event Alpha is enabled, `GET /v1/event-alpha/status` shows bounded card growth, explicit
+  availability bases, and no repeated assessment invocation when its semantic analog set is
+  unchanged. Confirm `predictive_ml_used=false` and `shadow_eligible=false`; no Event Playbook
+  may appear as an adopted technical strategy.
 - When dynamic discovery is enabled, `GET /v1/market-scanner/status` has a recent completed
   or explicit fallback run, its raw object IDs resolve, and every coordinator job carries the
   same `universe_scan_id`. If autonomous pool admission is enabled, verify the recorded list

@@ -92,6 +92,11 @@ A Git commit cannot contain its own content-derived hash without changing that h
   abstains when
   independent evidence is missing, and exposes the full lineage as Decision Inspector graph
   `ai_infrastructure_graph@0.1.0`.
+- Event Alpha V1 adds a parallel case-based research lane for sparse catalysts. The LLM creates
+  citation-bound Event Cards and compares bounded cross-stock analogs; deterministic code owns
+  evidence cutoffs, 1/2/5-session outcomes, robustness statistics, and the research-candidate
+  gate. It trains no predictive event ML model. Event Playbooks are research-only and cannot
+  enter Shadow or Paper until an event-aware replay and exact execution certificate exist.
 - Phase 5 trains logistic and boosted-stump candidates on executable next-open-to-future-close
   labels indexed by actual bars. It uses embargoed chronological folds and separate purged
   calibration, model-selection, and untouched final holdout partitions, measures PSI drift,
@@ -350,6 +355,10 @@ Development service ports bind only to loopback. The local Compose credentials a
 - C031 local release gate passed 118 tests, Flake8, strict mypy across 56 source files,
   authenticated local doctor, repository secret scan, Docker rebuild/doctor, and PostgreSQL
   Alembic zero-drift. The rebuilt page served all new Strategy/Shadow/Coordinator labels.
+- C100 local release gate passes Flake8, strict mypy across 62 source files, all 225 tests,
+  authenticated local and PostgreSQL/Redis/MinIO doctors, repository secret scan, fresh SQLite
+  upgrade/downgrade/re-upgrade, PostgreSQL Alembic zero-drift at `20260912_0038`, production-role
+  configuration isolation, and a headless-browser render of the Event Alpha page.
 - C032 targeted and full local checks pass 121 tests plus Flake8 and strict mypy across 58
   source files. Docker/PostgreSQL drift and GitHub CI are rerun before handoff.
 - C034 local release gate passes 138 tests, Flake8, strict mypy across 58 source files,
@@ -609,6 +618,11 @@ flowchart LR
     DOCINGEST --> DB
     CATALYST --> DB
     CATALYST --> REDIS
+    CATALYST --> EVENTCARD["Citation-bound Event Cards"]
+    LLMGW --> EVENTCARD
+    EVENTCARD --> EVENTCASE["Deterministic 1/2/5-session case outcomes"]
+    EVENTCASE --> EVENTPLAY["LLM analog assessment + research Playbook"]
+    EVENTPLAY --> DB
     INGEST --> MINIO["MinIO raw archive"]
     INGEST --> DB
     INGEST --> REDIS["Redis Streams"]
@@ -946,6 +960,7 @@ year or more of data.
 | Event ingestion | `src/agentic_quant/document_ingestion.py` | raw-first document/fact ingestion and normalized events |
 | Document persistence | `src/agentic_quant/document_store.py` | immutable versions, entities, search, catalyst dedup, SEC facts |
 | Event operations | `src/agentic_quant/event_cli.py` | bounded provider ingestion, search, and health CLI |
+| Event Alpha | `src/agentic_quant/event_alpha.py` | citation-bound Event Cards, cross-stock case outcomes/statistics, LLM playbooks, and a hard research-only boundary |
 | Research engine | `src/agentic_quant/research.py` | point-in-time price/event features and cost-aware deterministic baselines |
 | Portfolio replay | `src/agentic_quant/backtest_engine.py` | event-driven cash/share accounting, fills, marks, costs, and liquidity caps |
 | Research persistence | `src/agentic_quant/research_store.py` | immutable evidence/features/specs/experiments/trades and as-of reads |
@@ -961,7 +976,7 @@ year or more of data.
 | ML training/registry | `src/agentic_quant/ml.py`, `configs/ml_policy.yaml` | PIT labels, logistic/stump walk-forward, calibration, drift, JSON registry, forecasts |
 | Strategy generator | `src/agentic_quant/strategy_generation.py` | evidence/forecast-bound LLM generation, adversarial critique, constrained research DSL |
 | Runtime worker | `src/agentic_quant/worker.py` | supervised shadow and autonomous research schedulers with persistent heartbeats |
-| Schema migrations | `migrations/` | Alembic schema history through ML training-contract revision `20260907_0031` |
+| Schema migrations | `migrations/` | Alembic schema history through Event Alpha revision `20260912_0038` |
 
 ## Current executable risk baseline
 
@@ -1021,6 +1036,8 @@ Implemented endpoints:
 - `GET /v1/workflow-jobs` and `/v1/workflow-jobs/{job_id}`
 - `GET /v1/documents/search`
 - `GET /v1/catalysts`
+- `GET /v1/event-alpha/status`, `/cards`, `/cards/{id}`, `/assessments`, and `/playbooks`
+- `POST /v1/event-alpha/run`; development-only bounded Event Alpha cycle
 - `GET /v1/research/experiments`
 - `GET /v1/research/experiments/{experiment_run_id}/events`
 - `GET /v1/research/validations`
@@ -2644,6 +2661,8 @@ Ordered near-term work:
 7. Extend fill realism and add an operator-selected provider-lag/sequence notification channel.
    Dead-letter inspection and single-event requeue are now confirmation-gated.
 8. Build a labeled corpus and measure catalyst-dedup precision/recall.
+9. Populate Event Alpha's case memory and design an event-specific walk-forward/execution
+   certificate before any Playbook can enter broker-free Shadow.
 
 Historical note: C061 first replaced invalid one-session fallbacks with genuinely
 horizon-bound evidence. Candidate observation may collect broker-free forward evidence but
@@ -5010,6 +5029,65 @@ lifecycle. No Paper order was used as a build or deployment test.
   activity, win-rate interval, profit factor, best-trade sensitivity, and gate disposition.
   After Monday's completed bar, reconcile the nine legacy causal exits and any genuinely
   signaled new sandbox plans; do not promise that a qualified strategy must trade.
+
+### D051 — Sparse event alpha is LLM-led case research, not premature predictive ML
+
+- Date: 2026-09-12 PDT.
+- The user wants the system to recognize message-driven moves—contracts, guidance, regulation,
+  theme acceleration, squeezes, and similar catalysts—that a price-pattern-only lane will miss.
+  The user explicitly chose an LLM-led design because exact sparse events do not repeat often
+  enough to justify pretending a first-generation classifier can learn them reliably.
+- Decision: preserve Technical Alpha unchanged and add Event Alpha as a parallel case-memory
+  lane. The LLM normalizes evidence into generalized, citation-bound Event Cards and reasons
+  across comparable events from other issuers. Code independently calculates causally available
+  1/2/5-session outcomes, sample breadth, positive rate, median, profit factor, worst case, and
+  performance after removing the largest winner.
+- Authority boundary: the LLM may propose a research Playbook or abstain. It cannot choose
+  sizing, waive deterministic risk/restrictions, promote to Shadow/Paper, or send an order.
+  Passing the first gate creates only `RESEARCH_CANDIDATE`; an event-aware walk-forward replay,
+  frozen execution contract, and exact validation certificate remain mandatory for Shadow.
+- Time/budget decision: forward-observed and historical provider-time replay evidence are
+  labeled separately; corrected backfill that was unavailable historically fails closed.
+  Semantic assessment identity excludes the moving coordinator clock so an unchanged case set
+  cannot repeatedly spend LLM budget. Event Alpha failure is isolated from Technical Alpha and
+  existing Shadow accounting.
+- Formal record: ADR 0044 and `runbooks/event_alpha.md`.
+
+### C100 — `Build LLM case-based Event Alpha memory`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-12 PDT.
+- User intent: add a news/event-driven research system in which the LLM generalizes sparse
+  catalysts and recognizes recurring cross-stock situations without pretending a first-
+  generation predictive ML classifier can reliably learn exact events.
+- Scope: add Event Card, completed outcome, analog assessment, and Playbook tables under
+  Alembic `20260912_0038`; implement bounded citation-checked extraction, deterministic
+  1/2/5-session raw price reactions, transparent cross-symbol similarity/statistics, structured
+  LLM synthesis, idempotent semantic assessment reuse, and an outlier-resistant research gate;
+  connect a failure-isolated coordinator sidecar, authenticated read/development-run APIs,
+  System Steward summary, Event Alpha Control Center page, configuration, production role
+  isolation, fixtures, ADR 0044, and operating/deployment documentation.
+- Architecture/decision impact: Event Alpha is parallel to, rather than a replacement for,
+  Technical Alpha. It uses no trained predictive event ML. Historical provider-time replay is
+  labeled separately from forward-observed evidence, corrected delayed evidence fails closed,
+  same-symbol cases cannot satisfy the cross-stock analog set, and an event visible exactly at
+  an opening timestamp cannot claim that opening price. The LLM proposes hypotheses but has no
+  sizing, risk, adoption, Shadow, Paper, Robinhood-order, or live authority.
+- Validation: `make check` passed Flake8, strict mypy across 62 source files, and all 225 tests.
+  `make doctor` and the secret scan passed. A fresh SQLite database upgraded to head, downgraded
+  to `20260911_0037`, re-upgraded to `20260912_0038`, and reported zero drift. The rebuilt local
+  Compose stack passed authenticated API, PostgreSQL, Redis, MinIO, and Alembic zero-drift
+  checks. A headless Chrome run executed and rendered the Event Alpha page without JavaScript
+  errors. Production Compose inspection proved the coordinator may enable Event Alpha while the
+  Shadow worker forces it off.
+- Global state after commit: local source contains a safe-off, bounded Event Alpha research
+  memory and UI. Production remains on `dc84596`/functional image `9471b604` and Event Alpha is
+  neither deployed nor enabled. Existing technical research, isolated Shadow sandboxes, Paper,
+  Robinhood, and the hard no-live boundary are unchanged.
+- Corrections/follow-ups: after a clean exact-SHA build is deliberately deployed, enable the
+  sidecar only under a reviewed USD budget and inspect its first historical/forward Event Cards.
+  Before any Event Playbook reaches broker-free Shadow, add a separate event-aware walk-forward
+  replay, frozen execution contract, exact validation certificate, and deterministic adapter.
 
 ## Template for future commit entries
 

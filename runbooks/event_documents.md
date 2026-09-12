@@ -82,6 +82,12 @@ Search normalized documents:
 ```
 
 The equivalent read APIs are `GET /v1/documents/search` and `GET /v1/catalysts`.
+
+When the separate Event Alpha sidecar is enabled, these normalized catalysts become bounded,
+citation-checked Event Cards and cross-stock case memory. Historical provider-time replay and
+forward-observed evidence remain visibly distinct, and corrected documents first seen only after
+the event are not backdated. See `runbooks/event_alpha.md`; a research Playbook is not a Shadow
+or broker authorization.
 Development-only ingestion endpoints are visible in `/docs`.
 
 ## Expected invariants

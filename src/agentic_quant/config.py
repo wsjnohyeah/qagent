@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     coordinator_document_lookback_days: int = Field(default=1_826, ge=1, le=3_650)
     coordinator_document_partition_days: int = Field(default=90, ge=1, le=365)
     coordinator_document_max_pages: int = Field(default=100, ge=1, le=100)
+    event_alpha_enabled: bool = False
+    event_alpha_max_cards_per_cycle: int = Field(default=2, ge=1, le=20)
+    event_alpha_minimum_analogs: int = Field(default=5, ge=3, le=100)
+    event_alpha_minimum_symbols: int = Field(default=3, ge=2, le=100)
     market_scanner_enabled: bool = False
     market_scanner_llm_enabled: bool = False
     market_scanner_auto_trading_pool_enabled: bool = False
@@ -176,6 +180,14 @@ class Settings(BaseSettings):
             raise ValueError(
                 "COORDINATOR_AUTO_SHADOW_ENABLED=true requires "
                 "AUTONOMOUS_COORDINATOR_ENABLED=true"
+            )
+        if self.event_alpha_enabled and not (
+            self.autonomous_coordinator_enabled
+            and self.coordinator_paid_research_enabled
+        ):
+            raise ValueError(
+                "EVENT_ALPHA_ENABLED=true requires autonomous coordinator and paid "
+                "research"
             )
         if self.paper_trading_enabled or self.market_scanner_enabled:
             if self.alpaca_paper_base_url.rstrip("/") != (

@@ -77,6 +77,13 @@ Within every group, ready jobs are likewise stage-major.
    available tier and start broker-free Shadow. An operator pause or retirement blocks automatic
    reactivation. Candidate cannot enter Alpaca Paper, and neither tier is auto-enrolled in Paper.
 
+When separately enabled, Event Alpha runs as a bounded sidecar after the technical DAG. It
+normalizes a small number of catalyst documents into citation-bound Event Cards and refreshes
+cross-stock 1/2/5-session analog assessments. Its provider, budget, or data failure is isolated:
+the technical cycle and existing Shadow accounting continue. Event Alpha V1 produces research
+playbooks only and cannot use the technical strategy-admission path. See
+`runbooks/event_alpha.md` and ADR 0044.
+
 ## Configuration
 
 ```dotenv
@@ -87,6 +94,10 @@ COORDINATOR_DOCUMENT_LOOKBACK_DAYS=1826
 COORDINATOR_DOCUMENT_PARTITION_DAYS=90
 COORDINATOR_AUTO_SHADOW_ENABLED=false
 COORDINATOR_PAID_RESEARCH_ENABLED=false
+EVENT_ALPHA_ENABLED=false
+EVENT_ALPHA_MAX_CARDS_PER_CYCLE=2
+EVENT_ALPHA_MINIMUM_ANALOGS=5
+EVENT_ALPHA_MINIMUM_SYMBOLS=3
 MARKET_SCANNER_ENABLED=false
 MARKET_SCANNER_LLM_ENABLED=false
 MARKET_SCANNER_AUTO_TRADING_POOL_ENABLED=false
