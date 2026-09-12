@@ -198,9 +198,13 @@ class ShadowRuntime:
                     _ZERO,
                 )
             ),
-            "open_position_count": sum(
+            "sandbox_open_position_count": sum(
                 Decimal(str(item["position_quantity"])) != _ZERO
                 for item in sandboxes
+            ),
+            "open_position_count": sum(
+                Decimal(str(item["position_quantity"])) != _ZERO
+                for item in deployments
             ),
             "legacy_shared_account": legacy,
         }

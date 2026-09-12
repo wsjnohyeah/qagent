@@ -5,14 +5,15 @@ Last updated: 2026-09-11 PDT
 Context format: v1
 
 Current phase: the unified research, Shadow, and Alpaca Paper foundations are deployed to a
-fresh production data plane. The source now replaces shared-capital Shadow with isolated
-per-strategy `$10,000` sandboxes under ADR 0042; exact-SHA deployment and the confirmed legacy
-shutdown remain pending. Paid ML + LLM research and source-specific historical backfill are
+fresh production data plane. ADR 0042 is deployed: 97 flat legacy Shadow deployments are
+retired, one unfilled plan is cancelled, nine open virtual positions await causal liquidation,
+and new isolated `$10,000` sandbox exposure cannot execute before the September 14 open.
+Paid ML + LLM research and source-specific historical backfill are
 active. Production automatically admits exact deterministic Candidate/Qualified results to
 broker-free Shadow; Paper enrollment remains separately human-confirmed and live money remains
 impossible. Off-site backup/alerting and statistical/elapsed production evidence remain open.
 
-Current documented baseline: C096 — `Isolate strategy Shadow sandboxes`
+Current documented baseline: C097 — `Report isolated Shadow rollout`
 
 ## Purpose and authority
 
@@ -2616,10 +2617,9 @@ The Compose stack is currently intended to remain running for local inspection. 
 
 Ordered near-term work:
 
-1. Complete exact-SHA CI and guarded deployment of ADR 0042, keep new exposure paused, run the
-   confirmed legacy Shadow migration, set
-   `SHADOW_NEW_EXPOSURE_NOT_BEFORE=2026-09-14T13:30:00Z`, verify old positions are flat or
-   explicitly liquidation-pending, then resume only the broker-free workflow.
+1. Observe the September 14 session: verify all nine legacy positions receive causal virtual
+   exits, current exact `risk_policy@0.4.0` certificates create isolated sandboxes, and no new
+   plan has an earliest execution before `2026-09-14T13:30:00Z`.
 2. Replace the temporary `sslip.io` hostname with the operator's permanent domain, select an
    off-site backup target and external notification destination, and automate retention plus
    alert checks. The fresh production bootstrap, TLS path, local backup, and isolated restore
@@ -4870,7 +4870,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C096 — `Isolate strategy Shadow sandboxes`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `819d41b0f0c3e0dfbe3bc159a7a4bfd4da02e9d6`.
 - Date: 2026-09-11 PDT.
 - User intent: make Shadow evaluate each strategy independently instead of simulating a shared
   portfolio; give every strategy `$10,000`, risk 2% of current sandbox equity per trade, derive
@@ -4901,6 +4901,34 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: after CI, deploy paused, set the September 14 activation boundary,
   run the confirmed migration, verify legacy positions and new sandbox counts, resume the
   broker-free workflow, and record exact production evidence in C097.
+
+### C097 — `Report isolated Shadow rollout`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-11 PDT.
+- User intent: retire every old shared-account Shadow experiment and start the new isolated
+  policy at the next Monday open.
+- Scope: record the C096 CI/deployment/backup/migration evidence and correct the transitional
+  Shadow summary so its open-position count includes legacy liquidation-pending positions as
+  well as new sandboxes.
+- Architecture/decision impact: none beyond ADR 0042. The activation boundary is
+  `2026-09-14T13:30:00Z`; it blocks early entries but not exits. The runtime is resumed now so
+  Friday's completed bar can create causally valid Monday plans after fresh exact validation.
+- Validation: C096 `make release-check` passed all 217 tests, local and Compose doctors, secret
+  scan, and PostgreSQL schema-drift inspection. GitHub Actions run `34663589698` passed and
+  published exact image `819d41b0f0c3e0dfbe3bc159a7a4bfd4da02e9d6`. Pre-migration backup
+  `/opt/agentic-quant/backups/20260912T010804Z` passed checksums, object-archive inspection, and
+  PostgreSQL catalog verification. The guarded deployment passed API, Shadow worker,
+  coordinator, PostgreSQL, and Redis gates with live money disabled. The C097 transition-count
+  correction independently passed the same `make release-check` gate with all 217 tests.
+- Global state after commit: production C096 is healthy and resumed behind the Monday boundary.
+  The confirmed migration retired 97 flat legacy deployments, moved nine open virtual
+  positions to `LIQUIDATION_PENDING`, and cancelled the one unfilled plan. Paper has zero
+  enrollments/orders and Robinhood order submission remains disabled. No new sandbox exists yet
+  because the new execution contract requires fresh exact validation.
+- Corrections/follow-ups: deploy C097 after exact-SHA CI so the transition UI counts all open
+  positions; after Monday's completed bar, verify nine legacy exits and report which newly
+  validated sandboxes actually created or filled plans.
 
 ## Template for future commit entries
 

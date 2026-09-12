@@ -11,13 +11,15 @@
   strictly Qualified and forward observation history remains short.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `4fe2d71b372a3731140189a18450a7fa32f74ee6` image, PostgreSQL, Redis, API, Shadow worker,
+  `819d41b0f0c3e0dfbe3bc159a7a4bfd4da02e9d6` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled. The last pre-migration inspection found 106
-  active legacy shared-account Shadow deployments. The operator authorized retiring all of
-  them and starting the isolated-sandbox policy no earlier than the September 14 open; that
-  production rollout is pending exact-SHA CI and guarded deployment. C094 is deployed,
+  legacy shared-account Shadow deployments before migration. The confirmed migration retired
+  97 flat deployments, cancelled the one unfilled plan, and placed nine open virtual positions
+  into causal liquidation. New sandbox exposure is resumed behind the
+  `2026-09-14T13:30:00Z` boundary; no sandbox exists yet while new exact certificates are being
+  generated. C094 remains active,
   deterministic automatic Candidate/Qualified Shadow admission is enabled, and the audited
   runtime is resumed. There are no
   Paper enrollments or orders. Live money remains structurally disabled.
@@ -301,7 +303,7 @@
 - The last complete release audit passed lint, strict typing, the full test suite,
   authenticated local and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, fresh schema
   upgrade and PostgreSQL schema-drift checks. The current source migration head is
-  `20260911_0037`; production remains on `20260909_0036` until this rollout completes.
+  `20260911_0037`; production is on the same revision.
 - A local real read-only dynamic scan merged 258 source names, retained 40 review candidates
   and 20 deep-research stocks, included SNDK, and excluded sampled leveraged/single-stock
   ETFs. Its budgeted Meta re-rank cost an estimated `$0.008322` and moved SNDK from
