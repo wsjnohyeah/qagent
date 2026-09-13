@@ -1,6 +1,6 @@
 # Master Project Context
 
-Last updated: 2026-09-11 PDT
+Last updated: 2026-09-13 PDT
 
 Context format: v1
 
@@ -13,7 +13,7 @@ active. Production automatically admits exact deterministic Candidate/Qualified 
 broker-free Shadow; Paper enrollment remains separately human-confirmed and live money remains
 impossible. Off-site backup/alerting and statistical/elapsed production evidence remain open.
 
-Current documented baseline: C097 — `Report isolated Shadow rollout`
+Current documented baseline: C101 — `Record Event Alpha production rollout`
 
 ## Purpose and authority
 
@@ -97,6 +97,8 @@ A Git commit cannot contain its own content-derived hash without changing that h
   evidence cutoffs, 1/2/5-session outcomes, robustness statistics, and the research-candidate
   gate. It trains no predictive event ML model. Event Playbooks are research-only and cannot
   enter Shadow or Paper until an event-aware replay and exact execution certificate exist.
+  Production serves this code and schema at exact image `2c43092`, but the feature flag remains
+  false and the case-memory tables remain empty pending a separate budgeted activation decision.
 - Phase 5 trains logistic and boosted-stump candidates on executable next-open-to-future-close
   labels indexed by actual bars. It uses embargoed chronological folds and separate purged
   calibration, model-selection, and untouched final holdout partitions, measures PSI drift,
@@ -196,7 +198,7 @@ A Git commit cannot contain its own content-derived hash without changing that h
   a separate local-commit approval. Push and deployment remain external actions.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`. A fresh SFO3 VPS runs the
   production stack at `https://qagent.143.110.239.251.sslip.io` behind Caddy TLS on verified
-  immutable functional commit `663c462a60bac9c612265ac2e242192723bf1a27`.
+  immutable functional commit `2c4309229b9739d5e415c0ab76eb5f7c4ada985b`.
 - The independent `06b6853` fix verification is mapped item-by-item in
   `docs/REVIEW_REMEDIATION_2026-09-05.md`. The deterministic F01–F11 counterexamples are
   followed by the corrections from the `56bb979` review in
@@ -5088,6 +5090,38 @@ lifecycle. No Paper order was used as a build or deployment test.
   sidecar only under a reviewed USD budget and inspect its first historical/forward Event Cards.
   Before any Event Playbook reaches broker-free Shadow, add a separate event-aware walk-forward
   replay, frozen execution contract, exact validation certificate, and deterministic adapter.
+
+### C101 — `Record Event Alpha production rollout`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-13 PDT.
+- User intent: deploy the already-reviewed Event Alpha V1 release to the production VPS while
+  preserving the existing no-live and deterministic execution boundaries.
+- Scope: record exact-SHA CI/image evidence, a verified pre-deploy backup, the `0037 → 0038`
+  migration, immutable-image rollout, worker lease recovery, external TLS/auth checks, and the
+  explicit distinction between deployed code and disabled paid Event Alpha operation.
+- Architecture/decision impact: none beyond ADR 0044. Deployment does not authorize Event Alpha
+  LLM spend or create an Event Shadow path. Production bootstrap and worker restart force new
+  exposure paused; existing exit management remains available.
+- Validation: GitHub Actions run `34723781883` passed for exact functional commit
+  `2c4309229b9739d5e415c0ab76eb5f7c4ada985b` and GHCR exposed its immutable multi-architecture
+  image. Backup `/opt/agentic-quant/backups/20260913T082104Z` passed PostgreSQL catalog,
+  object-archive, and SHA-256 verification. The guarded deployment migrated PostgreSQL to
+  `20260912_0038`; `alembic check` reported no operations. API, worker, coordinator,
+  PostgreSQL, and Redis are healthy on the exact image label. The first health window caught a
+  still-valid lease left by the replaced Shadow worker; no lock was deleted, it expired
+  naturally, the worker restarted once, and the idempotent guarded rerun passed every health
+  gate. External TLS readiness returned 200, system/Event Alpha reads returned 401 without
+  authentication, and the page contains the Event Alpha UI.
+- Global state after commit: production serves Event Alpha V1 code and schema with
+  `EVENT_ALPHA_ENABLED=false`. Event Card/outcome/assessment/Playbook counts are all zero;
+  Paper order count remains zero; `LIVE_TRADING_ENABLED=false`; new exposure is paused by
+  `production-bootstrap`; coordinator research is running and Shadow/Paper workers report
+  healthy waiting states. The functional production image remains `2c43092` even though this
+  audit-only documentation commit follows it on GitHub.
+- Corrections/follow-ups: decide whether to enable Event Alpha under the shared
+  `critical_research` daily/monthly USD limits. If enabled, begin with two cards per cycle,
+  inspect first-call cost and citation quality, and keep playbooks research-only.
 
 ## Template for future commit entries
 

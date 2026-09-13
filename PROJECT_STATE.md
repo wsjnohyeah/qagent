@@ -11,7 +11,7 @@
   strictly Qualified and forward observation history remains short.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `9471b60479d528669aabdbeb267cb83321439a08` image, PostgreSQL, Redis, API, Shadow worker,
+  `2c4309229b9739d5e415c0ab76eb5f7c4ada985b` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled. The last pre-migration inspection found 106
@@ -68,12 +68,14 @@
   retires at a `$8,800` marked-value floor. Explicit commission is zero while spread,
   slippage, impact, liquidity, and gap behavior remain modeled. The legacy migration is
   confirmation-gated and a deployment-time exposure boundary can stage Monday activation.
-- Local source now also implements the safe-off Event Alpha V1 from ADR 0044. A bounded
+- Production now includes the safe-off Event Alpha V1 from ADR 0044. A bounded
   coordinator sidecar creates citation-bound Event Cards, deterministic 1/2/5-session outcomes,
   cross-stock analog statistics, LLM case assessments, and immutable research Playbooks without
   a predictive event ML model. Unchanged case sets are idempotent for LLM spend and a sidecar
   failure cannot interrupt Technical Alpha. Event Playbooks are research candidates only: no
-  Event Alpha replay certificate, Shadow adapter, Paper path, or production enablement exists yet.
+  Event Alpha replay certificate, Shadow adapter, Paper path, or runtime enablement exists yet.
+  Schema `20260912_0038` and the Event Alpha UI/API are deployed, but `EVENT_ALPHA_ENABLED=false`
+  and all four Event Alpha tables are empty, so the rollout has incurred no Event Alpha LLM cost.
 - Local lint, strict type checking, API readiness, the authenticated HTTP
   vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
@@ -314,7 +316,7 @@
 - The last complete release audit passed lint, strict typing, the full test suite,
   authenticated local and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, fresh schema
   upgrade and PostgreSQL schema-drift checks. The current source migration head is
-  `20260912_0038`; production remains on `20260911_0037` until this safe-off feature is released.
+  `20260912_0038`; production is on the same revision.
 - A local real read-only dynamic scan merged 258 source names, retained 40 review candidates
   and 20 deep-research stocks, included SNDK, and excluded sampled leveraged/single-stock
   ETFs. Its budgeted Meta re-rank cost an estimated `$0.008322` and moved SNDK from
