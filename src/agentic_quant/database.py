@@ -1606,7 +1606,7 @@ shadow_risk_decisions = Table(
     Column("invalidation", Numeric(20, 8), nullable=False),
     Column("planned_r_multiple_to_t1", Numeric(20, 8), nullable=True),
     Column("portfolio_risk_after_usd", Numeric(24, 8), nullable=False),
-    Column("policy_version", String(80), nullable=False),
+    Column("policy_version", String(240), nullable=False),
     Column("evaluation_context_json", JSON, nullable=False),
     Column("evaluated_at", DateTime(timezone=True), nullable=False, index=True),
 )

@@ -5123,6 +5123,34 @@ lifecycle. No Paper order was used as a build or deployment test.
   `critical_research` daily/monthly USD limits. If enabled, begin with two cards per cycle,
   inspect first-call cost and citation quality, and keep playbooks research-only.
 
+### C102 — `Prevent Shadow risk-version truncation`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-13 PDT.
+- User intent: keep broker-free Shadow running continuously so every currently authorized,
+  ready strategy can accumulate isolated sandbox evidence without a deployment pause becoming
+  a permanent operating state.
+- Scope: remove the duplicated volatility-geometry component from the deterministic per-signal
+  risk-policy version, expand `shadow_risk_decisions.policy_version` from 80 to 240 characters
+  under Alembic `20260913_0039`, and add regression coverage binding the generated lineage value
+  to both one geometry-version component and the persisted schema capacity.
+- Architecture/decision impact: no risk threshold, sizing rule, strategy admission rule, broker
+  permission, or live-money boundary changes. The repair preserves exact risk lineage while
+  preventing a storage-width error from aborting eligible Shadow deployment processing.
+- Validation: `make check` passed Flake8, strict mypy across 62 source files, and all 225 tests;
+  `make doctor` and the secret scan passed. A fresh SQLite database upgraded to head, downgraded
+  to `20260912_0038`, re-upgraded to `20260913_0039`, and reported zero drift. The local Compose
+  stack migrated PostgreSQL to `20260913_0039`, reported a 240-character target column, passed
+  authenticated Docker doctor, and reported zero Alembic drift.
+- Global state after commit: local source contains the reviewed repair while production still
+  runs functional image `2c430922` and schema `20260912_0038`. Production exposure is resumed,
+  but its first post-resume tick recorded 37 append-only `DataError` deployment failures from
+  the old 80-character field and produced no partial plans; those immutable failures remain
+  historical evidence after repair.
+- Corrections/follow-ups: publish the exact-SHA image, take a fresh production backup, deploy
+  paused, resume via the audited two-step admin action, and require a subsequent Shadow tick to
+  complete without the truncation failure before declaring continuous Shadow healthy.
+
 ## Template for future commit entries
 
 Copy this section before making a commit:

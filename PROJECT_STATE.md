@@ -76,6 +76,11 @@
   Event Alpha replay certificate, Shadow adapter, Paper path, or runtime enablement exists yet.
   Schema `20260912_0038` and the Event Alpha UI/API are deployed, but `EVENT_ALPHA_ENABLED=false`
   and all four Event Alpha tables are empty, so the rollout has incurred no Event Alpha LLM cost.
+- The source migration head is `20260913_0039`. It removes a duplicated volatility-geometry
+  suffix from per-signal risk-policy lineage and expands the persisted Shadow policy-version
+  field to 240 characters. Production remains on `20260912_0038` until this repair completes
+  exact-SHA CI and guarded rollout; its resumed Shadow worker exposed the former 80-character
+  limit as 37 append-only deployment failures rather than creating partial trade plans.
 - Local lint, strict type checking, API readiness, the authenticated HTTP
   vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
@@ -109,7 +114,7 @@
 - Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
   experiment runs, backtest trades, corporate actions, historical universe membership,
   feature parity checks, walk-forward reports, and Event Alpha case memory are stored through
-  Alembic revision `20260912_0038`, including exact validation and ML-training contracts, normalized Paper
+  Alembic revision `20260913_0039`, including exact validation and ML-training contracts, normalized Paper
   order legs, shadow risk lineage, fenced workflow
   attempts, generation-attempt audit, runtime leases, and the event outbox.
 - The Phase 3 runner provides buy-and-hold, long/cash momentum, and long/cash
@@ -316,7 +321,8 @@
 - The last complete release audit passed lint, strict typing, the full test suite,
   authenticated local and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, fresh schema
   upgrade and PostgreSQL schema-drift checks. The current source migration head is
-  `20260912_0038`; production is on the same revision.
+  `20260913_0039`; production remains on `20260912_0038` until the Shadow lineage repair is
+  released.
 - A local real read-only dynamic scan merged 258 source names, retained 40 review candidates
   and 20 deep-research stocks, included SNDK, and excluded sampled leveraged/single-stock
   ETFs. Its budgeted Meta re-rank cost an estimated `$0.008322` and moved SNDK from

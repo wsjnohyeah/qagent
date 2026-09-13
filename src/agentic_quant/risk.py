@@ -286,7 +286,7 @@ def strategy_signal_risk_policy(
     return effective.model_copy(
         update={
             "version": (
-                f"{account_policy.version}+{VOLATILITY_GEOMETRY_VERSION}"
+                f"{effective.version}"
                 f"+{holding_sessions}s+{strategy_type}+stop-{stop}"
             ),
             "baseline_stop_fraction": stop,

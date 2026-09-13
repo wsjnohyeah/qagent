@@ -15,7 +15,7 @@ from sqlalchemy import insert
 
 from agentic_quant.api import create_app
 from agentic_quant.config import AppEnvironment, Settings, TradingMode
-from agentic_quant.database import runtime_controls
+from agentic_quant.database import runtime_controls, shadow_risk_decisions
 from agentic_quant.domain import (
     AccountState,
     Direction,
@@ -30,6 +30,7 @@ from agentic_quant.migrations import upgrade_database
 from agentic_quant.production_bootstrap import bootstrap_production
 from agentic_quant.risk import (
     MULTI_SESSION_EXECUTION_PROFILE_VERSION,
+    VOLATILITY_GEOMETRY_VERSION,
     RestrictionRegistry,
     RiskPolicy,
     baseline_long_exit,
@@ -113,6 +114,8 @@ def test_multi_session_profile_widens_price_stop_without_expanding_account_caps(
     )
     assert signal_policy.baseline_stop_fraction == Decimal("0.15")
     assert signal_policy.baseline_target_r_multiple == Decimal("2.25")
+    assert signal_policy.version.count(VOLATILITY_GEOMETRY_VERSION) == 1
+    assert len(signal_policy.version) <= shadow_risk_decisions.c.policy_version.type.length
     assert effective.maximum_trade_risk_usd == account_policy.maximum_trade_risk_usd
     assert (
         effective.maximum_concurrent_risk_usd
