@@ -11,7 +11,7 @@
   strictly Qualified and forward observation history remains short.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `2c4309229b9739d5e415c0ab76eb5f7c4ada985b` image, PostgreSQL, Redis, API, Shadow worker,
+  `0a050c2a4ed36f65f2e9759dcdf7b31c8aa1c2cf` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled. The last pre-migration inspection found 106
@@ -22,8 +22,9 @@
   had been admitted under the former certificate as `REVALIDATION_REQUIRED`; no new-policy
   sandbox is active until a fresh exact report passes. C094 remains active,
   deterministic automatic Candidate/Qualified Shadow admission is enabled, and the audited
-  runtime is resumed. There are no
-  Paper enrollments or orders. Live money remains structurally disabled.
+  runtime is resumed. The first two post-repair Shadow ticks succeeded with zero deployment
+  failures; the worker remains enabled and new exposure is not paused. There are no Paper
+  enrollments or orders. Live money remains structurally disabled.
 - Production runs `research_gate@0.5.0`, horizon-specific
   Candidate Shadow activity minima, horizon-specific research-trial accounting, budget-
   independent revalidation of accepted specs, scanner-pool authorization at Shadow start,
@@ -74,13 +75,13 @@
   a predictive event ML model. Unchanged case sets are idempotent for LLM spend and a sidecar
   failure cannot interrupt Technical Alpha. Event Playbooks are research candidates only: no
   Event Alpha replay certificate, Shadow adapter, Paper path, or runtime enablement exists yet.
-  Schema `20260912_0038` and the Event Alpha UI/API are deployed, but `EVENT_ALPHA_ENABLED=false`
+  Event Alpha schema `20260912_0038` and the Event Alpha UI/API are deployed, but `EVENT_ALPHA_ENABLED=false`
   and all four Event Alpha tables are empty, so the rollout has incurred no Event Alpha LLM cost.
-- The source migration head is `20260913_0039`. It removes a duplicated volatility-geometry
+- Production and source are on migration `20260913_0039`. It removes a duplicated volatility-geometry
   suffix from per-signal risk-policy lineage and expands the persisted Shadow policy-version
-  field to 240 characters. Production remains on `20260912_0038` until this repair completes
-  exact-SHA CI and guarded rollout; its resumed Shadow worker exposed the former 80-character
-  limit as 37 append-only deployment failures rather than creating partial trade plans.
+  field to 240 characters. The pre-repair worker exposed the former 80-character limit as 37
+  append-only deployment failures rather than creating partial trade plans; post-repair ticks
+  complete successfully and retain those failures as historical audit evidence.
 - Local lint, strict type checking, API readiness, the authenticated HTTP
   vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
@@ -321,8 +322,7 @@
 - The last complete release audit passed lint, strict typing, the full test suite,
   authenticated local and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, fresh schema
   upgrade and PostgreSQL schema-drift checks. The current source migration head is
-  `20260913_0039`; production remains on `20260912_0038` until the Shadow lineage repair is
-  released.
+  `20260913_0039`; production is on the same revision.
 - A local real read-only dynamic scan merged 258 source names, retained 40 review candidates
   and 20 deep-research stocks, included SNDK, and excluded sampled leveraged/single-stock
   ETFs. Its budgeted Meta re-rank cost an estimated `$0.008322` and moved SNDK from

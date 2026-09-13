@@ -5151,6 +5151,45 @@ lifecycle. No Paper order was used as a build or deployment test.
   paused, resume via the audited two-step admin action, and require a subsequent Shadow tick to
   complete without the truncation failure before declaring continuous Shadow healthy.
 
+### C103 — `Record continuous Shadow repair rollout`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-13 PDT.
+- User intent: keep Shadow enabled as a long-running broker-free observation service; whenever
+  deterministic research produces a currently authorized ready strategy, automatic admission
+  should start its isolated sandbox without waiting for a manual adoption step.
+- Scope: record exact-SHA CI/image publication, a fresh verified production backup, guarded
+  `0038 → 0039` rollout, natural stale-lease recovery, audited resume, and two successful
+  post-repair Shadow ticks.
+- Architecture/decision impact: deployment bootstrap still pauses new exposure fail-closed.
+  After deployment health and safety checks pass, restoring the already approved continuous
+  Shadow operating state is part of rollout. A failed safety gate must leave exposure paused.
+  This does not arm Paper or create any live-money execution path.
+- Validation: GitHub Actions run `34748903459` passed and published exact image
+  `0a050c2a4ed36f65f2e9759dcdf7b31c8aa1c2cf`. Backup
+  `/opt/agentic-quant/backups/20260913T090743Z` passed PostgreSQL catalog, object archive, and
+  SHA-256 verification. The guarded deploy migrated PostgreSQL to `20260913_0039` with zero
+  Alembic drift. Its first worker replacement encountered the prior process's still-valid
+  portfolio lease; no lock was deleted, it expired naturally, and the idempotent deploy rerun
+  passed all API/worker/coordinator health gates. Audited action
+  `01a09a12-6dd1-78be-8676-70c53b46522a` restored new exposure. Shadow runs
+  `01a09a16-6371-7e97-94eb-df5bad046620` and
+  `01a09a20-0803-7c40-a758-8b9ad84e5522` both succeeded: the first processed 37 bars and
+  created 111 lineage events across 91 deployments, the second processed two bars across 93
+  deployments, and both recorded zero deployment failures. External readiness returned 200,
+  protected status returned 401 without a session, every production container is healthy, and
+  the worker reports `new_entry_paused=False`.
+- Global state after commit: production runs exact functional image `0a050c2`, schema
+  `20260913_0039`, automatic Candidate/Qualified admission, enabled continuous Shadow, and an
+  unpaused new-exposure control. `coordinator_auto_shadow_enabled=true`; future ready strategies
+  can enter isolated sandbox observation automatically. Event Alpha remains disabled, Paper has
+  no enrollment/order authority, Robinhood mutation is disabled, and
+  `LIVE_TRADING_ENABLED=false`.
+- Corrections/follow-ups: monitor ordinary scheduled ticks and strategy outcomes. Do not infer
+  that an enabled Shadow worker guarantees a trade every session: a plan still requires a
+  current exact validation certificate, a matching completed-bar signal, deterministic risk
+  approval, and the configured activation boundary.
+
 ## Template for future commit entries
 
 Copy this section before making a commit:
