@@ -5266,6 +5266,43 @@ lifecycle. No Paper order was used as a build or deployment test.
   evidence exclusions plus at least one valid V0.1.1 Meta card without exceeding the two-call
   cap.
 
+### D053 — The approved daily Event budget requires a non-contradictory monthly ceiling
+
+- Date: 2026-09-14 PDT.
+- Production activation reconstructed same-month spend instead of resetting it and exposed that
+  `$199.914253` of the former `$200` project monthly ceiling was already consumed. Leaving that
+  cap unchanged would reduce the newly approved `$40/day` Event Alpha budget to roughly `$0.086`
+  for the remainder of September.
+- Decision: set the project monthly ceiling to `$1,400`, equal to the former `$200` allowance
+  plus at most 30 days of the explicit `$40/day` Event Alpha authorization. Daily enforcement
+  remains `$80` project-wide, `$40` for Meta, and `$40` for `event_research`; this is not an
+  uncapped provider authorization.
+
+### C106 — `Align Event Alpha monthly allowance`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-14 PDT.
+- User intent: make the approved `$40/day` Event Alpha process capable of operating over the
+  requested next 24 hours and subsequent days rather than being immediately stopped by an
+  almost-exhausted inherited monthly ceiling.
+- Scope: raise only the project monthly estimated-cost ceiling from `$200` to `$1,400`; retain
+  the `$80` project daily cap, `$40` Meta/provider cap, `$40` Event workload cap, immutable
+  reservation accounting, and all no-execution boundaries. Update policy documentation and the
+  vertical-slice assertion.
+- Architecture/decision impact: D053 supersedes D052 only on the monthly number. The new value is
+  derived from the former allowance plus 30 maximum Event Alpha days; it does not change model
+  routing, per-call behavior, or strategy authority.
+- Validation: the repaired `ed4214f` production cycle created 17 auditable cards, including two
+  completed V0.1.1 cards, six deterministic outcomes, and two insufficient-analog assessments;
+  five completed Meta calls consumed an estimated `$0.010302` from `event_research`. No
+  Playbook was fabricated. The source budget assertion requires `$1,400/month`.
+- Global state after commit: production runs `ed4214f` with Event Alpha enabled and functional,
+  but its active base monthly ceiling remains `$200` until this configuration-only correction is
+  published and deployed. The source carries the `$1,400` correction.
+- Corrections/follow-ups: run the complete release gate, deploy the immutable image, verify the
+  monthly window is rebuilt from existing spend at the new limit, restore continuous Shadow,
+  and record final production state.
+
 ## Template for future commit entries
 
 Copy this section before making a commit:

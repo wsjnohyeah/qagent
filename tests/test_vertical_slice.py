@@ -221,6 +221,9 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert budget["limits"]["project_daily"] == {
             "max_estimated_cost_usd": "80.00",
         }
+        assert budget["limits"]["project_monthly"] == {
+            "max_estimated_cost_usd": "1400.00",
+        }
         assert set(budget["limits"]["provider_daily"]) == {"openai", "meta"}
         assert budget["limits"]["provider_daily"]["meta"] == {
             "max_estimated_cost_usd": "40.00",

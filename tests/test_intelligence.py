@@ -255,7 +255,7 @@ def test_retrieval_is_point_in_time_and_analysis_is_citation_bound(
     budget_summary = budget.summary()
     assert budget_summary["reservation_counts"] == {"SETTLED": 1}
     assert budget_summary["limits"]["project_monthly"] == {
-        "max_estimated_cost_usd": "200.00",
+        "max_estimated_cost_usd": "1400.00",
     }
 
 

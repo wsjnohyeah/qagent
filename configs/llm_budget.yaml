@@ -18,7 +18,7 @@ limits:
   project_daily:
     max_estimated_cost_usd: "80.00"
   project_monthly:
-    max_estimated_cost_usd: "200.00"
+    max_estimated_cost_usd: "1400.00"
   provider_daily:
     openai:
       max_estimated_cost_usd: "40.00"

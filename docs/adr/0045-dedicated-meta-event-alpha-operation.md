@@ -16,8 +16,9 @@ authorized a dedicated `$40` daily Event Alpha ceiling.
    `muse-spark-1.3`. Technical critical research remains on OpenAI.
 2. Set the Event Alpha workload and Meta provider daily estimated-cost ceilings to `$40`.
    Raise the project daily ceiling from `$40` to `$80` so the new allowance does not silently
-   consume the already-approved technical research allowance. Retain the existing `$200`
-   monthly project ceiling.
+   consume the already-approved technical research allowance. Raise the monthly project
+   ceiling from `$200` to `$1,400`: the former allowance plus at most 30 days of the explicitly
+   approved Event Alpha daily budget.
 3. Keep Event Alpha bounded to two new cards per coordinator cycle. Semantic input hashes make
    unchanged card/analog sets idempotent for spend.
 4. Enable the full V1 research-memory pipeline in production: citation-bound Event Cards,

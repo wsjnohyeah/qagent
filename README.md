@@ -119,7 +119,8 @@ its abandoned reservation after the configured provider timeout plus a five-minu
 margin, so a process restart cannot permanently consume budget capacity.
 `llm_budget@0.3.0` preserves the `$40` OpenAI technical-research ceiling and gives Event Alpha
 its own `$40/day` `event_research` workload routed to Meta Muse Spark. The combined project
-daily ceiling is `$80`, while the existing `$200` monthly project ceiling remains unchanged.
+daily ceiling is `$80`. The project monthly ceiling is `$1,400`: the former `$200` technical
+allowance plus at most `$40 × 30` for the newly approved Event Alpha workload.
 Same-period consumption is reconstructed from durable reservations across policy versions, so
 deploying a higher ceiling does not reset money already spent that day.
 

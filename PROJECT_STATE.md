@@ -11,7 +11,7 @@
   strictly Qualified and forward observation history remains short.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `0a050c2a4ed36f65f2e9759dcdf7b31c8aa1c2cf` image, PostgreSQL, Redis, API, Shadow worker,
+  `ed4214fa776fe47ef7486a06f6c0520183fd3a62` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled. The last pre-migration inspection found 106
@@ -32,7 +32,7 @@
   compounded OOS return after removing the largest winner,
   a stricter Research LLM output prompt, and `llm_budget@0.3.0` with separate `$40` daily
   technical and Event Alpha workload ceilings, an `$80` combined project daily ceiling, and
-  the existing `$200` monthly ceiling. It preserves same-day spend across policy versions,
+  a `$1,400` monthly ceiling. It preserves same-day spend across policy versions,
   single-attempt invalid LLM
   output handling, and leakage-safe annual ML under a six-year daily-bar target.
 - Autonomous research supports 1/2/5/10/20/63/126/252-session groups. Its deterministic
@@ -81,12 +81,13 @@
   `EVENT_ALPHA_ENABLED=true`. A dedicated
   `event_research` workload routes only Event Card extraction and analog synthesis to Meta
   `muse-spark-1.3`, caps that workload and the Meta provider at `$40/day`, raises the combined
-  project daily ceiling to `$80`, and retains the existing `$200` monthly ceiling. The first
-  real call completed for an estimated `$0.002089` but its `event_card@0.1.0` result was
-  rejected because Meta exceeded the implicit 120-character mechanism field. Local source now
-  upgrades that contract to `event_card@0.1.1`, states the bound explicitly, and durably audits
-  expected unsafe-evidence exclusions while continuing to the next eligible catalyst; this
-  intake hardening awaits exact-SHA CI and rollout.
+  project daily ceiling to `$80`. Production now runs `event_card@0.1.1`, states the mechanism
+  bound explicitly, and durably audits expected unsafe-evidence exclusions while continuing to
+  the next eligible catalyst. At latest inspection it held 17 cards (two completed, 15 rejected),
+  six completed outcomes, two insufficient-analog assessments, and zero Playbooks; five Meta
+  calls cost an estimated `$0.010302`. Local source raises the nearly exhausted project monthly
+  ceiling from `$200` to `$1,400` so the approved daily Event allowance can operate through the
+  month; that final budget correction awaits CI and rollout.
 - Production and source are on migration `20260913_0039`. It removes a duplicated volatility-geometry
   suffix from per-signal risk-policy lineage and expands the persisted Shadow policy-version
   field to 240 characters. The pre-repair worker exposed the former 80-character limit as 37
