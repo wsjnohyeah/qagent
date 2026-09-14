@@ -19,6 +19,7 @@ from agentic_quant.document_store import DocumentStore
 from agentic_quant.domain import (
     LLMProviderName,
     LLMUsage,
+    LLMWorkload,
     SourceDocument,
     SourceTier,
     StockBar,
@@ -58,11 +59,12 @@ AS_OF = datetime(2026, 9, 12, 18, tzinfo=UTC)
 
 class EventAlphaProvider:
     def __init__(self, routing: LLMRoutingConfig) -> None:
-        self.name = LLMProviderName.OPENAI
+        self.name = LLMProviderName.META
         self.config = routing.providers[self.name]
         self.calls: list[str] = []
 
     async def complete(self, request: LLMRequest) -> LLMProviderResult:
+        assert request.workload == LLMWorkload.EVENT_RESEARCH
         self.calls.append(request.prompt_version)
         payload = json.loads(request.input_text)
         if request.prompt_version == EVENT_CARD_PROMPT_VERSION:
@@ -148,7 +150,7 @@ def _services(
     provider = EventAlphaProvider(routing)
     gateway = LLMGateway(
         routing=routing,
-        providers={LLMProviderName.OPENAI: provider},
+        providers={LLMProviderName.META: provider},
         store=LLMStore(ledger.engine),
         ledger=ledger,
         budget_manager=LLMBudgetManager(
@@ -533,6 +535,9 @@ def test_event_alpha_is_safe_off_and_visible_in_control_center(
     assert status.json()["enabled"] is False
     assert status.json()["predictive_ml_used"] is False
     assert status.json()["shadow_eligible"] is False
+    assert status.json()["llm_workload"] == "event_research"
+    assert status.json()["llm_provider"] == "meta"
+    assert status.json()["llm_model"] == "muse-spark-1.3"
     assert "Event Alpha" in page.text
 
 

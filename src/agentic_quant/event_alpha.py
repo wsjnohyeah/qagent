@@ -647,7 +647,7 @@ class EventAlphaService:
             return prior
         invocation = await self.gateway.complete(
             LLMRequest(
-                workload=LLMWorkload.CRITICAL_RESEARCH,
+                workload=LLMWorkload.EVENT_RESEARCH,
                 prompt_version=EVENT_CARD_PROMPT_VERSION,
                 instructions=self._card_instructions(),
                 input_text=json.dumps(payload, ensure_ascii=False, sort_keys=True),
@@ -868,7 +868,7 @@ class EventAlphaService:
             )
         invocation = await self.gateway.complete(
             LLMRequest(
-                workload=LLMWorkload.CRITICAL_RESEARCH,
+                workload=LLMWorkload.EVENT_RESEARCH,
                 prompt_version=EVENT_ASSESSMENT_PROMPT_VERSION,
                 instructions=self._assessment_instructions(),
                 input_text=json.dumps(
@@ -1091,6 +1091,8 @@ class EventAlphaService:
         }
 
     def summary(self) -> dict[str, Any]:
+        routing = self.gateway.status()
+        provider = routing["routes"][LLMWorkload.EVENT_RESEARCH.value]
         return {
             **self.store.health_summary(),
             "gate_version": EVENT_ALPHA_GATE_VERSION,
@@ -1100,6 +1102,9 @@ class EventAlphaService:
             "minimum_symbols": self.minimum_symbols,
             "predictive_ml_used": False,
             "shadow_eligible": False,
+            "llm_workload": LLMWorkload.EVENT_RESEARCH.value,
+            "llm_provider": provider,
+            "llm_model": routing["providers"][provider]["model"],
         }
 
     def _ranked_analogs(

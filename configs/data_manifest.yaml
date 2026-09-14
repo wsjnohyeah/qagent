@@ -63,7 +63,7 @@ intelligence:
   exact_source_quotes_required_for_claims: true
   unknown_citations_fail_closed: true
   insufficient_evidence_abstains_before_llm_call: true
-  budget_policy: llm_budget@0.2.0
+  budget_policy: llm_budget@0.3.0
   llm_has_execution_authority: false
 event_alpha:
   card_schema: event_card@0.1.0
@@ -76,6 +76,9 @@ event_alpha:
   largest_winner_sensitivity_required: true
   historical_replay_labeled: true
   shadow_eligible: false
+  llm_workload: event_research
+  llm_provider: meta
+  daily_estimated_usd_limit: "40.00"
 machine_learning:
   policy: ml_policy@0.1.0
   candidates: [logistic_regression, boosted_stumps]

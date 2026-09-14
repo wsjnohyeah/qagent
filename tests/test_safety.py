@@ -56,6 +56,11 @@ def test_production_worker_healthchecks_allow_cold_import_latency() -> None:
     assert api_environment["SHADOW_RUNTIME_ENABLED"].endswith(":-true}")
     assert api_environment["PAPER_TRADING_ENABLED"].endswith(":-false}")
     assert api_environment["AUTONOMOUS_COORDINATOR_ENABLED"].endswith(":-true}")
+    assert api_environment["EVENT_ALPHA_ENABLED"].endswith(":-false}")
+    assert coordinator_environment["EVENT_ALPHA_ENABLED"].endswith(":-false}")
+    assert compose["services"]["worker"]["environment"][
+        "EVENT_ALPHA_ENABLED"
+    ] == "false"
     assert coordinator_environment["COORDINATOR_AUTO_SHADOW_ENABLED"].endswith(
         ":-false}"
     )

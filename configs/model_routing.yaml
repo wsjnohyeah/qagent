@@ -1,4 +1,4 @@
-version: llm_routing@0.1.0
+version: llm_routing@0.2.0
 
 providers:
   openai:
@@ -26,6 +26,7 @@ routes:
   interactive_explanation: meta
   routine_pipeline: meta
   critical_research: openai
+  event_research: meta
   strategy_generation: openai
   strategy_critique: openai
 

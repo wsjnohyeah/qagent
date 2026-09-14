@@ -5190,6 +5190,50 @@ lifecycle. No Paper order was used as a build or deployment test.
   current exact validation certificate, a matching completed-bar signal, deterministic risk
   approval, and the configured activation boundary.
 
+### D052 — Event Alpha receives a dedicated Meta research budget without execution authority
+
+- Date: 2026-09-13 PDT.
+- The user approved continuous Event Alpha research and a dedicated `$40/day` allowance using
+  the lower-cost Meta Muse Spark model. Event extraction and analog synthesis must not consume
+  the premium OpenAI technical-research workload.
+- Decision: add `event_research`, route it to Meta `muse-spark-1.3`, cap both that workload and
+  the Meta provider at `$40/day`, and raise the combined project daily cap to `$80`. Preserve
+  the existing `$200` monthly project cap. Budget accounting remains estimated USD, rebuilds
+  same-period spend from the reservation ledger, and uses no operator token ceiling.
+- Authority boundary: activation covers citation-bound Event Cards, deterministic 1/2/5-session
+  outcomes, cross-stock analog statistics, LLM assessments, and immutable Playbooks. A passing
+  Playbook is still `RESEARCH_CANDIDATE`; it cannot enter Shadow or any broker path until a later
+  reviewed implementation supplies event-aware replay, a frozen execution contract, exact
+  validation, and deterministic risk integration. Formal record: ADR 0045.
+
+### C104 — `Dedicate Meta budget to Event Alpha`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-13 PDT.
+- User intent: start the complete Event Alpha V1 research-memory pipeline, assign its LLM work
+  to Meta Muse Spark, and give it an independently visible `$40` daily estimated-cost ceiling.
+- Scope: add the `event_research` workload throughout routing, budget validation, admin actions,
+  audit records, API/UI labels, tests, and manifests; route both Event Card extraction and analog
+  assessment to Meta; upgrade routing to `llm_routing@0.2.0` and budget policy to
+  `llm_budget@0.3.0`; set Meta/Event daily caps to `$40`, the project daily cap to `$80`, and keep
+  the project monthly cap at `$200`; expose the effective Event model in Event Alpha status;
+  propagate production enablement to the read-only API display while preserving worker role
+  isolation; record ADR 0045 and update the runbook.
+- Architecture/decision impact: Event Alpha is now operationally budget-isolated from premium
+  technical research. Its coordinator still processes at most two new cards per cycle and
+  semantic hashes prevent unchanged evidence from spending again. The research/Shadow boundary
+  from ADR 0044 remains unchanged.
+- Validation: focused Event Alpha, LLM, budget, Control Center, safety, and vertical-slice tests
+  passed. `make check` passed Flake8, strict mypy across 62 source files, and all 225 tests.
+- Global state after commit: source is ready for exact-SHA CI and guarded deployment, while
+  production still runs functional image `0a050c2` with Event Alpha disabled, base routing
+  `llm_routing@0.1.0`, and budget `llm_budget@0.2.0`. No Event Card, outcome, assessment, or
+  Playbook exists in production yet.
+- Corrections/follow-ups: run doctor/secret/Compose gates, publish the exact image, back up
+  production, set `EVENT_ALPHA_ENABLED=true` with two cards per cycle, deploy paused, restore
+  continuous Shadow after health checks, and inspect the first real Meta Event Card call and
+  coordinator status without promising that the analog gate must produce a Playbook in 24 hours.
+
 ## Template for future commit entries
 
 Copy this section before making a commit:

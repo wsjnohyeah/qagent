@@ -11,7 +11,7 @@ from sqlalchemy import Engine, insert, select, update
 from agentic_quant.code_changes import CodeChangeStore
 from agentic_quant.control_plane import SystemObjectStore
 from agentic_quant.database import admin_action_requests, runtime_controls
-from agentic_quant.domain import EventEnvelope
+from agentic_quant.domain import EventEnvelope, LLMWorkload
 from agentic_quant.ids import uuid7
 from agentic_quant.ledger import EventLedger
 from agentic_quant.paper import PaperTradingRuntime
@@ -373,13 +373,7 @@ class AdminActionService:
             self.pipeline_enabled(target_id)
         if action_type == "llm.routes.update":
             raw_routes = parameters.get("routes")
-            expected = {
-                "interactive_explanation",
-                "routine_pipeline",
-                "critical_research",
-                "strategy_generation",
-                "strategy_critique",
-            }
+            expected = {workload.value for workload in LLMWorkload}
             if not isinstance(raw_routes, dict) or set(raw_routes) != expected:
                 raise ValueError("LLM route action must define every workload exactly once")
             if set(str(value) for value in raw_routes.values()) - {"openai", "meta"}:

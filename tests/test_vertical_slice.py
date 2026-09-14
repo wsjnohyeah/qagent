@@ -62,8 +62,8 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert system_status["development_max_backfill_days"] == 120
         assert system_status["development_max_intraday_backfill_days"] == 7
         assert system_status["phase_1b_open_session_validation"] == "completed"
-        assert system_status["llm_routing_version"] == "llm_routing@0.1.0"
-        assert system_status["llm_budget_policy"] == "llm_budget@0.2.0"
+        assert system_status["llm_routing_version"] == "llm_routing@0.2.0"
+        assert system_status["llm_budget_policy"] == "llm_budget@0.3.0"
         assert system_status["ml_policy"] == "ml_policy@0.1.0"
         assert system_status["openai_configured"] is False
         assert system_status["meta_model_configured"] is False
@@ -181,6 +181,7 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert missing_validation.status_code == 404
         routes = client.get("/v1/llm/routes").json()
         assert routes["routes"]["critical_research"] == "openai"
+        assert routes["routes"]["event_research"] == "meta"
         assert routes["routes"]["interactive_explanation"] == "meta"
         assert routes["route_source"] == "yaml_base"
         assert routes["automatic_fallback"] is False
@@ -191,6 +192,7 @@ def test_api_health_and_demo(settings: Settings) -> None:
                     "interactive_explanation": "openai",
                     "routine_pipeline": "meta",
                     "critical_research": "openai",
+                    "event_research": "meta",
                     "strategy_generation": "openai",
                     "strategy_critique": "openai",
                 },
@@ -215,12 +217,18 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert history[0]["reason"] == "API route revision test"
         assert client.get("/v1/llm/invocations").json() == []
         budget = client.get("/v1/llm/budget").json()
-        assert budget["policy_version"] == "llm_budget@0.2.0"
+        assert budget["policy_version"] == "llm_budget@0.3.0"
         assert budget["limits"]["project_daily"] == {
-            "max_estimated_cost_usd": "40.00",
+            "max_estimated_cost_usd": "80.00",
         }
         assert set(budget["limits"]["provider_daily"]) == {"openai", "meta"}
-        assert len(budget["windows"]) == 9
+        assert budget["limits"]["provider_daily"]["meta"] == {
+            "max_estimated_cost_usd": "40.00",
+        }
+        assert budget["limits"]["workload_daily"]["event_research"] == {
+            "max_estimated_cost_usd": "40.00",
+        }
+        assert len(budget["windows"]) == 10
         assert client.get("/v1/intelligence/analyses").json() == []
         assert client.get("/v1/decision-inspector/missing").status_code == 404
         assert client.get("/v1/ml/training-runs").json() == []
@@ -300,6 +308,7 @@ def test_unauthenticated_llm_controls_fail_closed_in_production(
         "interactive_explanation": "meta",
         "routine_pipeline": "meta",
         "critical_research": "openai",
+        "event_research": "meta",
         "strategy_generation": "openai",
         "strategy_critique": "openai",
     }

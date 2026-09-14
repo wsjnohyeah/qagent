@@ -13,7 +13,11 @@ all existing risk boundaries.
 
 ## Enablement
 
-Event Alpha is safe-off by default and shares the critical-research USD budget.
+Event Alpha is safe-off by default. When enabled, both Event Card extraction and analog
+assessment use the dedicated `event_research` workload, routed to Meta Muse Spark with a
+`$40/day` workload/provider ceiling. Technical critical research remains routed to OpenAI and
+does not consume Event Alpha's workload allowance. The project-wide and monthly ceilings still
+apply.
 
 ```dotenv
 AUTONOMOUS_COORDINATOR_ENABLED=true

@@ -77,6 +77,11 @@
   Event Alpha replay certificate, Shadow adapter, Paper path, or runtime enablement exists yet.
   Event Alpha schema `20260912_0038` and the Event Alpha UI/API are deployed, but `EVENT_ALPHA_ENABLED=false`
   and all four Event Alpha tables are empty, so the rollout has incurred no Event Alpha LLM cost.
+- Local source now implements ADR 0045 for the approved Event Alpha activation. A dedicated
+  `event_research` workload routes only Event Card extraction and analog synthesis to Meta
+  `muse-spark-1.3`, caps that workload and the Meta provider at `$40/day`, raises the combined
+  project daily ceiling to `$80`, and retains the existing `$200` monthly ceiling. Production
+  remains on the prior safe-off routing/budget until exact-SHA CI and guarded deployment.
 - Production and source are on migration `20260913_0039`. It removes a duplicated volatility-geometry
   suffix from per-signal risk-policy lineage and expands the persisted Shadow policy-version
   field to 240 characters. The pre-repair worker exposed the former 80-character limit as 37

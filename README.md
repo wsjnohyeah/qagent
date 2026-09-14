@@ -117,9 +117,11 @@ reservations stop over-budget calls before they reach a provider. Token counts r
 diagnostic telemetry, not operator-configured limits. An interrupted provider call releases
 its abandoned reservation after the configured provider timeout plus a five-minute safety
 margin, so a process restart cannot permanently consume budget capacity.
-`llm_budget@0.2.0` sets the daily project, OpenAI-provider, and critical-research ceilings to
-`$40`; same-period consumption is reconstructed from durable reservations across policy
-versions, so deploying a higher ceiling does not reset money already spent that day.
+`llm_budget@0.3.0` preserves the `$40` OpenAI technical-research ceiling and gives Event Alpha
+its own `$40/day` `event_research` workload routed to Meta Muse Spark. The combined project
+daily ceiling is `$80`, while the existing `$200` monthly project ceiling remains unchanged.
+Same-period consumption is reconstructed from durable reservations across policy versions, so
+deploying a higher ceiling does not reset money already spent that day.
 
 Event Alpha adds a parallel, LLM-led research lane for sparse catalysts without training a
 predictive event classifier. It turns citation-bound catalysts into generalized Event Cards,

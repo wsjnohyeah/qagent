@@ -127,6 +127,7 @@ class LLMWorkload(StrEnum):
     INTERACTIVE_EXPLANATION = "interactive_explanation"
     ROUTINE_PIPELINE = "routine_pipeline"
     CRITICAL_RESEARCH = "critical_research"
+    EVENT_RESEARCH = "event_research"
     STRATEGY_GENERATION = "strategy_generation"
     STRATEGY_CRITIQUE = "strategy_critique"
 
