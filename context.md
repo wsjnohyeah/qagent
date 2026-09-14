@@ -1,6 +1,6 @@
 # Master Project Context
 
-Last updated: 2026-09-13 PDT
+Last updated: 2026-09-14 PDT
 
 Context format: v1
 
@@ -11,9 +11,12 @@ and new isolated `$10,000` sandbox exposure cannot execute before the September 
 Paid ML + LLM research and source-specific historical backfill are
 active. Production automatically admits exact deterministic Candidate/Qualified results to
 broker-free Shadow; Paper enrollment remains separately human-confirmed and live money remains
-impossible. Off-site backup/alerting and statistical/elapsed production evidence remain open.
+impossible. Event Alpha case research is also active through a dedicated Meta route and `$40/day`
+estimated-cost ceiling, but its outputs remain research-only pending a separate event replay and
+execution certificate. Off-site backup/alerting and statistical/elapsed production evidence
+remain open.
 
-Current documented baseline: C101 — `Record Event Alpha production rollout`
+Current documented baseline: C108 — `Record final Event Alpha activation`
 
 ## Purpose and authority
 
@@ -97,8 +100,12 @@ A Git commit cannot contain its own content-derived hash without changing that h
   evidence cutoffs, 1/2/5-session outcomes, robustness statistics, and the research-candidate
   gate. It trains no predictive event ML model. Event Playbooks are research-only and cannot
   enter Shadow or Paper until an event-aware replay and exact execution certificate exist.
-  Production serves this code and schema at exact image `2c43092`, but the feature flag remains
-  false and the case-memory tables remain empty pending a separate budgeted activation decision.
+  Production serves this code at exact image `8ecdc7f`, the feature is enabled, and Event Card
+  extraction plus analog synthesis use the dedicated Meta `event_research` route. At the latest
+  inspection the case memory held 49 cards, 69 deterministic 1/2/5-session outcomes, and 23
+  assessments. No Playbook exists: 22 assessments lacked enough analogs, while the first
+  five-analog/cross-three-symbol comparison produced a reasoned `ABSTAIN` that also failed the
+  deterministic robustness gate. This is working research rejection, not an execution outage.
 - Phase 5 trains logistic and boosted-stump candidates on executable next-open-to-future-close
   labels indexed by actual bars. It uses embargoed chronological folds and separate purged
   calibration, model-selection, and untouched final holdout partitions, measures PSI drift,
@@ -198,7 +205,7 @@ A Git commit cannot contain its own content-derived hash without changing that h
   a separate local-commit approval. Push and deployment remain external actions.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`. A fresh SFO3 VPS runs the
   production stack at `https://qagent.143.110.239.251.sslip.io` behind Caddy TLS on verified
-  immutable functional commit `2c4309229b9739d5e415c0ab76eb5f7c4ada985b`.
+  immutable functional commit `8ecdc7f5f52e99610d57852a59bea10790e5e35c`.
 - The independent `06b6853` fix verification is mapped item-by-item in
   `docs/REVIEW_REMEDIATION_2026-09-05.md`. The deterministic F01–F11 counterexamples are
   followed by the corrections from the `56bb979` review in
@@ -5327,6 +5334,46 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: publish and deploy this script fix, confirm all health gates pass on the
   first guarded attempt, restore continuous Shadow with an audited action, and record final Event
   Alpha counts/budget/assessment state.
+
+### C108 — `Record final Event Alpha activation`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-14 PDT.
+- User intent: finish production activation of the complete Event Alpha research-memory pipeline,
+  keep continuous broker-free Shadow running, and provide a precise explanation of the resulting
+  event-driven trading plan.
+- Scope: record exact-SHA rollout of the dedicated Meta Event workload, the corrected monthly
+  allowance, hardened Event Card intake, graceful deployment drain, audited Shadow resume, and
+  current production research evidence. Refresh the operational state documents without adding
+  Event Alpha execution authority.
+- Architecture/decision impact: Event Alpha now runs continuously as an LLM-led research sidecar.
+  It creates citation-bound Event Cards, measures deterministic next-session-open to 1/2/5-session
+  close outcomes, compares cross-symbol analogs, and can create immutable Playbook candidates.
+  It does not yet possess an event-aware walk-forward replay, frozen execution contract, exact
+  validation certificate, risk adapter, or Shadow adapter. Therefore even a passing Playbook
+  remains research-only; Technical Alpha Shadow continues independently.
+- Validation: functional commits passed Flake8, strict mypy across 62 source files, all 227 tests,
+  local doctor, and repository secret scan. GitHub Actions run `34818243796` passed and published
+  exact image `8ecdc7f5f52e99610d57852a59bea10790e5e35c`. Backup
+  `/opt/agentic-quant/backups/20260914T071443Z` passed PostgreSQL catalog, object archive, and
+  SHA-256 verification. The guarded rollout drained the live Shadow lease without deleting it,
+  then passed API, worker, coordinator, PostgreSQL, and Redis health gates. `alembic check` found
+  no schema operations. Audited action `01a09edd-beb4-74b7-b600-28f2714ac33d` restored continuous
+  Shadow; public readiness still reports `live_trading_enabled=false`.
+- Global state after commit: production runs exact image `8ecdc7f`. Event Alpha is enabled with a
+  two-paid-card-per-cycle limit, routes `event_research` to Meta `muse-spark-1.3`, and enforces
+  `$40/day` Event, `$40/day` Meta, `$80/day` project, and `$1,400/month` project ceilings. The
+  current case memory contains 49 cards (23 completed, 26 rejected), 69 deterministic outcomes,
+  23 assessments, and zero Playbooks. Event daily spend is `$0.053805`. Twenty-two assessments
+  are `INSUFFICIENT_ANALOGS`; the one five-analog/cross-three-symbol assessment selected one
+  session but recommended `ABSTAIN` and failed the deterministic return/robustness gate. New
+  Shadow exposure is resumed but still cannot execute before its separately configured Monday
+  activation boundary. Paper has no enrollment or order; live money remains impossible.
+- Corrections/follow-ups: let the bounded case memory accumulate across more symbols and event
+  types. Before any Event Alpha output can enter Shadow, implement and review the event-aware
+  replay, causal signal/execution timing, deterministic stop/target/timed-exit contract, exact
+  validation certificate, and isolated-sandbox risk integration. Do not translate a Playbook
+  directly into a technical `StrategySpec`.
 
 ## Template for future commit entries
 

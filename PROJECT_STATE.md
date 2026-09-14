@@ -11,7 +11,7 @@
   strictly Qualified and forward observation history remains short.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `ed4214fa776fe47ef7486a06f6c0520183fd3a62` image, PostgreSQL, Redis, API, Shadow worker,
+  `8ecdc7f5f52e99610d57852a59bea10790e5e35c` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled. The last pre-migration inspection found 106
@@ -83,20 +83,26 @@
   `muse-spark-1.3`, caps that workload and the Meta provider at `$40/day`, raises the combined
   project daily ceiling to `$80`. Production now runs `event_card@0.1.1`, states the mechanism
   bound explicitly, and durably audits expected unsafe-evidence exclusions while continuing to
-  the next eligible catalyst. At latest inspection it held 17 cards (two completed, 15 rejected),
-  six completed outcomes, two insufficient-analog assessments, and zero Playbooks; five Meta
-  calls cost an estimated `$0.010302`. Local source raises the nearly exhausted project monthly
-  ceiling from `$200` to `$1,400` so the approved daily Event allowance can operate through the
-  month; that final budget correction awaits CI and rollout.
+  the next eligible catalyst. At latest inspection it held 49 cards (23 completed and 26
+  rejected), 69 deterministic outcomes, 23 assessments, and zero Playbooks. Twenty-two
+  assessments lacked enough cross-symbol analogs. The first assessment with five analogs across
+  three symbols reached `RESEARCH_ONLY`, but Meta recommended `ABSTAIN` and the deterministic gate
+  rejected it because the median return and best-winner-removed return were negative and profit
+  factor was below 1.10. The Event workload had consumed an estimated `$0.053805` for the UTC day.
+  The `$1,400` monthly project ceiling is deployed and preserves the approximately `$199.96`
+  already consumed this month rather than resetting spend.
 - Production and source are on migration `20260913_0039`. It removes a duplicated volatility-geometry
   suffix from per-signal risk-policy lineage and expands the persisted Shadow policy-version
   field to 240 characters. The pre-repair worker exposed the former 80-character limit as 37
   append-only deployment failures rather than creating partial trade plans; post-repair ticks
   complete successfully and retain those failures as historical audit evidence.
-- Local deployment tooling now stops API/worker/coordinator gracefully for up to 15 minutes and
+- Production deployment tooling now stops API/worker/coordinator gracefully for up to 15 minutes and
   waits for the fenced Shadow execution lease to drain before migration or replacement. This
   fixes the repeatedly observed post-deploy worker crash loop without deleting or stealing a
-  live lease; production will receive the fix in the next exact-SHA rollout.
+  live lease. Exact-SHA rollout `8ecdc7f` completed through all health gates on the first guarded
+  attempt, and continuous broker-free Shadow was restored through audited action
+  `01a09edd-beb4-74b7-b600-28f2714ac33d`. New exposure is not paused; Event Alpha remains
+  research-only and cannot create a Shadow deployment.
 - Local lint, strict type checking, API readiness, the authenticated HTTP
   vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.
@@ -326,14 +332,14 @@
   stop/target geometry used identically by research and shadow. Candidate/snapshot mismatches
   and future signal/feature timestamps also reject.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; production currently runs the
-  verified immutable functional commit `4fe2d71b372a3731140189a18450a7fa32f74ee6` while the
-  isolated-sandbox release awaits CI and guarded deployment.
+  verified immutable functional commit `8ecdc7f5f52e99610d57852a59bea10790e5e35c` with the
+  isolated-sandbox and Event Alpha releases deployed.
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases. A verified `main` push publishes an immutable GHCR
   commit-SHA image with matching embedded/OCI source provenance; deployment rejects mismatches.
 - The source now batches large SEC company-fact writes and resolves their durable IDs in
   bounded queries after a production AAPL response with 5,291 facts exposed PostgreSQL's
-  per-statement parameter ceiling. The regression suite contains 225 tests.
+  per-statement parameter ceiling. The regression suite contains 227 tests.
 - The last complete release audit passed lint, strict typing, the full test suite,
   authenticated local and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, fresh schema
   upgrade and PostgreSQL schema-drift checks. The current source migration head is
