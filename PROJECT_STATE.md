@@ -11,7 +11,7 @@
   strictly Qualified and forward observation history remains short.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `3b8fc6d20df7084ab5fc2ddc39e39b709e4227c6` image, PostgreSQL, Redis, API, Shadow worker,
+  `747060bada20a7ac0c86923b7cb1f6083b90b537` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled. The last pre-migration inspection found 106
@@ -83,12 +83,13 @@
   `muse-spark-1.3`, caps that workload and the Meta provider at `$40/day`, raises the combined
   project daily ceiling to `$80`. Production now runs `event_card@0.1.1`, states the mechanism
   bound explicitly, and durably audits expected unsafe-evidence exclusions while continuing to
-  the next eligible catalyst. At latest inspection it held 49 cards (23 completed and 26
-  rejected), 69 deterministic outcomes, 23 assessments, and zero Playbooks. Twenty-two
-  assessments lacked enough cross-symbol analogs. The first assessment with five analogs across
+  the next eligible catalyst. At latest inspection it held 61 cards, 93 deterministic outcomes,
+  31 assessments, and zero Playbooks. Fair scheduling expanded completed-card coverage from four
+  to six symbols in its first deployed cycle. Most assessments lacked enough cross-symbol
+  analogs. The first assessment with five analogs across
   three symbols reached `RESEARCH_ONLY`, but Meta recommended `ABSTAIN` and the deterministic gate
   rejected it because the median return and best-winner-removed return were negative and profit
-  factor was below 1.10. The Event workload had consumed an estimated `$0.053805` for the UTC day.
+  factor was below 1.10. The Event workload had consumed an estimated `$0.077574` for the UTC day.
   The `$1,400` monthly project ceiling is deployed and preserves the approximately `$199.96`
   already consumed this month rather than resetting spend.
 - Production and source are on migration `20260913_0039`. It removes a duplicated volatility-geometry
@@ -107,9 +108,10 @@
   over 118 nonterminal sandboxes lasts about nine minutes, while the completed-tick heartbeat
   threshold was 90 seconds. The running tick continued renewing its lease every 15 seconds, but
   Docker and the deploy script correctly left the rollout unhealthy/paused under their old
-  interpretation. Source now treats that fresh fenced lease as in-flight liveness while still
-  rejecting expired leases and stale completed heartbeats; the correction awaits exact-SHA CI
-  and rollout.
+  interpretation. Production now treats that fresh fenced lease as in-flight liveness while
+  still rejecting expired leases and stale completed heartbeats. Exact image `747060b` passed
+  the guarded deploy health gates, and continuous Shadow was restored through audited action
+  `01a09f29-32ac-7358-8bd1-4fb4d9fc8021`.
 - Local lint, strict type checking, API readiness, the authenticated HTTP
   vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.

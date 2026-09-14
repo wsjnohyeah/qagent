@@ -16,7 +16,7 @@ estimated-cost ceiling, but its outputs remain research-only pending a separate 
 execution certificate. Off-site backup/alerting and statistical/elapsed production evidence
 remain open.
 
-Current documented baseline: C110 — `Recognize active Shadow tick health`
+Current documented baseline: C111 — `Record fair Event Alpha production verification`
 
 ## Purpose and authority
 
@@ -5432,6 +5432,44 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: run the complete release gate, publish/deploy the exact image, verify
   the active-lease health path and cross-symbol Event Card growth, then restore continuous Shadow
   and record the final production snapshot.
+
+### C111 — `Record fair Event Alpha production verification`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-14 PDT.
+- User intent: complete the repeated Event Alpha activation request and verify the deployed
+  pipeline rather than relying only on configuration or unit tests.
+- Scope: record the exact C109/C110 production rollout, backup, health-gate correction, audited
+  Shadow resume, first fair-scheduler outputs, active Meta budget, and the precise boundary
+  between an Event Playbook and an executable event strategy.
+- Architecture/decision impact: none beyond ADRs 0044–0046. Event Alpha is a continuous,
+  budgeted research pipeline. Its current 1/2/5-session horizon is selected after an event
+  trigger and is intended to become a timed exit with earlier deterministic stop/target handling
+  in a future execution contract. V1 measures raw next-session-open-to-horizon-close outcomes and
+  creates research Playbooks only; it does not yet execute those entry confirmations or exits.
+- Validation: GitHub Actions run `34820273193` passed and published fair-scheduler image
+  `3b8fc6d20df7084ab5fc2ddc39e39b709e4227c6`. The first guarded rollout put that image online but
+  failed closed at the stale-completed-heartbeat health interpretation while its Shadow lease was
+  visibly renewing. GitHub Actions run `34823318634` then passed and published health-corrected
+  image `747060bada20a7ac0c86923b7cb1f6083b90b537`. Backup
+  `/opt/agentic-quant/backups/20260914T080304Z` passed checksums, object archive inspection, and
+  PostgreSQL catalog validation. The final guarded rollout passed API, worker, coordinator,
+  PostgreSQL, and Redis health gates; `alembic check` reported no operations. Audited action
+  `01a09f29-32ac-7358-8bd1-4fb4d9fc8021` restored continuous Shadow. Local final gates passed
+  Flake8, strict mypy across 62 source files, 230 tests, doctor, and secret scan.
+- Global state after commit: production runs exact image `747060b`, reports
+  `live_trading_enabled=false`, and has new Shadow exposure resumed. Event Alpha remains enabled,
+  routes to Meta `muse-spark-1.3`, and retains its `$40/day` workload/provider ceiling. The first
+  deployed fair cycle added completed SMR and ACVA cards: current memory contains 61 cards,
+  93 deterministic outcomes, 31 assessments, and zero Playbooks, with completed-card coverage
+  expanded from four to six symbols. A direct production read of the next candidate pass returned
+  20 distinct symbols rather than an AAPL-filled global prefix. Event workload spend was
+  `$0.077574` for the UTC day against `$40`.
+- Corrections/follow-ups: monitor autonomous cross-symbol accumulation over the next 24 hours.
+  A Playbook is possible but not guaranteed: the system must not invent one if the five-analog,
+  three-symbol, median/trimmed-return, profit-factor, worst-loss, and LLM recommendation gates do
+  not pass. Implement a separate reviewed event walk-forward/execution certificate before any
+  Event Playbook is admitted to isolated Shadow.
 
 ## Template for future commit entries
 
