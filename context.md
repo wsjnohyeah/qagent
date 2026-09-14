@@ -16,7 +16,7 @@ estimated-cost ceiling, but its outputs remain research-only pending a separate 
 execution certificate. Off-site backup/alerting and statistical/elapsed production evidence
 remain open.
 
-Current documented baseline: C109 — `Balance Event Alpha across symbols`
+Current documented baseline: C110 — `Recognize active Shadow tick health`
 
 ## Purpose and authority
 
@@ -5405,6 +5405,33 @@ lifecycle. No Paper order was used as a build or deployment test.
   verify that newly completed cards expand beyond AAPL/HPE/INTC/ORCL, restore continuous Shadow
   after the guarded rollout, and record final runtime evidence. A Playbook remains evidence-
   dependent and cannot be promised or promoted into Shadow merely to satisfy a clock target.
+
+### C110 — `Recognize active Shadow tick health`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-14 PDT.
+- User intent: finish and verify the Event Alpha rollout without leaving the independent
+  continuous Shadow runtime in a false-unhealthy or paused state.
+- Scope: extend the Shadow worker health predicate to accept a non-expired
+  `shadow:portfolio-execution` lease renewed within 75 seconds as evidence that a long tick is
+  alive. Preserve the existing recent-completion heartbeat path and reject stale/expired leases.
+  Add direct active/expired lease regressions and deployment documentation.
+- Architecture/decision impact: health now represents both completed-loop progress and fenced
+  in-flight progress. It does not weaken single-owner execution: the same unique lease token,
+  60-second expiry, 15-second renewal, and deploy-time drain remain authoritative. No risk,
+  strategy, Event gate, Paper, or live-money behavior changes.
+- Validation: focused worker tests, Flake8, and strict mypy across 62 source files pass. The
+  production counterexample was exact: image `3b8fc6d` ran an actively renewed Shadow lease while
+  its last completed-tick heartbeat was older than the former 90-second threshold; Docker marked
+  only that worker unhealthy and the guarded deploy exited nonzero with exposure still paused.
+- Expected global state after commit: a published exact image can complete deployment health
+  gates while a large Shadow tick is actively renewing its fence. Production currently runs the
+  fair Event scheduler from `3b8fc6d`, with API/coordinator/database/Redis healthy, Event Alpha
+  enabled, and new exposure fail-closed paused until the health correction is deployed and an
+  audited resume succeeds.
+- Corrections/follow-ups: run the complete release gate, publish/deploy the exact image, verify
+  the active-lease health path and cross-symbol Event Card growth, then restore continuous Shadow
+  and record the final production snapshot.
 
 ## Template for future commit entries
 

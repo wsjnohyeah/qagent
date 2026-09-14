@@ -11,7 +11,7 @@
   strictly Qualified and forward observation history remains short.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `8ecdc7f5f52e99610d57852a59bea10790e5e35c` image, PostgreSQL, Redis, API, Shadow worker,
+  `3b8fc6d20df7084ab5fc2ddc39e39b709e4227c6` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled. The last pre-migration inspection found 106
@@ -103,6 +103,13 @@
   attempt, and continuous broker-free Shadow was restored through audited action
   `01a09edd-beb4-74b7-b600-28f2714ac33d`. New exposure is not paused; Event Alpha remains
   research-only and cannot create a Shadow deployment.
+- The first fair-scheduler rollout exposed a health-probe mismatch: a valid fenced Shadow tick
+  over 118 nonterminal sandboxes lasts about nine minutes, while the completed-tick heartbeat
+  threshold was 90 seconds. The running tick continued renewing its lease every 15 seconds, but
+  Docker and the deploy script correctly left the rollout unhealthy/paused under their old
+  interpretation. Source now treats that fresh fenced lease as in-flight liveness while still
+  rejecting expired leases and stale completed heartbeats; the correction awaits exact-SHA CI
+  and rollout.
 - Local lint, strict type checking, API readiness, the authenticated HTTP
   vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.

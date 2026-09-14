@@ -10,7 +10,7 @@ from sqlalchemy import create_engine, select
 
 from agentic_quant.api import create_app
 from agentic_quant.config import Settings
-from agentic_quant.database import runtime_controls
+from agentic_quant.database import runtime_controls, runtime_leases
 from agentic_quant.migrations import prepare_database
 
 
@@ -62,12 +62,34 @@ def worker_is_healthy(settings: Settings, *, pipeline: str = "shadow") -> bool:
     prepare_database(settings)
     engine = create_engine(settings.database_url, pool_pre_ping=True)
     try:
+        now = datetime.now(UTC)
         with engine.connect() as connection:
             row = connection.execute(
                 select(runtime_controls).where(
                     runtime_controls.c.control_key == f"worker:{pipeline}"
                 )
             ).one_or_none()
+            active_shadow_lease = (
+                connection.execute(
+                    select(runtime_leases).where(
+                        runtime_leases.c.lease_key == "shadow:portfolio-execution"
+                    )
+                ).one_or_none()
+                if pipeline == "shadow"
+                else None
+            )
+        if active_shadow_lease is not None:
+            lease_expires_at = active_shadow_lease.lease_expires_at
+            lease_updated_at = active_shadow_lease.updated_at
+            if lease_expires_at.tzinfo is None:
+                lease_expires_at = lease_expires_at.replace(tzinfo=UTC)
+            if lease_updated_at.tzinfo is None:
+                lease_updated_at = lease_updated_at.replace(tzinfo=UTC)
+            if (
+                lease_expires_at > now
+                and now - lease_updated_at <= timedelta(seconds=75)
+            ):
+                return True
         if row is None:
             return False
         updated_at = row.updated_at
@@ -82,7 +104,7 @@ def worker_is_healthy(settings: Settings, *, pipeline: str = "shadow") -> bool:
             else settings.shadow_poll_seconds
         )
         maximum_age = timedelta(seconds=max(30, poll_seconds * 3))
-        return datetime.now(UTC) - updated_at <= maximum_age and status != "FAILED"
+        return now - updated_at <= maximum_age and status != "FAILED"
     finally:
         engine.dispose()
 

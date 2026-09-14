@@ -175,6 +175,11 @@ lease is no longer active. This prevents a long in-flight tick from leaving the 
 worker in a repeated lease-conflict crash loop. A lease that does not drain fails deployment;
 the script never deletes it.
 
+The Shadow healthcheck accepts either a recent completed-tick heartbeat or the actively renewed
+`shadow:portfolio-execution` lease. A large sandbox inventory can make one deterministic tick
+last several minutes; a fresh 15-second lease renewal is positive liveness evidence, whereas an
+expired lease and stale completed-tick heartbeat still fail closed.
+
 The worker health command performs a cold Python/analytics import before reading its SQL
 heartbeat. Production Compose therefore checks worker and coordinator health every 60 seconds
 with a 20-second timeout. Do not reduce that timeout below measured cold-import latency; the
