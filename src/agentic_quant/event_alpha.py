@@ -431,20 +431,52 @@ class EventAlphaStore:
     ) -> list[dict[str, Any]]:
         if not symbols:
             return []
+        normalized_symbols = tuple(dict.fromkeys(value.upper() for value in symbols))
         processed = select(event_alpha_cards.c.catalyst_id).where(
             event_alpha_cards.c.schema_version == EVENT_CARD_SCHEMA_VERSION
         )
-        statement = (
-            select(catalysts)
-            .where(catalysts.c.primary_symbol.in_([value.upper() for value in symbols]))
-            .where(catalysts.c.event_time <= as_of)
-            .where(catalysts.c.available_from <= as_of)
-            .where(~catalysts.c.catalyst_id.in_(processed))
-            .order_by(catalysts.c.event_time.asc())
-            .limit(limit)
-        )
         with self.engine.connect() as connection:
-            return [self._row(row) or {} for row in connection.execute(statement)]
+            processed_counts = {
+                str(row.symbol): int(row.card_count)
+                for row in connection.execute(
+                    select(
+                        event_alpha_cards.c.symbol,
+                        func.count().label("card_count"),
+                    )
+                    .where(
+                        event_alpha_cards.c.schema_version
+                        == EVENT_CARD_SCHEMA_VERSION
+                    )
+                    .where(event_alpha_cards.c.symbol.in_(normalized_symbols))
+                    .group_by(event_alpha_cards.c.symbol)
+                )
+            }
+            ranked_symbols = sorted(
+                enumerate(normalized_symbols),
+                key=lambda item: (processed_counts.get(item[1], 0), item[0]),
+            )
+            selected: list[dict[str, Any]] = []
+            for _, symbol in ranked_symbols:
+                card_count = processed_counts.get(symbol, 0)
+                order = (
+                    (catalysts.c.event_time.desc(), catalysts.c.catalyst_id.desc())
+                    if card_count % 2
+                    else (catalysts.c.event_time.asc(), catalysts.c.catalyst_id.asc())
+                )
+                row = connection.execute(
+                    select(catalysts)
+                    .where(catalysts.c.primary_symbol == symbol)
+                    .where(catalysts.c.event_time <= as_of)
+                    .where(catalysts.c.available_from <= as_of)
+                    .where(~catalysts.c.catalyst_id.in_(processed))
+                    .order_by(*order)
+                    .limit(1)
+                ).one_or_none()
+                if row is not None:
+                    selected.append(self._row(row) or {})
+                if len(selected) >= limit:
+                    break
+        return selected
 
     def card(self, event_card_id: str) -> dict[str, Any] | None:
         with self.engine.connect() as connection:
@@ -1071,23 +1103,10 @@ class EventAlphaService:
             as_of=as_of,
             limit=500,
         )
-        mature = [
-            item
-            for item in candidates
-            if _utc(item["event_time"]) <= as_of - timedelta(days=10)
-        ]
-        recent = list(reversed(candidates))
-        prioritized: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        for item in [*mature[:1], *recent[:1], *mature[1:], *recent[1:]]:
-            catalyst_id = str(item["catalyst_id"])
-            if catalyst_id not in seen:
-                prioritized.append(item)
-                seen.add(catalyst_id)
         selected: list[dict[str, Any]] = []
         extracted: list[dict[str, Any]] = []
         evidence_rejections: list[dict[str, Any]] = []
-        for item in prioritized:
+        for item in candidates:
             if len(extracted) >= max_cards:
                 break
             try:

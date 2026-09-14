@@ -592,6 +592,38 @@ def test_event_cycle_audits_unsafe_evidence_and_continues_to_next_card(
     assert "corrected backfilled" in rejected["rejection_reason"]
 
 
+def test_unprocessed_event_candidates_are_balanced_across_symbols(
+    settings: Settings,
+) -> None:
+    ledger, _, store, _, _ = _services(settings)
+    documents = DocumentStore(ledger.engine)
+    for days_ago in (100, 99, 98):
+        _persist_catalyst(
+            documents,
+            _document(
+                symbol="AAPL",
+                published_at=AS_OF - timedelta(days=days_ago),
+                ingested_at=AS_OF - timedelta(days=days_ago),
+            ),
+        )
+    _persist_catalyst(
+        documents,
+        _document(
+            symbol="MSFT",
+            published_at=AS_OF - timedelta(days=1),
+            ingested_at=AS_OF - timedelta(days=1),
+        ),
+    )
+
+    candidates = store.unprocessed_catalysts(
+        symbols=("AAPL", "MSFT"),
+        as_of=AS_OF,
+        limit=2,
+    )
+
+    assert [item["primary_symbol"] for item in candidates] == ["AAPL", "MSFT"]
+
+
 def test_event_alpha_requires_paid_autonomous_coordinator(
     settings: Settings,
 ) -> None:

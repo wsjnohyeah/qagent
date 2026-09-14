@@ -38,8 +38,10 @@ not spend again because wall-clock time advanced.
 
 1. Source-specific ingestion archives Alpaca News, SEC, or approved IR evidence and resolves a
    deterministic catalyst.
-2. The bounded coordinator selects old cases to grow memory while reserving capacity for the
-   newest event.
+2. The bounded coordinator balances work across the active scanner symbols by current-schema
+   card count. Within each symbol it alternates the oldest and newest unprocessed catalyst. This
+   prevents a high-volume issuer from monopolizing the global query while still growing both
+   historical memory and current-event coverage.
 3. The extraction call creates a strict Event Card with exact source quotations. Invented
    citations, non-verbatim quotes, bad horizons, and malformed output are persisted as rejected.
    Each call is capped at eight source versions, prioritizing primary and recent evidence.

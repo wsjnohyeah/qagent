@@ -16,7 +16,7 @@ estimated-cost ceiling, but its outputs remain research-only pending a separate 
 execution certificate. Off-site backup/alerting and statistical/elapsed production evidence
 remain open.
 
-Current documented baseline: C108 — `Record final Event Alpha activation`
+Current documented baseline: C109 — `Balance Event Alpha across symbols`
 
 ## Purpose and authority
 
@@ -5374,6 +5374,37 @@ lifecycle. No Paper order was used as a build or deployment test.
   replay, causal signal/execution timing, deterministic stop/target/timed-exit contract, exact
   validation certificate, and isolated-sandbox risk integration. Do not translate a Playbook
   directly into a technical `StrategySpec`.
+
+### C109 — `Balance Event Alpha across symbols`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-14 PDT.
+- User intent: recheck the full Event Card → analog comparison → deterministic return → LLM
+  hypothesis → Event Playbook pipeline and make the requested 24-hour research expectation
+  operationally credible without weakening its evidence gate.
+- Scope: replace the globally truncated oldest-catalyst selection with deterministic fair
+  scheduling across the current scanner symbols. Rank issuers by current-schema Event Card
+  attempt count, preserve scanner rank as the tie-break, choose at most one catalyst per issuer
+  in a pass, and alternate that issuer's oldest and newest remaining catalyst. Add a regression,
+  ADR 0046, and operator documentation.
+- Architecture/decision impact: this fixes a scheduling bias rather than changing statistical
+  acceptance. In production, AAPL held more than 17,000 unprocessed catalysts and monopolized
+  the former global 500-row prefix: 21 of the first 27 completed cards were AAPL and only four
+  issuers had a completed card. Fair scheduling gives the 20-symbol scanner set bounded coverage
+  so the existing five-analog/three-other-symbol gate can accumulate relevant evidence. The two
+  paid-card-per-cycle limit, Meta route, `$40/day` Event budget, citation checks, deterministic
+  outcome calculations, Playbook gate, and no-execution boundary are unchanged.
+- Validation: the focused Event Alpha suite passes all nine tests, including a regression where
+  multiple older AAPL catalysts cannot exclude MSFT from a two-item selection. Focused Flake8 and
+  strict mypy across 62 source files pass.
+- Expected global state after commit: source can publish an exact immutable image whose Event
+  Alpha cycles distribute new cards across the active scanner list while preserving every prior
+  card, assessment, outcome, and budget record. Production remains on `8ecdc7f` until guarded
+  deployment; it currently has 55 cards, 81 outcomes, 27 assessments, and zero Playbooks.
+- Corrections/follow-ups: run the complete release gate, publish and deploy the exact image,
+  verify that newly completed cards expand beyond AAPL/HPE/INTC/ORCL, restore continuous Shadow
+  after the guarded rollout, and record final runtime evidence. A Playbook remains evidence-
+  dependent and cannot be promised or promoted into Shadow merely to satisfy a clock target.
 
 ## Template for future commit entries
 

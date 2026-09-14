@@ -539,6 +539,11 @@
 - ADR 0044: use an LLM-led, case-based Event Alpha sidecar without predictive event ML; bind
   every hypothesis to point-in-time citations and deterministic cross-stock outcome statistics,
   and keep all playbooks research-only until a separate event replay certificate exists.
+- ADR 0045: isolate Event Alpha LLM work on Meta behind a `$40/day` workload/provider cap and
+  preserve the separate technical-research allowance.
+- ADR 0046: schedule Event Alpha fairly across active scanner symbols by current-schema attempt
+  count, alternating old and new cases per issuer so one high-volume symbol cannot starve the
+  cross-symbol evidence gate.
 - ADR 0024: isolate Alpaca Paper behind an exact host, durable idempotent intents, account and
   risk reconciliation, and per-deployment administrator confirmation; retain no live path.
 - ADR 0025: reject Shadow certificates at the Paper boundary; require a separately validated
