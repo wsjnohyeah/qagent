@@ -42,6 +42,8 @@ not spend again because wall-clock time advanced.
 3. The extraction call creates a strict Event Card with exact source quotations. Invented
    citations, non-verbatim quotes, bad horizons, and malformed output are persisted as rejected.
    Each call is capped at eight source versions, prioritizing primary and recent evidence.
+   Schema `event_card@0.1.1` explicitly states the 120-character mechanism bound so value-tier
+   models do not lose otherwise valid cards to an implicit database-width constraint.
 4. When daily bars become causally complete, deterministic code records raw 1/2/5-session price
    reactions from the first session open strictly after the evidence became available. These are
    case-study outcomes, not cost-aware strategy backtests.

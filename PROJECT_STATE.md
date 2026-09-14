@@ -30,8 +30,10 @@
   independent revalidation of accepted specs, scanner-pool authorization at Shadow start,
   at least 50% positive active OOS folds, profit factor at least 1.10, and a positive
   compounded OOS return after removing the largest winner,
-  a stricter Research LLM output prompt, and `llm_budget@0.2.0` with a `$40` critical/daily
-  ceiling that preserves same-day spend across policy versions, single-attempt invalid LLM
+  a stricter Research LLM output prompt, and `llm_budget@0.3.0` with separate `$40` daily
+  technical and Event Alpha workload ceilings, an `$80` combined project daily ceiling, and
+  the existing `$200` monthly ceiling. It preserves same-day spend across policy versions,
+  single-attempt invalid LLM
   output handling, and leakage-safe annual ML under a six-year daily-bar target.
 - Autonomous research supports 1/2/5/10/20/63/126/252-session groups. Its deterministic
   daily UTC schedule assigns 21 of 24 hourly slots to the 1/2/5/10/20-session core and one
@@ -69,19 +71,22 @@
   retires at a `$8,800` marked-value floor. Explicit commission is zero while spread,
   slippage, impact, liquidity, and gap behavior remain modeled. The legacy migration is
   confirmation-gated and a deployment-time exposure boundary can stage Monday activation.
-- Production now includes the safe-off Event Alpha V1 from ADR 0044. A bounded
+- Production now runs the bounded Event Alpha V1 from ADRs 0044 and 0045. A bounded
   coordinator sidecar creates citation-bound Event Cards, deterministic 1/2/5-session outcomes,
   cross-stock analog statistics, LLM case assessments, and immutable research Playbooks without
   a predictive event ML model. Unchanged case sets are idempotent for LLM spend and a sidecar
   failure cannot interrupt Technical Alpha. Event Playbooks are research candidates only: no
   Event Alpha replay certificate, Shadow adapter, Paper path, or runtime enablement exists yet.
-  Event Alpha schema `20260912_0038` and the Event Alpha UI/API are deployed, but `EVENT_ALPHA_ENABLED=false`
-  and all four Event Alpha tables are empty, so the rollout has incurred no Event Alpha LLM cost.
-- Local source now implements ADR 0045 for the approved Event Alpha activation. A dedicated
+  Event Alpha schema `20260912_0038` and the Event Alpha UI/API are deployed with
+  `EVENT_ALPHA_ENABLED=true`. A dedicated
   `event_research` workload routes only Event Card extraction and analog synthesis to Meta
   `muse-spark-1.3`, caps that workload and the Meta provider at `$40/day`, raises the combined
-  project daily ceiling to `$80`, and retains the existing `$200` monthly ceiling. Production
-  remains on the prior safe-off routing/budget until exact-SHA CI and guarded deployment.
+  project daily ceiling to `$80`, and retains the existing `$200` monthly ceiling. The first
+  real call completed for an estimated `$0.002089` but its `event_card@0.1.0` result was
+  rejected because Meta exceeded the implicit 120-character mechanism field. Local source now
+  upgrades that contract to `event_card@0.1.1`, states the bound explicitly, and durably audits
+  expected unsafe-evidence exclusions while continuing to the next eligible catalyst; this
+  intake hardening awaits exact-SHA CI and rollout.
 - Production and source are on migration `20260913_0039`. It removes a duplicated volatility-geometry
   suffix from per-signal risk-policy lineage and expands the persisted Shadow policy-version
   field to 240 characters. The pre-repair worker exposed the former 80-character limit as 37

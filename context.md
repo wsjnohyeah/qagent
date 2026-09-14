@@ -5234,6 +5234,38 @@ lifecycle. No Paper order was used as a build or deployment test.
   continuous Shadow after health checks, and inspect the first real Meta Event Card call and
   coordinator status without promising that the analog gate must produce a Playbook in 24 hours.
 
+### C105 — `Harden Event Alpha card intake`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-13 PDT.
+- User intent: continue the approved Event Alpha activation until the production pipeline is
+  genuinely progressing rather than merely configured.
+- Scope: upgrade the Event Card/prompt contract to `0.1.1`, state the 120-character mechanism
+  bound explicitly for value-tier models, persist expected corrected-backfill evidence failures
+  as no-LLM rejected cards, scan past those exclusions instead of starving on the same oldest
+  and newest catalysts each cycle, and cap durable evidence exclusions at 50 per cycle while
+  preserving the two paid-card-call limit.
+- Architecture/decision impact: corrected historical evidence still fails closed and is never
+  sent to the LLM. The change makes that expected gate result auditable and lets the coordinator
+  reach the next causally usable event without labeling the whole sidecar degraded. Bumping the
+  schema permits one bounded retry of the HPE event rejected under the old implicit prompt.
+- Validation: the first production `event_research` call on functional image `55d2ea8` used Meta
+  `muse-spark-1.3`, completed with 769 input and 852 output tokens for estimated cost
+  `$0.002089`, and was correctly rejected because its mechanism exceeded 120 characters.
+  Read-only inspection also proved the next two repeatedly selected historical catalysts had
+  only corrected backfilled documents. Eight focused Event Alpha tests now pass, including a
+  regression that records an unsafe corrected event without an LLM call and continues to a
+  valid next card; focused Flake8 and strict mypy pass.
+- Global state after commit: production runs `55d2ea8`, Event Alpha is enabled with the dedicated
+  Meta route and `$40/day` workload cap, one rejected HPE V0.1.0 card is retained as immutable
+  evidence, and no outcome/assessment/Playbook exists yet. Continuous Shadow was restored after
+  deployment via audited action `01a09e3a-555c-7e81-a475-769f33e45f9a`. Source contains the
+  intake repair pending CI and rollout.
+- Corrections/follow-ups: pass the complete release gate, publish/deploy the exact repair image,
+  preserve the first rejected card, and verify that the next coordinator cycle records explicit
+  evidence exclusions plus at least one valid V0.1.1 Meta card without exceeding the two-call
+  cap.
+
 ## Template for future commit entries
 
 Copy this section before making a commit:

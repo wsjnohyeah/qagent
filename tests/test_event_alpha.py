@@ -541,6 +541,57 @@ def test_event_alpha_is_safe_off_and_visible_in_control_center(
     assert "Event Alpha" in page.text
 
 
+def test_event_card_prompt_exposes_strict_mechanism_storage_bound(
+    settings: Settings,
+) -> None:
+    *_, service = _services(settings)
+
+    assert EVENT_CARD_SCHEMA_VERSION == "event_card@0.1.1"
+    assert "mechanism between 3 and 120 characters" in service._card_instructions()
+
+
+def test_event_cycle_audits_unsafe_evidence_and_continues_to_next_card(
+    settings: Settings,
+) -> None:
+    ledger, provider, store, _, service = _services(settings)
+    documents = DocumentStore(ledger.engine)
+    _persist_catalyst(
+        documents,
+        _document(
+            symbol="MSFT",
+            published_at=AS_OF - timedelta(days=60),
+            ingested_at=AS_OF,
+            corrected=True,
+        ),
+    )
+    _persist_catalyst(
+        documents,
+        _document(
+            symbol="AAPL",
+            published_at=AS_OF - timedelta(hours=2),
+            ingested_at=AS_OF - timedelta(hours=1),
+        ),
+    )
+
+    result = asyncio.run(
+        service.run_cycle(
+            symbols=("MSFT", "AAPL"),
+            as_of=AS_OF,
+            max_cards=1,
+        )
+    )
+
+    assert result["status"] == "COMPLETED"
+    assert result["evidence_rejections"] == 1
+    assert result["cards_recorded"] == 1
+    assert provider.calls == [EVENT_CARD_PROMPT_VERSION]
+    cards = store.cards(limit=10)
+    assert {value["status"] for value in cards} == {"COMPLETED", "REJECTED"}
+    rejected = next(value for value in cards if value["status"] == "REJECTED")
+    assert rejected["llm_invocation_id"] is None
+    assert "corrected backfilled" in rejected["rejection_reason"]
+
+
 def test_event_alpha_requires_paid_autonomous_coordinator(
     settings: Settings,
 ) -> None:
