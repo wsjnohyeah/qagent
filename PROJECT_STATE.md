@@ -93,6 +93,10 @@
   field to 240 characters. The pre-repair worker exposed the former 80-character limit as 37
   append-only deployment failures rather than creating partial trade plans; post-repair ticks
   complete successfully and retain those failures as historical audit evidence.
+- Local deployment tooling now stops API/worker/coordinator gracefully for up to 15 minutes and
+  waits for the fenced Shadow execution lease to drain before migration or replacement. This
+  fixes the repeatedly observed post-deploy worker crash loop without deleting or stealing a
+  live lease; production will receive the fix in the next exact-SHA rollout.
 - Local lint, strict type checking, API readiness, the authenticated HTTP
   vertical slice, and the secret scan pass.
 - Docker Desktop 4.89.0 / Engine 29.7.2 is installed on the current Apple Silicon Mac.

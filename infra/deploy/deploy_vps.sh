@@ -97,6 +97,12 @@ if [ "$image_sha" != "$expected_sha" ]; then
   echo "Refusing deployment: image revision label does not match APP_IMAGE commit tag."
   exit 1
 fi
+
+# A Shadow tick runs blocking database work in a background thread. Give the old worker enough
+# time to finish and release its fenced lease before migration or process replacement. The
+# explicit lease wait also covers a prior process that was killed outside this deploy script.
+docker compose --env-file .env.production -f compose.production.yml stop \
+  --timeout 900 worker coordinator api
 docker compose --env-file .env.production -f compose.production.yml up -d postgres redis
 
 attempt=0
@@ -105,6 +111,18 @@ until docker compose --env-file .env.production -f compose.production.yml exec -
   attempt=$((attempt + 1))
   if [ "$attempt" -ge 30 ]; then
     echo "PostgreSQL did not become ready for migration."
+    exit 1
+  fi
+  sleep 2
+done
+
+attempt=0
+while [ "$(docker compose --env-file .env.production -f compose.production.yml \
+  exec -T postgres sh -c 'psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc \
+  "SELECT EXISTS (SELECT 1 FROM runtime_leases WHERE lease_key = '\''shadow:portfolio-execution'\'' AND lease_expires_at > now());"')" = "t" ]; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -ge 90 ]; then
+    echo "Active Shadow execution lease did not drain before deployment."
     exit 1
   fi
   sleep 2

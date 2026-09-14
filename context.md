@@ -5303,6 +5303,31 @@ lifecycle. No Paper order was used as a build or deployment test.
   monthly window is rebuilt from existing spend at the new limit, restore continuous Shadow,
   and record final production state.
 
+### C107 — `Drain Shadow leases during deployment`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-14 PDT.
+- User intent: complete Event Alpha deployment without repeatedly disrupting the separately
+  approved continuous Shadow service.
+- Scope: make the guarded VPS deploy stop API, Shadow worker, and coordinator with a 15-minute
+  graceful timeout before migration/replacement; wait up to three minutes for any still-active
+  fenced Shadow lease to drain; fail rather than delete or steal a lease; document and test the
+  deployment invariant.
+- Architecture/decision impact: no research, strategy, risk, or trading rule changes. Deployment
+  now respects the fact that a Shadow tick can take longer than Docker's former default 10-second
+  stop timeout. PostgreSQL/Redis remain online during the controlled application drain.
+- Validation: `sh -n infra/deploy/deploy_vps.sh` passed and all 27 safety tests passed, including
+  static checks for the graceful stop and lease-drain guard. The recurring failure was observed
+  on three guarded rollouts as a new worker exhausting five retries against the prior worker's
+  valid `shadow:portfolio-execution` lease; each lease expired naturally and no lock was deleted.
+- Global state after commit: production runs functional image `d234d23`, Event Alpha is enabled,
+  the `$1,400` monthly ceiling is active, but the just-completed deployment left new exposure
+  paused and exposed the old deploy-script race one last time. Source contains the permanent
+  deployment drain fix pending CI and rollout.
+- Corrections/follow-ups: publish and deploy this script fix, confirm all health gates pass on the
+  first guarded attempt, restore continuous Shadow with an audited action, and record final Event
+  Alpha counts/budget/assessment state.
+
 ## Template for future commit entries
 
 Copy this section before making a commit:

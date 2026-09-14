@@ -169,6 +169,12 @@ and separate research-coordinator worker so CPU-heavy training cannot delay shad
 API does not own production schedulers. Deployment fails if API readiness or either worker
 heartbeat is unhealthy. `AUTO_MIGRATE` remains false in long-running services.
 
+Before migration or replacement, the deploy script gives the existing API, Shadow worker, and
+coordinator up to 15 minutes to stop cleanly, then verifies that the fenced Shadow execution
+lease is no longer active. This prevents a long in-flight tick from leaving the replacement
+worker in a repeated lease-conflict crash loop. A lease that does not drain fails deployment;
+the script never deletes it.
+
 The worker health command performs a cold Python/analytics import before reading its SQL
 heartbeat. Production Compose therefore checks worker and coordinator health every 60 seconds
 with a 20-second timeout. Do not reduce that timeout below measured cold-import latency; the

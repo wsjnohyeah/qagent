@@ -45,6 +45,7 @@ from agentic_quant.risk import (
 
 def test_production_worker_healthchecks_allow_cold_import_latency() -> None:
     compose = yaml.safe_load(Path("compose.production.yml").read_text())
+    deploy_script = Path("infra/deploy/deploy_vps.sh").read_text()
 
     for service_name in ("worker", "coordinator"):
         healthcheck = compose["services"][service_name]["healthcheck"]
@@ -82,6 +83,8 @@ def test_production_worker_healthchecks_allow_cold_import_latency() -> None:
     assert coordinator_environment[
         "MARKET_SCANNER_AUTO_TRADING_POOL_ENABLED"
     ].endswith(":-false}")
+    assert "--timeout 900 worker coordinator api" in deploy_script
+    assert "Active Shadow execution lease did not drain" in deploy_script
 
 
 def test_baseline_bracket_executes_stop_first_when_intrabar_order_is_unknown() -> None:
