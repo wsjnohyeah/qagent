@@ -1,6 +1,6 @@
 # Master Project Context
 
-Last updated: 2026-09-14 PDT
+Last updated: 2026-09-16 PDT
 
 Context format: v1
 
@@ -16,7 +16,7 @@ estimated-cost ceiling, but its outputs remain research-only pending a separate 
 execution certificate. Off-site backup/alerting and statistical/elapsed production evidence
 remain open.
 
-Current documented baseline: C112 — `Route LLM workloads to Meta and refresh Event cases`
+Current documented baseline: C113 — `Record Meta-only production rollout`
 
 ## Purpose and authority
 
@@ -86,11 +86,11 @@ A Git commit cannot contain its own content-derived hash without changing that h
   authority.
 - Phase 5A adds persisted fail-closed market-data audits, configured half-spread fill costs,
   governed point-in-time reference imports, and idempotent resumable backfill partitions.
-- A front-loaded Phase 4B gateway and local Control Center retain one audited contract over
-  OpenAI GPT-5.6 Sol and Meta Muse Spark 1.3. The source `llm_routing@0.3.0` policy routes every
-  active workload to Meta, and inactive-provider overrides fail closed. Missing project
-  credentials fail closed and no model has any monetary authority. Production remains on the
-  preceding policy until this revision passes immutable deployment.
+- A front-loaded Phase 4B gateway and Control Center retain an audited provider abstraction.
+  Production `llm_routing@0.3.0` routes every active workload to Meta Muse Spark 1.3, and
+  inactive-provider overrides fail closed. OpenAI remains only a dormant compatibility
+  definition and historical audit label. Missing project credentials fail closed and no model
+  has any monetary authority.
 - Phase 4 retrieves only evidence versions available by `as_of`, reserves LLM budget before
   each provider call, requires typed research-only output and exact source quotations,
   abstains when
@@ -101,7 +101,7 @@ A Git commit cannot contain its own content-derived hash without changing that h
   evidence cutoffs, 1/2/5-session outcomes, robustness statistics, and the research-candidate
   gate. It trains no predictive event ML model. Event Playbooks are research-only and cannot
   enter Shadow or Paper until an event-aware replay and exact execution certificate exist.
-  Production serves this code at exact image `8ecdc7f`, the feature is enabled, and Event Card
+  Production serves the current implementation at exact image `cda8ba5`, the feature is enabled, and Event Card
   extraction plus analog synthesis use the dedicated Meta `event_research` route. At the latest
   inspection the case memory held 49 cards, 69 deterministic 1/2/5-session outcomes, and 23
   assessments. No Playbook exists: 22 assessments lacked enough analogs, while the first
@@ -115,6 +115,11 @@ A Git commit cannot contain its own content-derived hash without changing that h
   Source now rejects header-only SEC evidence before paid inference and fairly rechecks older
   actionable bullish cards after their semantic analog set changes. The evidence thresholds are
   intentionally unchanged.
+  At the post-rollout checkpoint the case memory held 287 cards (208 completed and 79 rejected),
+  211 assessments, and zero Playbooks. A bounded diagnostic cycle processed two cards, rejected
+  three header-only SEC records before inference, and re-evaluated two changed older cases as
+  `INSUFFICIENT_ANALOGS`, with no business error. This is evidence that the corrected scheduler
+  is active; it is not evidence that a tradable Event strategy already exists.
 - Phase 5 trains logistic and boosted-stump candidates on executable next-open-to-future-close
   labels indexed by actual bars. It uses embargoed chronological folds and separate purged
   calibration, model-selection, and untouched final holdout partitions, measures PSI drift,
@@ -5524,6 +5529,41 @@ lifecycle. No Paper order was used as a build or deployment test.
   to Meta and same-period spend is reconstructed under the new policy, confirm Event Alpha
   records a header-only rejection without a provider call and/or an eligible changed-case
   reassessment, then record the production rollout without claiming a Playbook must exist.
+  Completed by C113.
+
+### C113 — `Record Meta-only production rollout`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-16 PDT.
+- User intent: stop future GPT/OpenAI use, run every LLM workload on Meta, and determine whether
+  Event Alpha's lack of Playbooks came from overly strict admission rules.
+- Scope: record deployment of C112, the exact production route and budget state, the protected
+  backup and release evidence, the audited restoration of autonomous new exposure, and the
+  bounded post-rollout Event Alpha diagnostic.
+- Architecture/decision impact: none beyond C112/ADR 0047. The deployed effective route has all
+  six workloads on Meta and no active routing revision. OpenAI is a dormant compatibility
+  definition; an explicit override fails closed. Event Alpha keeps the five-analog,
+  three-symbol and robustness gates because the observed bottleneck is usable case coverage,
+  not an unjustified threshold. Header-only SEC evidence is rejected before paid inference and
+  changed older bullish cases are re-evaluated fairly.
+- Validation: GitHub Actions run `35064503800` passed verification and image publication for
+  exact SHA `cda8ba53009dd904cf2cb727a60c43c5e59cc796`; backup
+  `/opt/agentic-quant/backups/20260916T064008Z` passed checksum, object-archive, and PostgreSQL
+  catalog verification; the guarded deploy passed API, Shadow, Paper, and coordinator health
+  gates; all five containers report healthy. Post-rollout production completed Meta calls for
+  `critical_research`, `strategy_generation`, `strategy_critique`, and `event_research`, with no
+  OpenAI invocation. A bounded Event cycle completed with two processed cards, three pre-LLM
+  header-only SEC rejections, two changed-case reassessments, and zero business errors.
+- Global state after commit: production runs exact image `cda8ba5`; `llm_routing@0.3.0` and
+  `llm_budget@0.4.0` are the unoverridden YAML bases; same-period spend is reconstructed; the
+  technical five-session research cycle and continuous Event research remain active. The
+  audited global new-exposure control is resumed, Paper/Shadow remain enabled under their
+  independent deterministic gates, `LIVE_TRADING_ENABLED=false`, and Event Alpha remains
+  research-only. Event memory contains 287 cards, 211 assessments, and zero Playbooks at this
+  checkpoint.
+- Corrections/follow-ups: allow autonomous case memory to grow. Implement and validate a
+  separate event-aware replay/execution certificate before granting any Event Playbook Shadow
+  eligibility; do not weaken the current gate merely to create output.
 
 ## Template for future commit entries
 

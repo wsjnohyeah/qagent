@@ -11,7 +11,7 @@
   strictly Qualified and forward observation history remains short.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `747060bada20a7ac0c86923b7cb1f6083b90b537` image, PostgreSQL, Redis, API, Shadow worker,
+  `cda8ba53009dd904cf2cb727a60c43c5e59cc796` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled. The last pre-migration inspection found 106
@@ -30,19 +30,20 @@
   independent revalidation of accepted specs, scanner-pool authorization at Shadow start,
   at least 50% positive active OOS folds, profit factor at least 1.10, and a positive
   compounded OOS return after removing the largest winner,
-  a stricter Research LLM output prompt, and `llm_budget@0.3.0` with separate `$40` daily
-  technical and Event Alpha workload ceilings, an `$80` combined project daily ceiling, and
+  a stricter Research LLM output prompt, and `llm_budget@0.4.0` with separate `$40` daily
+  technical and Event Alpha workload ceilings, an `$80` Meta-provider and combined project daily ceiling, and
   a `$1,400` monthly ceiling. It preserves same-day spend across policy versions,
   single-attempt invalid LLM
   output handling, and leakage-safe annual ML under a six-year daily-bar target.
-- Source now carries the operator-directed Meta-only policy: `llm_routing@0.3.0` routes every
+- Production now runs the operator-directed Meta-only policy: `llm_routing@0.3.0` routes every
   interactive, routine, technical-research, Event, strategy-generation, and critique workload
   to Meta `muse-spark-1.3`. `llm_budget@0.4.0` preserves the `$80/day` project ceiling and raises
   Meta's provider ceiling to the same value so the existing technical and Event workload
   allowances do not accidentally compete under the former `$40` Meta cap. OpenAI remains only
   as a dormant provider definition and historical audit label; an explicit call fails closed
-  while it is absent from the effective route map. Production remains on the preceding policy
-  versions until this source revision passes the release gates and is deployed.
+  while it is absent from the effective route map. Post-rollout production evidence contains
+  completed Meta calls for technical research, strategy generation, strategy critique, and
+  Event research, with zero post-rollout OpenAI calls.
 - Autonomous research supports 1/2/5/10/20/63/126/252-session groups. Its deterministic
   daily UTC schedule assigns 21 of 24 hourly slots to the 1/2/5/10/20-session core and one
   background slot to each longer horizon. One-session research is a prior-completed-bar to
@@ -88,18 +89,15 @@
   Event Alpha schema `20260912_0038` and the Event Alpha UI/API are deployed with
   `EVENT_ALPHA_ENABLED=true`. A dedicated
   `event_research` workload routes only Event Card extraction and analog synthesis to Meta
-  `muse-spark-1.3`, caps that workload and the Meta provider at `$40/day`, raises the combined
-  project daily ceiling to `$80`. Production now runs `event_card@0.1.1`, states the mechanism
+  `muse-spark-1.3`, caps that workload at `$40/day`, and shares the `$80/day` Meta/project
+  ceiling with technical research. Production now runs `event_card@0.1.1`, states the mechanism
   bound explicitly, and durably audits expected unsafe-evidence exclusions while continuing to
-  the next eligible catalyst. At latest inspection it held 61 cards, 93 deterministic outcomes,
-  31 assessments, and zero Playbooks. Fair scheduling expanded completed-card coverage from four
-  to six symbols in its first deployed cycle. Most assessments lacked enough cross-symbol
-  analogs. The first assessment with five analogs across
-  three symbols reached `RESEARCH_ONLY`, but Meta recommended `ABSTAIN` and the deterministic gate
-  rejected it because the median return and best-winner-removed return were negative and profit
-  factor was below 1.10. The Event workload had consumed an estimated `$0.077574` for the UTC day.
-  The `$1,400` monthly project ceiling is deployed and preserves the approximately `$199.96`
-  already consumed this month rather than resetting spend.
+  the next eligible catalyst. At the post-rollout checkpoint it held 287 cards (208 completed,
+  79 rejected), 211 assessments, and zero Playbooks. A bounded production diagnostic completed
+  without business errors: three header-only SEC records were rejected before paid inference,
+  two cards were processed, and two changed older cases were re-evaluated as
+  `INSUFFICIENT_ANALOGS`. The `$1,400` monthly project ceiling remains deployed and same-period
+  usage is reconstructed from the reservation ledger rather than reset on a policy change.
 - Event Alpha source now rejects header-only SEC evidence before paid inference and fairly
   re-evaluates older actionable bullish cards when later backfill changes their bounded analog
   set. Its five-analog/three-symbol and robustness thresholds remain unchanged: a current
@@ -107,6 +105,12 @@
   filing stubs, while assessments of substantive bullish events either lacked enough comparable cases or had
   adverse analog returns. No Playbook or execution authority is manufactured to satisfy an
   output target.
+- GitHub Actions run `35064503800` passed verification and published exact image `cda8ba5`.
+  Guarded production rollout used verified backup `/opt/agentic-quant/backups/20260916T064008Z`;
+  all five containers passed health gates. Bootstrap failed closed with new exposure paused,
+  after which the previously approved autonomous Shadow/Paper state was restored through an
+  audited `runtime.resume` action. `LIVE_TRADING_ENABLED` remains false and Event Playbooks
+  remain ineligible for Shadow or Paper.
 - Production and source are on migration `20260913_0039`. It removes a duplicated volatility-geometry
   suffix from per-signal risk-policy lineage and expands the persisted Shadow policy-version
   field to 240 characters. The pre-repair worker exposed the former 80-character limit as 37
