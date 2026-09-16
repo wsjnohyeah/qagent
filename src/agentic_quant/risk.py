@@ -88,11 +88,13 @@ _HORIZON_STOP_MULTIPLIERS = {
 }
 _STRATEGY_STOP_MULTIPLIERS = {
     "buy_and_hold": Decimal("1.00"),
+    "event_playbook": Decimal("1.00"),
     "mean_reversion": Decimal("0.90"),
     "momentum": Decimal("1.10"),
 }
 _STRATEGY_TARGET_R_MULTIPLES = {
     "buy_and_hold": Decimal("2.00"),
+    "event_playbook": Decimal("2.00"),
     "mean_reversion": Decimal("1.75"),
     "momentum": Decimal("2.25"),
 }

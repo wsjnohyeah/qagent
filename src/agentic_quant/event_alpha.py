@@ -6,10 +6,10 @@ from enum import StrEnum
 import hashlib
 import json
 from statistics import median
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
 
 from pydantic import ConfigDict, Field, model_validator
-from sqlalchemy import Engine, and_, func, insert, select
+from sqlalchemy import Engine, and_, func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -18,8 +18,11 @@ from agentic_quant.database import (
     catalysts,
     event_alpha_assessments,
     event_alpha_cards,
+    event_alpha_matches,
     event_alpha_outcomes,
     event_alpha_playbooks,
+    event_alpha_validations,
+    validation_reports,
     source_document_versions,
     source_documents,
 )
@@ -28,24 +31,35 @@ from agentic_quant.domain import (
     FrozenModel,
     LLMInvocationStatus,
     LLMWorkload,
+    StrategySpec,
 )
-from agentic_quant.ids import uuid7
+from agentic_quant.ids import stable_uuid, uuid7
 from agentic_quant.ledger import EventLedger
 from agentic_quant.llm import LLMGateway, LLMRequest
 from agentic_quant.market_calendar import MarketSessionClock
 from agentic_quant.research_store import ResearchStore
+from agentic_quant.research import FEATURE_SET_VERSION
+from agentic_quant.validation import validation_execution_contract
+
+if TYPE_CHECKING:
+    from agentic_quant.shadow import ShadowRuntime
 
 
-EVENT_CARD_SCHEMA_VERSION = "event_card@0.1.1"
-EVENT_CARD_PROMPT_VERSION = "event_card_extraction@0.1.1"
-EVENT_ASSESSMENT_SCHEMA_VERSION = "event_analog_assessment@0.1.0"
-EVENT_ASSESSMENT_PROMPT_VERSION = "event_analog_synthesis@0.1.0"
-EVENT_ALPHA_GATE_VERSION = "event_alpha_gate@0.1.0"
-EVENT_ALPHA_HORIZONS = (1, 2, 5)
+EVENT_CARD_SCHEMA_VERSION = "event_card@0.2.0"
+EVENT_CARD_PROMPT_VERSION = "event_card_extraction@0.2.0"
+EVENT_ASSESSMENT_SCHEMA_VERSION = "event_analog_assessment@0.2.0"
+EVENT_ASSESSMENT_PROMPT_VERSION = "event_analog_synthesis@0.2.0"
+EVENT_ALPHA_GATE_VERSION = "event_alpha_gate@0.2.0"
+EVENT_ALPHA_VALIDATION_VERSION = "event_playbook_validation@0.1.0"
+EVENT_ALPHA_STRATEGY_VERSION = "event_news_strategy@0.1.0"
+EVENT_ALPHA_HORIZONS = (1, 2, 5, 10, 20)
 EVENT_ALPHA_MAX_DOCUMENTS = 8
 EVENT_ALPHA_MAX_EVIDENCE_REJECTIONS_PER_CYCLE = 50
 EVENT_ALPHA_MAX_ASSESSMENT_SCAN = 500
-EVENT_ALPHA_MIN_SEC_EVIDENCE_WORDS = 30
+EVENT_ALPHA_MIN_NEWS_EVIDENCE_WORDS = 12
+EVENT_ALPHA_MINIMUM_HOLDOUT_EVENTS = 3
+EVENT_ALPHA_MINIMUM_HOLDOUT_SYMBOLS = 2
+EVENT_ALPHA_MATCH_THRESHOLD = Decimal("0.65")
 HISTORICAL_PROVIDER_REPLAY = "PROVIDER_PUBLISHED_REPLAY"
 FORWARD_OBSERVED = "FORWARD_FIRST_SEEN"
 
@@ -87,7 +101,7 @@ class EventEvidenceQuote(FrozenModel):
 class EventCardOutput(FrozenModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    schema_version: str = Field(pattern=r"^event_card@0\.1\.1$")
+    schema_version: str = Field(pattern=r"^event_card@0\.2\.0$")
     symbol: str = Field(min_length=1, max_length=24)
     event_type: EventType
     direction: EventDirection
@@ -98,7 +112,7 @@ class EventCardOutput(FrozenModel):
     source_quality_score: Decimal = Field(ge=0, le=1)
     confidence: Decimal = Field(ge=0, le=1)
     generalized_tags: tuple[str, ...] = Field(min_length=1, max_length=12)
-    expected_horizons: tuple[int, ...] = Field(min_length=1, max_length=3)
+    expected_horizons: tuple[int, ...] = Field(min_length=1, max_length=5)
     evidence_quotes: tuple[EventEvidenceQuote, ...] = Field(min_length=1, max_length=12)
     risk_factors: tuple[str, ...] = Field(default=(), max_length=12)
 
@@ -107,7 +121,9 @@ class EventCardOutput(FrozenModel):
         if self.symbol != self.symbol.upper():
             raise ValueError("Event Card symbol must be uppercase")
         if any(value not in EVENT_ALPHA_HORIZONS for value in self.expected_horizons):
-            raise ValueError("Event Card horizons must be selected from 1, 2, and 5")
+            raise ValueError(
+                "Event Card horizons must be selected from 1, 2, 5, 10, and 20"
+            )
         if len(set(self.expected_horizons)) != len(self.expected_horizons):
             raise ValueError("Event Card horizons must be unique")
         normalized_tags = tuple(tag.strip().casefold() for tag in self.generalized_tags)
@@ -127,14 +143,14 @@ class EventCardOutput(FrozenModel):
 
 class EventEntryConfirmation(FrozenModel):
     maximum_opening_gap_fraction: Decimal = Field(ge=0, le=Decimal("0.25"))
-    minimum_relative_volume: Decimal = Field(ge=0, le=10)
+    minimum_relative_volume: Decimal = Field(ge=0, le=0)
     maximum_event_age_hours: int = Field(ge=1, le=168)
 
 
 class EventPlaybookProposal(FrozenModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    schema_version: str = Field(pattern=r"^event_analog_assessment@0\.1\.0$")
+    schema_version: str = Field(pattern=r"^event_analog_assessment@0\.2\.0$")
     recommendation: EventRecommendation
     selected_horizon_sessions: int
     confidence: Decimal = Field(ge=0, le=1)
@@ -148,7 +164,9 @@ class EventPlaybookProposal(FrozenModel):
     @model_validator(mode="after")
     def approved_horizon(self) -> Self:
         if self.selected_horizon_sessions not in EVENT_ALPHA_HORIZONS:
-            raise ValueError("Event playbook horizon must be 1, 2, or 5 sessions")
+            raise ValueError(
+                "Event playbook horizon must be 1, 2, 5, 10, or 20 sessions"
+            )
         if len(set(self.cited_event_ids)) != len(self.cited_event_ids):
             raise ValueError("Event citations must be unique")
         return self
@@ -231,6 +249,7 @@ class EventAlphaStore:
                     == source_documents.c.document_id,
                 )
                 .where(catalyst_documents.c.catalyst_id == catalyst_id)
+                .where(source_documents.c.source_kind == "news")
                 .where(source_documents.c.published_at <= as_of)
                 .where(source_document_versions.c.ingested_at <= as_of)
                 .order_by(
@@ -437,6 +456,14 @@ class EventAlphaStore:
         processed = select(event_alpha_cards.c.catalyst_id).where(
             event_alpha_cards.c.schema_version == EVENT_CARD_SCHEMA_VERSION
         )
+        news_catalysts = (
+            select(catalyst_documents.c.catalyst_id)
+            .join(
+                source_documents,
+                source_documents.c.document_id == catalyst_documents.c.document_id,
+            )
+            .where(source_documents.c.source_kind == "news")
+        )
         with self.engine.connect() as connection:
             processed_counts = {
                 str(row.symbol): int(row.card_count)
@@ -468,6 +495,7 @@ class EventAlphaStore:
                 row = connection.execute(
                     select(catalysts)
                     .where(catalysts.c.primary_symbol == symbol)
+                    .where(catalysts.c.catalyst_id.in_(news_catalysts))
                     .where(catalysts.c.event_time <= as_of)
                     .where(catalysts.c.available_from <= as_of)
                     .where(~catalysts.c.catalyst_id.in_(processed))
@@ -494,10 +522,15 @@ class EventAlphaStore:
         *,
         limit: int = 100,
         symbol: str | None = None,
+        schema_version: str | None = None,
     ) -> list[dict[str, Any]]:
         statement = select(event_alpha_cards)
         if symbol:
             statement = statement.where(event_alpha_cards.c.symbol == symbol.upper())
+        if schema_version:
+            statement = statement.where(
+                event_alpha_cards.c.schema_version == schema_version
+            )
         statement = statement.order_by(event_alpha_cards.c.created_at.desc()).limit(limit)
         with self.engine.connect() as connection:
             return [self._row(row) or {} for row in connection.execute(statement)]
@@ -663,49 +696,388 @@ class EventAlphaStore:
         assert item is not None
         return item
 
-    def assessments(self, *, limit: int = 100) -> list[dict[str, Any]]:
+    def assessments(
+        self,
+        *,
+        limit: int = 100,
+        schema_version: str | None = None,
+    ) -> list[dict[str, Any]]:
+        statement = select(event_alpha_assessments)
+        if schema_version:
+            statement = statement.where(
+                event_alpha_assessments.c.schema_version == schema_version
+            )
+        statement = statement.order_by(
+            event_alpha_assessments.c.created_at.desc()
+        ).limit(limit)
+        with self.engine.connect() as connection:
+            return [
+                self._row(row) or {}
+                for row in connection.execute(statement)
+            ]
+
+    def playbooks(
+        self,
+        *,
+        limit: int = 100,
+        assessment_schema_version: str | None = None,
+    ) -> list[dict[str, Any]]:
+        statement = select(event_alpha_playbooks)
+        if assessment_schema_version:
+            statement = statement.join(
+                event_alpha_assessments,
+                event_alpha_assessments.c.event_assessment_id
+                == event_alpha_playbooks.c.event_assessment_id,
+            ).where(
+                event_alpha_assessments.c.schema_version
+                == assessment_schema_version
+            )
+        statement = statement.order_by(
+            event_alpha_playbooks.c.created_at.desc()
+        ).limit(limit)
+        with self.engine.connect() as connection:
+            return [
+                self._row(row) or {}
+                for row in connection.execute(statement)
+            ]
+
+    def playbook_context(self, event_playbook_id: str) -> dict[str, Any] | None:
+        statement = (
+            select(
+                event_alpha_playbooks,
+                event_alpha_assessments.c.event_card_id.label("anchor_event_card_id"),
+                event_alpha_assessments.c.analog_card_ids_json.label(
+                    "discovery_card_ids_json"
+                ),
+                event_alpha_assessments.c.schema_version.label(
+                    "assessment_schema_version"
+                ),
+                event_alpha_cards.c.event_time.label("anchor_event_time"),
+                event_alpha_cards.c.symbol.label("anchor_symbol"),
+                event_alpha_cards.c.generalized_tags_json.label("anchor_tags_json"),
+                event_alpha_cards.c.evidence_json.label("anchor_evidence_json"),
+            )
+            .join(
+                event_alpha_assessments,
+                event_alpha_assessments.c.event_assessment_id
+                == event_alpha_playbooks.c.event_assessment_id,
+            )
+            .join(
+                event_alpha_cards,
+                event_alpha_cards.c.event_card_id
+                == event_alpha_assessments.c.event_card_id,
+            )
+            .where(event_alpha_playbooks.c.event_playbook_id == event_playbook_id)
+        )
+        with self.engine.connect() as connection:
+            return self._row(connection.execute(statement).one_or_none())
+
+    def holdout_candidates(
+        self,
+        *,
+        playbook: dict[str, Any],
+        as_of: datetime,
+    ) -> list[dict[str, Any]]:
+        statement = (
+            select(event_alpha_cards, event_alpha_outcomes)
+            .join(
+                event_alpha_outcomes,
+                event_alpha_outcomes.c.event_card_id
+                == event_alpha_cards.c.event_card_id,
+            )
+            .where(event_alpha_cards.c.status == "COMPLETED")
+            .where(event_alpha_cards.c.event_type == playbook["event_type"])
+            .where(event_alpha_cards.c.direction == playbook["direction"])
+            .where(event_alpha_cards.c.event_time > playbook["anchor_event_time"])
+            .where(
+                event_alpha_outcomes.c.horizon_sessions
+                == playbook["holding_period_sessions"]
+            )
+            .where(event_alpha_outcomes.c.available_from <= as_of)
+            .order_by(event_alpha_cards.c.event_time.asc())
+        )
+        with self.engine.connect() as connection:
+            return [self._row(row) or {} for row in connection.execute(statement)]
+
+    def validation_for_input(
+        self,
+        *,
+        event_playbook_id: str,
+        input_sha256: str,
+    ) -> dict[str, Any] | None:
+        statement = select(event_alpha_validations).where(
+            and_(
+                event_alpha_validations.c.event_playbook_id == event_playbook_id,
+                event_alpha_validations.c.schema_version
+                == EVENT_ALPHA_VALIDATION_VERSION,
+                event_alpha_validations.c.input_sha256 == input_sha256,
+            )
+        )
+        with self.engine.connect() as connection:
+            return self._row(connection.execute(statement).one_or_none())
+
+    def latest_validation(
+        self,
+        event_playbook_id: str,
+        *,
+        eligible_only: bool = False,
+    ) -> dict[str, Any] | None:
+        statement = select(event_alpha_validations).where(
+            event_alpha_validations.c.event_playbook_id == event_playbook_id
+        )
+        if eligible_only:
+            statement = statement.where(
+                event_alpha_validations.c.status == "SHADOW_ELIGIBLE"
+            )
+        statement = statement.order_by(
+            event_alpha_validations.c.created_at.desc()
+        ).limit(1)
+        with self.engine.connect() as connection:
+            return self._row(connection.execute(statement).one_or_none())
+
+    def record_validation(self, values: dict[str, Any]) -> dict[str, Any]:
+        identity = ("event_playbook_id", "schema_version", "input_sha256")
+        with self.engine.begin() as connection:
+            statement: Any
+            if self.engine.dialect.name == "postgresql":
+                statement = (
+                    postgresql_insert(event_alpha_validations)
+                    .values(**values)
+                    .on_conflict_do_nothing(index_elements=list(identity))
+                )
+            elif self.engine.dialect.name == "sqlite":
+                statement = (
+                    sqlite_insert(event_alpha_validations)
+                    .values(**values)
+                    .on_conflict_do_nothing(index_elements=list(identity))
+                )
+            else:
+                raise RuntimeError(f"Unsupported SQL dialect: {self.engine.dialect.name}")
+            connection.execute(statement)
+            row = connection.execute(
+                select(event_alpha_validations).where(
+                    and_(
+                        event_alpha_validations.c.event_playbook_id
+                        == values["event_playbook_id"],
+                        event_alpha_validations.c.schema_version
+                        == values["schema_version"],
+                        event_alpha_validations.c.input_sha256
+                        == values["input_sha256"],
+                    )
+                )
+            ).one()
+        item = self._row(row)
+        assert item is not None
+        return item
+
+    def validations(self, *, limit: int = 100) -> list[dict[str, Any]]:
         with self.engine.connect() as connection:
             return [
                 self._row(row) or {}
                 for row in connection.execute(
-                    select(event_alpha_assessments)
-                    .order_by(event_alpha_assessments.c.created_at.desc())
+                    select(event_alpha_validations)
+                    .order_by(event_alpha_validations.c.created_at.desc())
                     .limit(limit)
                 )
             ]
 
-    def playbooks(self, *, limit: int = 100) -> list[dict[str, Any]]:
+    def match_for_case(
+        self,
+        *,
+        event_playbook_id: str,
+        event_validation_id: str,
+        event_card_id: str,
+    ) -> dict[str, Any] | None:
+        statement = select(event_alpha_matches).where(
+            and_(
+                event_alpha_matches.c.event_playbook_id == event_playbook_id,
+                event_alpha_matches.c.event_validation_id == event_validation_id,
+                event_alpha_matches.c.event_card_id == event_card_id,
+            )
+        )
+        with self.engine.connect() as connection:
+            return self._row(connection.execute(statement).one_or_none())
+
+    def record_match(self, values: dict[str, Any]) -> dict[str, Any]:
+        with self.engine.begin() as connection:
+            existing = connection.execute(
+                select(event_alpha_matches).where(
+                    and_(
+                        event_alpha_matches.c.event_playbook_id
+                        == values["event_playbook_id"],
+                        event_alpha_matches.c.event_validation_id
+                        == values["event_validation_id"],
+                        event_alpha_matches.c.event_card_id
+                        == values["event_card_id"],
+                    )
+                )
+            ).one_or_none()
+            if existing is None:
+                connection.execute(insert(event_alpha_matches).values(**values))
+            elif str(existing.status) != "SHADOW_STARTED":
+                connection.execute(
+                    update(event_alpha_matches)
+                    .where(
+                        and_(
+                            event_alpha_matches.c.event_playbook_id
+                            == values["event_playbook_id"],
+                            event_alpha_matches.c.event_validation_id
+                            == values["event_validation_id"],
+                            event_alpha_matches.c.event_card_id
+                            == values["event_card_id"],
+                        )
+                    )
+                    .values(
+                        status=values["status"],
+                        reason=values["reason"],
+                        strategy_spec_id=values.get("strategy_spec_id"),
+                        shadow_deployment_id=values.get("shadow_deployment_id"),
+                    )
+                )
+            row = connection.execute(
+                select(event_alpha_matches).where(
+                    and_(
+                        event_alpha_matches.c.event_playbook_id
+                        == values["event_playbook_id"],
+                        event_alpha_matches.c.event_validation_id
+                        == values["event_validation_id"],
+                        event_alpha_matches.c.event_card_id
+                        == values["event_card_id"],
+                    )
+                )
+            ).one()
+        item = self._row(row)
+        assert item is not None
+        return item
+
+    def matches(self, *, limit: int = 100) -> list[dict[str, Any]]:
         with self.engine.connect() as connection:
             return [
                 self._row(row) or {}
                 for row in connection.execute(
-                    select(event_alpha_playbooks)
-                    .order_by(event_alpha_playbooks.c.created_at.desc())
+                    select(event_alpha_matches)
+                    .order_by(event_alpha_matches.c.created_at.desc())
                     .limit(limit)
                 )
             ]
 
     def health_summary(self) -> dict[str, Any]:
+        latest_validation_times = (
+            select(
+                event_alpha_validations.c.event_playbook_id,
+                func.max(event_alpha_validations.c.created_at).label("latest_created_at"),
+            )
+            .where(
+                event_alpha_validations.c.schema_version
+                == EVENT_ALPHA_VALIDATION_VERSION
+            )
+            .group_by(event_alpha_validations.c.event_playbook_id)
+            .subquery()
+        )
         with self.engine.connect() as connection:
+            all_cards = int(
+                connection.execute(
+                    select(func.count()).select_from(event_alpha_cards)
+                ).scalar_one()
+            )
+            current_cards = int(
+                connection.execute(
+                    select(func.count())
+                    .select_from(event_alpha_cards)
+                    .where(event_alpha_cards.c.schema_version == EVENT_CARD_SCHEMA_VERSION)
+                ).scalar_one()
+            )
+            all_assessments = int(
+                connection.execute(
+                    select(func.count()).select_from(event_alpha_assessments)
+                ).scalar_one()
+            )
+            current_assessments = int(
+                connection.execute(
+                    select(func.count())
+                    .select_from(event_alpha_assessments)
+                    .where(
+                        event_alpha_assessments.c.schema_version
+                        == EVENT_ASSESSMENT_SCHEMA_VERSION
+                    )
+                ).scalar_one()
+            )
             return {
-                "event_alpha_cards": int(
+                "event_alpha_cards": current_cards,
+                "event_alpha_cards_all_versions": all_cards,
+                "event_alpha_outcomes": int(
                     connection.execute(
-                        select(func.count()).select_from(event_alpha_cards)
+                        select(func.count())
+                        .select_from(event_alpha_outcomes)
+                        .join(
+                            event_alpha_cards,
+                            event_alpha_cards.c.event_card_id
+                            == event_alpha_outcomes.c.event_card_id,
+                        )
+                        .where(
+                            event_alpha_cards.c.schema_version
+                            == EVENT_CARD_SCHEMA_VERSION
+                        )
                     ).scalar_one()
                 ),
-                "event_alpha_outcomes": int(
+                "event_alpha_outcomes_all_versions": int(
                     connection.execute(
                         select(func.count()).select_from(event_alpha_outcomes)
                     ).scalar_one()
                 ),
-                "event_alpha_assessments": int(
-                    connection.execute(
-                        select(func.count()).select_from(event_alpha_assessments)
-                    ).scalar_one()
-                ),
+                "event_alpha_assessments": current_assessments,
+                "event_alpha_assessments_all_versions": all_assessments,
                 "event_alpha_playbooks": int(
                     connection.execute(
+                        select(func.count())
+                        .select_from(event_alpha_playbooks)
+                        .join(
+                            event_alpha_assessments,
+                            event_alpha_assessments.c.event_assessment_id
+                            == event_alpha_playbooks.c.event_assessment_id,
+                        )
+                        .where(
+                            event_alpha_assessments.c.schema_version
+                            == EVENT_ASSESSMENT_SCHEMA_VERSION
+                        )
+                    ).scalar_one()
+                ),
+                "event_alpha_playbooks_all_versions": int(
+                    connection.execute(
                         select(func.count()).select_from(event_alpha_playbooks)
+                    ).scalar_one()
+                ),
+                "event_alpha_validations": int(
+                    connection.execute(
+                        select(func.count()).select_from(event_alpha_validations)
+                    ).scalar_one()
+                ),
+                "event_alpha_shadow_eligible_playbooks": int(
+                    connection.execute(
+                        select(
+                            func.count(
+                                func.distinct(
+                                    event_alpha_validations.c.event_playbook_id
+                                )
+                            )
+                        )
+                        .select_from(
+                            event_alpha_validations.join(
+                                latest_validation_times,
+                                and_(
+                                    latest_validation_times.c.event_playbook_id
+                                    == event_alpha_validations.c.event_playbook_id,
+                                    latest_validation_times.c.latest_created_at
+                                    == event_alpha_validations.c.created_at,
+                                ),
+                            )
+                        )
+                        .where(event_alpha_validations.c.status == "SHADOW_ELIGIBLE")
+                    ).scalar_one()
+                ),
+                "event_alpha_matches": int(
+                    connection.execute(
+                        select(func.count()).select_from(event_alpha_matches)
                     ).scalar_one()
                 ),
             }
@@ -722,7 +1094,7 @@ class EventAlphaStore:
 
 
 class EventAlphaService:
-    """LLM-led event research with deterministic case statistics and no broker path."""
+    """News-first case research with deterministic Candidate Shadow admission."""
 
     def __init__(
         self,
@@ -735,6 +1107,8 @@ class EventAlphaService:
         calendar_name: str = "XNYS",
         minimum_analogs: int = 5,
         minimum_symbols: int = 3,
+        shadow: ShadowRuntime | None = None,
+        auto_shadow_enabled: bool = False,
     ) -> None:
         self.store = store
         self.research = research
@@ -744,6 +1118,8 @@ class EventAlphaService:
         self.clock = MarketSessionClock(calendar_name)
         self.minimum_analogs = minimum_analogs
         self.minimum_symbols = minimum_symbols
+        self.shadow = shadow
+        self.auto_shadow_enabled = auto_shadow_enabled
 
     async def extract_card(
         self,
@@ -1206,17 +1582,21 @@ class EventAlphaService:
                         "error": type(exc).__name__,
                     }
                 )
+        validations = self.validate_playbooks(as_of=as_of)
+        matches = self.activate_forward_matches(as_of=as_of)
         return {
             "status": "COMPLETED" if not errors else "DEGRADED",
             "selected_catalysts": len(selected),
             "cards_recorded": len(extracted),
             "evidence_rejections": len(evidence_rejections),
             "assessments_recorded": len(assessments),
+            "playbook_validations_recorded": len(validations),
+            "forward_matches_processed": len(matches),
             "errors": errors,
-            "shadow_eligible": False,
+            "shadow_path_implemented": True,
             "execution_boundary": (
-                "Event Alpha V1 creates research playbooks only; a separate event-aware "
-                "replay certificate is required before Shadow"
+                "Only a chronologically held-out Event Playbook validation can compile a "
+                "one-shot, news-triggered strategy for isolated broker-free Shadow"
             ),
         }
 
@@ -1225,24 +1605,44 @@ class EventAlphaService:
             **self.summary(),
             "recent_cards": [
                 self._public_card(value) | {"status": value.get("status")}
-                for value in self.store.cards(limit=limit)
+                for value in self.store.cards(
+                    limit=limit,
+                    schema_version=EVENT_CARD_SCHEMA_VERSION,
+                )
             ],
-            "recent_assessments": self.store.assessments(limit=limit),
-            "recent_playbooks": self.store.playbooks(limit=limit),
+            "recent_assessments": self.store.assessments(
+                limit=limit,
+                schema_version=EVENT_ASSESSMENT_SCHEMA_VERSION,
+            ),
+            "recent_playbooks": self.store.playbooks(
+                limit=limit,
+                assessment_schema_version=EVENT_ASSESSMENT_SCHEMA_VERSION,
+            ),
+            "recent_validations": self.store.validations(limit=limit),
+            "recent_matches": self.store.matches(limit=limit),
         }
 
     def summary(self) -> dict[str, Any]:
         routing = self.gateway.status()
         provider = routing["routes"][LLMWorkload.EVENT_RESEARCH.value]
+        health = self.store.health_summary()
         return {
-            **self.store.health_summary(),
+            **health,
             "gate_version": EVENT_ALPHA_GATE_VERSION,
             "horizons": list(EVENT_ALPHA_HORIZONS),
             "maximum_documents_per_card": EVENT_ALPHA_MAX_DOCUMENTS,
             "minimum_analogs": self.minimum_analogs,
             "minimum_symbols": self.minimum_symbols,
             "predictive_ml_used": False,
-            "shadow_eligible": False,
+            "shadow_path_implemented": True,
+            "shadow_eligible": bool(
+                health["event_alpha_shadow_eligible_playbooks"]
+            ),
+            "source_policy": "NEWS_ONLY",
+            "episode_policy": "36-hour same-symbol/type headline cluster",
+            "holdout_minimum_events": EVENT_ALPHA_MINIMUM_HOLDOUT_EVENTS,
+            "holdout_minimum_symbols": EVENT_ALPHA_MINIMUM_HOLDOUT_SYMBOLS,
+            "auto_shadow_enabled": self.auto_shadow_enabled,
             "llm_workload": LLMWorkload.EVENT_RESEARCH.value,
             "llm_provider": provider,
             "llm_model": routing["providers"][provider]["model"],
@@ -1260,6 +1660,7 @@ class EventAlphaService:
             horizon_sessions=horizon,
             as_of=as_of,
         )
+        values = [value for value in values if self._card_is_news_based(value)]
         current_tags = set(card.get("generalized_tags_json") or [])
         ranked = []
         for value in values:
@@ -1281,6 +1682,464 @@ class EventAlphaService:
             reverse=True,
         )
         return ranked[:40]
+
+    def validate_playbooks(self, *, as_of: datetime) -> list[dict[str, Any]]:
+        if as_of.tzinfo is None:
+            raise ValueError("Event Playbook validation cutoff must be timezone-aware")
+        recorded: list[dict[str, Any]] = []
+        for playbook in self.store.playbooks(limit=500):
+            context = self.store.playbook_context(str(playbook["event_playbook_id"]))
+            if context is None:
+                continue
+            if context.get("assessment_schema_version") != EVENT_ASSESSMENT_SCHEMA_VERSION:
+                continue
+            if not self._card_is_news_based(
+                {"evidence_json": context.get("anchor_evidence_json")}
+            ):
+                continue
+            anchor_tags = set(context.get("anchor_tags_json") or [])
+            discovery_ids = {
+                str(value) for value in context.get("discovery_card_ids_json") or []
+            }
+            holdouts = []
+            for candidate in self.store.holdout_candidates(
+                playbook=context,
+                as_of=as_of,
+            ):
+                if str(candidate["event_card_id"]) in discovery_ids:
+                    continue
+                if not self._card_is_news_based(candidate):
+                    continue
+                similarity = self._tag_similarity(
+                    anchor_tags,
+                    set(candidate.get("generalized_tags_json") or []),
+                )
+                if similarity < EVENT_ALPHA_MATCH_THRESHOLD:
+                    continue
+                holdouts.append(candidate | {"similarity_score": similarity})
+            holdouts = holdouts[:40]
+            statistics = self._statistics(holdouts)
+            material = {
+                "schema_version": EVENT_ALPHA_VALIDATION_VERSION,
+                "event_playbook_id": context["event_playbook_id"],
+                "anchor_event_card_id": context["anchor_event_card_id"],
+                "holding_period_sessions": context["holding_period_sessions"],
+                "holdouts": [
+                    {
+                        "event_card_id": item["event_card_id"],
+                        "symbol": item["symbol"],
+                        "event_time": item["event_time"],
+                        "available_from": item["available_from"],
+                        "total_return": item["total_return"],
+                        "similarity_score": item["similarity_score"],
+                    }
+                    for item in holdouts
+                ],
+                "statistics": statistics,
+            }
+            input_sha256 = _canonical_hash(material)
+            prior = self.store.validation_for_input(
+                event_playbook_id=str(context["event_playbook_id"]),
+                input_sha256=input_sha256,
+            )
+            if prior is not None:
+                continue
+            gate = self._holdout_gate(statistics)
+            status = (
+                "SHADOW_ELIGIBLE"
+                if gate["eligible_for_event_shadow"]
+                else "INSUFFICIENT_HOLDOUT"
+                if gate["evidence_shortfalls"]
+                else "REJECTED"
+            )
+            value = self.store.record_validation(
+                {
+                    "event_validation_id": uuid7(),
+                    "event_playbook_id": context["event_playbook_id"],
+                    "as_of": as_of,
+                    "schema_version": EVENT_ALPHA_VALIDATION_VERSION,
+                    "status": status,
+                    "holdout_card_ids_json": [
+                        str(item["event_card_id"]) for item in holdouts
+                    ],
+                    "holdout_statistics_json": statistics,
+                    "gate_assessment_json": gate,
+                    "input_sha256": input_sha256,
+                    "code_git_sha": self.code_git_sha,
+                    "created_at": datetime.now(UTC),
+                }
+            )
+            recorded.append(value)
+            self._emit(
+                "event_alpha.playbook.validated.v1",
+                str(value["event_validation_id"]),
+                value,
+            )
+        return recorded
+
+    def activate_forward_matches(self, *, as_of: datetime) -> list[dict[str, Any]]:
+        if as_of.tzinfo is None:
+            raise ValueError("Event match cutoff must be timezone-aware")
+        results: list[dict[str, Any]] = []
+        for playbook in self.store.playbooks(limit=500):
+            playbook_id = str(playbook["event_playbook_id"])
+            validation = self.store.latest_validation(playbook_id)
+            if validation is None or validation.get("status") != "SHADOW_ELIGIBLE":
+                continue
+            proposal = dict(playbook.get("playbook_json") or {})
+            anchor = self.store.playbook_context(playbook_id)
+            if anchor is None:
+                continue
+            anchor_tags = set(anchor.get("anchor_tags_json") or [])
+            maximum_age = int(
+                dict(proposal.get("entry_confirmation") or {}).get(
+                    "maximum_event_age_hours",
+                    48,
+                )
+            )
+            for card in self.store.cards(limit=500):
+                if card.get("schema_version") != EVENT_CARD_SCHEMA_VERSION:
+                    continue
+                if card.get("status") != "COMPLETED":
+                    continue
+                if not self._card_is_news_based(card):
+                    continue
+                if card.get("availability_basis") != FORWARD_OBSERVED:
+                    continue
+                if card.get("direction") != EventDirection.BULLISH.value:
+                    continue
+                if card.get("event_type") != playbook.get("event_type"):
+                    continue
+                if _utc(card["available_from"]) < _utc(validation["created_at"]):
+                    continue
+                similarity = self._tag_similarity(
+                    anchor_tags,
+                    set(card.get("generalized_tags_json") or []),
+                )
+                if similarity < EVENT_ALPHA_MATCH_THRESHOLD:
+                    continue
+                existing = self.store.match_for_case(
+                    event_playbook_id=playbook_id,
+                    event_validation_id=str(validation["event_validation_id"]),
+                    event_card_id=str(card["event_card_id"]),
+                )
+                if existing is not None and existing.get("status") == "SHADOW_STARTED":
+                    continue
+                age = as_of - _utc(card["available_from"])
+                if age > timedelta(hours=maximum_age):
+                    results.append(
+                        self._record_match(
+                            playbook=playbook,
+                            validation=validation,
+                            card=card,
+                            similarity=similarity,
+                            status="EXPIRED",
+                            reason="Event exceeded the immutable maximum entry age",
+                        )
+                    )
+                    continue
+                if self.shadow is None or not self.auto_shadow_enabled:
+                    results.append(
+                        self._record_match(
+                            playbook=playbook,
+                            validation=validation,
+                            card=card,
+                            similarity=similarity,
+                            status="VALIDATED_MATCH",
+                            reason="Validated match awaits Event Shadow enablement",
+                        )
+                    )
+                    continue
+                try:
+                    strategy, report_id = self._compile_event_strategy(
+                        playbook=playbook,
+                        validation=validation,
+                        card=card,
+                        similarity=similarity,
+                    )
+                    self.shadow.adopt_strategy(
+                        strategy_spec_id=strategy.strategy_spec_id,
+                        validation_report_id=report_id,
+                        reason=(
+                            "Automatic Event Alpha Candidate Shadow admission from a "
+                            "chronologically held-out playbook certificate"
+                        ),
+                        approved_by="event-alpha-coordinator",
+                        admission_tier="CANDIDATE",
+                        author_kind="system",
+                        allow_operator_override=False,
+                    )
+                    deployment = self.shadow.start_deployment(
+                        strategy_spec_id=strategy.strategy_spec_id,
+                        symbol=str(card["symbol"]),
+                        initial_cash=Decimal("10000"),
+                        requested_by="event-alpha-coordinator",
+                        allow_operator_resume=False,
+                    )
+                except ValueError as exc:
+                    results.append(
+                        self._record_match(
+                            playbook=playbook,
+                            validation=validation,
+                            card=card,
+                            similarity=similarity,
+                            status="BLOCKED",
+                            reason=str(exc),
+                        )
+                    )
+                    continue
+                results.append(
+                    self._record_match(
+                        playbook=playbook,
+                        validation=validation,
+                        card=card,
+                        similarity=similarity,
+                        status="SHADOW_STARTED",
+                        reason="One-shot Event strategy entered isolated broker-free Shadow",
+                        strategy_spec_id=strategy.strategy_spec_id,
+                        shadow_deployment_id=str(deployment["shadow_deployment_id"]),
+                    )
+                )
+        return results
+
+    def _compile_event_strategy(
+        self,
+        *,
+        playbook: dict[str, Any],
+        validation: dict[str, Any],
+        card: dict[str, Any],
+        similarity: Decimal,
+    ) -> tuple[StrategySpec, str]:
+        if self.shadow is None:
+            raise ValueError("Event Shadow runtime is unavailable")
+        proposal = dict(playbook.get("playbook_json") or {})
+        entry = dict(proposal.get("entry_confirmation") or {})
+        material = {
+            "version": EVENT_ALPHA_STRATEGY_VERSION,
+            "event_playbook_id": playbook["event_playbook_id"],
+            "event_validation_id": validation["event_validation_id"],
+            "trigger_event_card_id": card["event_card_id"],
+            "trigger_catalyst_id": card["catalyst_id"],
+            "trigger_available_from": _utc(card["available_from"]).isoformat(),
+            "symbol": card["symbol"],
+            "event_type": card["event_type"],
+            "direction": card["direction"],
+            "holding_period_sessions": playbook["holding_period_sessions"],
+            "maximum_opening_gap_fraction": entry.get(
+                "maximum_opening_gap_fraction",
+                "0.10",
+            ),
+            "maximum_event_age_hours": entry.get("maximum_event_age_hours", 48),
+            "similarity_score": str(similarity),
+        }
+        digest = _canonical_hash(material)
+        strategy = self.research.record_strategy_spec(
+            StrategySpec(
+                strategy_spec_id=stable_uuid("event-alpha-strategy", digest),
+                name=(
+                    f"event_{str(playbook['event_type'])}_{str(card['symbol']).lower()}_"
+                    f"{str(playbook['event_playbook_id'])[:8]}"
+                ),
+                version=f"0.1.0+{digest[:12]}",
+                strategy_type="event_playbook",
+                timeframe="1Day",
+                feature_set_version=FEATURE_SET_VERSION,
+                parameters=material,
+                data_requirements={
+                    "minimum_bars": 22,
+                    "execution": (
+                        "news available at t; one-shot next-session DAY limit entry "
+                        "with deterministic open-price risk revalidation"
+                    ),
+                    "holding_period": "fixed_sessions",
+                    "holding_period_sessions": int(
+                        playbook["holding_period_sessions"]
+                    ),
+                    "position_style": "event",
+                    "shadow_deployable": True,
+                    "paper_deployable": False,
+                    "point_in_time_required": True,
+                    "event_alpha_strategy": True,
+                    "event_validation_id": validation["event_validation_id"],
+                    "trigger_event_card_id": card["event_card_id"],
+                },
+                code_sha256=digest,
+                created_at=datetime.now(UTC),
+            )
+        )
+        validated_ids = {"event_playbook": strategy.strategy_spec_id}
+        contract = validation_execution_contract(
+            validation_subject="event_playbook",
+            validated_strategy_spec_ids=validated_ids,
+            cost_model=self.shadow.costs,
+            risk_policy=self.shadow.sandbox_risk_policy(),
+            restriction_registry_version=self.shadow.restrictions.version,
+            initial_equity=Decimal("10000"),
+            strategy_spec=strategy,
+        )
+        report_material = {
+            "event_validation_id": validation["event_validation_id"],
+            "strategy_spec_id": strategy.strategy_spec_id,
+            "symbol": card["symbol"],
+            "execution_contract": contract,
+        }
+        report_hash = _canonical_hash(report_material)
+        report_id = stable_uuid("event-alpha-shadow-validation", report_hash)
+        gate = {
+            "version": EVENT_ALPHA_VALIDATION_VERSION,
+            "eligible_for_human_review": False,
+            "candidate_shadow": {
+                "eligible_for_human_review": True,
+                "status": "EVENT_HOLDOUT_ELIGIBLE",
+                "threshold_failures": [],
+                "evidence_shortfalls": [],
+            },
+            "event_validation_id": validation["event_validation_id"],
+            "paper_eligible": False,
+        }
+        values = {
+            "validation_report_id": report_id,
+            "symbol": str(card["symbol"]),
+            "timeframe": "1Day",
+            "strategy_types": ["event_playbook"],
+            "validation_subject": "event_playbook",
+            "validated_strategy_spec_ids": validated_ids,
+            "execution_contract_json": contract,
+            "execution_contract_sha256": _canonical_hash(contract),
+            "selection_metric": "event_holdout_median_return",
+            "train_bars": int(
+                dict(playbook.get("gate_assessment_json") or {}).get(
+                    "analog_count",
+                    self.minimum_analogs,
+                )
+            ),
+            "test_bars": int(
+                dict(validation.get("holdout_statistics_json") or {}).get(
+                    "analog_count",
+                    0,
+                )
+            ),
+            "step_bars": 1,
+            "embargo_bars": int(playbook["holding_period_sessions"]),
+            "aggregate_metrics": validation["holdout_statistics_json"],
+            "regime_metrics": {},
+            "robustness_metrics": {
+                "event_validation_id": validation["event_validation_id"],
+                "event_playbook_id": playbook["event_playbook_id"],
+                "holdout_card_ids": validation["holdout_card_ids_json"],
+                "trigger_event_card_id": card["event_card_id"],
+                "selection_search_trial_count": 1,
+            },
+            "gate_assessment": gate,
+            "report_hash": report_hash,
+            "code_git_sha": self.code_git_sha,
+            "created_at": datetime.now(UTC),
+        }
+        with self.store.engine.begin() as connection:
+            if self.store.engine.dialect.name == "postgresql":
+                statement: Any = (
+                    postgresql_insert(validation_reports)
+                    .values(**values)
+                    .on_conflict_do_nothing(index_elements=["validation_report_id"])
+                )
+            elif self.store.engine.dialect.name == "sqlite":
+                statement = (
+                    sqlite_insert(validation_reports)
+                    .values(**values)
+                    .on_conflict_do_nothing(index_elements=["validation_report_id"])
+                )
+            else:
+                raise RuntimeError(
+                    f"Unsupported SQL dialect: {self.store.engine.dialect.name}"
+                )
+            connection.execute(statement)
+        return strategy, report_id
+
+    def _record_match(
+        self,
+        *,
+        playbook: dict[str, Any],
+        validation: dict[str, Any],
+        card: dict[str, Any],
+        similarity: Decimal,
+        status: str,
+        reason: str,
+        strategy_spec_id: str | None = None,
+        shadow_deployment_id: str | None = None,
+    ) -> dict[str, Any]:
+        value = self.store.record_match(
+            {
+                "event_match_id": uuid7(),
+                "event_playbook_id": playbook["event_playbook_id"],
+                "event_validation_id": validation["event_validation_id"],
+                "event_card_id": card["event_card_id"],
+                "symbol": card["symbol"],
+                "similarity_score": similarity,
+                "status": status,
+                "reason": reason[:240],
+                "strategy_spec_id": strategy_spec_id,
+                "shadow_deployment_id": shadow_deployment_id,
+                "input_sha256": _canonical_hash(
+                    {
+                        "playbook": playbook["event_playbook_id"],
+                        "validation": validation["event_validation_id"],
+                        "card": card["event_card_id"],
+                        "similarity": similarity,
+                    }
+                ),
+                "created_at": datetime.now(UTC),
+            }
+        )
+        self._emit("event_alpha.match.recorded.v1", str(value["event_match_id"]), value)
+        return value
+
+    @staticmethod
+    def _tag_similarity(left: set[str], right: set[str]) -> Decimal:
+        union = left | right
+        if not union:
+            return Decimal("0")
+        return Decimal(len(left & right)) / Decimal(len(union))
+
+    @staticmethod
+    def _card_is_news_based(card: dict[str, Any]) -> bool:
+        evidence = dict(card.get("evidence_json") or {})
+        documents = list(evidence.get("documents") or [])
+        return bool(documents) and all(
+            item.get("source_kind") == "news" for item in documents
+        )
+
+    @staticmethod
+    def _holdout_gate(stats: dict[str, Any]) -> dict[str, Any]:
+        evidence_shortfalls = []
+        failures = []
+        if int(stats["analog_count"]) < EVENT_ALPHA_MINIMUM_HOLDOUT_EVENTS:
+            evidence_shortfalls.append(
+                f"Need at least {EVENT_ALPHA_MINIMUM_HOLDOUT_EVENTS} later holdout events"
+            )
+        if int(stats["unique_symbol_count"]) < EVENT_ALPHA_MINIMUM_HOLDOUT_SYMBOLS:
+            evidence_shortfalls.append(
+                f"Need at least {EVENT_ALPHA_MINIMUM_HOLDOUT_SYMBOLS} holdout symbols"
+            )
+        if not evidence_shortfalls:
+            if Decimal(str(stats["positive_rate"])) < Decimal("0.50"):
+                failures.append("holdout event win rate is below 50%")
+            if Decimal(str(stats["median_return"])) <= 0:
+                failures.append("holdout median return is not positive")
+            without_best = stats["mean_return_excluding_best"]
+            if without_best is None or Decimal(str(without_best)) <= 0:
+                failures.append("holdout return depends on the best event")
+            if Decimal(str(stats["profit_factor"])) < Decimal("1.10"):
+                failures.append("holdout profit factor is below 1.10")
+            if Decimal(str(stats["worst_return"])) < Decimal("-0.20"):
+                failures.append("worst holdout loss exceeds 20%")
+        return {
+            "version": EVENT_ALPHA_VALIDATION_VERSION,
+            "eligible_for_event_shadow": not evidence_shortfalls and not failures,
+            "evidence_shortfalls": evidence_shortfalls,
+            "threshold_failures": failures,
+            "minimum_positive_rate": "0.50",
+            "paper_eligible": False,
+        }
 
     def _assessment_material(
         self,
@@ -1337,18 +2196,16 @@ class EventAlphaService:
     def _validate_evidence_substance(evidence: dict[str, Any]) -> None:
         documents = list(evidence.get("documents") or [])
         if not documents:
-            raise ValueError("Event evidence has no usable documents")
-        header_only_sec = all(
-            item.get("provider") == "sec_edgar"
-            and item.get("source_kind") == "sec_filing"
-            and len(str(item.get("text") or "").split())
-            < EVENT_ALPHA_MIN_SEC_EVIDENCE_WORDS
+            raise ValueError("Event episode has no point-in-time news evidence")
+        if any(item.get("source_kind") != "news" for item in documents):
+            raise ValueError("Event Alpha accepts news evidence only")
+        if all(
+            len(str(item.get("text") or "").split())
+            < EVENT_ALPHA_MIN_NEWS_EVIDENCE_WORDS
             for item in documents
-        )
-        if header_only_sec:
+        ):
             raise ValueError(
-                "SEC filing body is unavailable; header-only evidence cannot support "
-                "event semantics"
+                "News episode has no substantive headline, summary, or body text"
             )
 
     @staticmethod
@@ -1430,10 +2287,12 @@ class EventAlphaService:
             "version": EVENT_ALPHA_GATE_VERSION,
             "eligible_for_playbook_candidate": not failures,
             "eligible_for_event_shadow": False,
+            "analog_count": int(stats["analog_count"]),
+            "unique_symbol_count": int(stats["unique_symbol_count"]),
             "failures": failures,
             "note": (
-                "Research candidate only. Event-aware walk-forward replay and an exact "
-                "Shadow execution certificate are not implemented in V1."
+                "Research candidate only until later chronological news events pass "
+                "the deterministic holdout gate and bind an exact Shadow certificate."
             ),
         }
 
@@ -1571,8 +2430,9 @@ class EventAlphaService:
             "characters; narrative between 10 and 2,000 characters; "
             "novelty_score, surprise_score, source_quality_score, and confidence from 0 to 1; "
             "one to twelve lowercase snake_case generalized_tags; expected_horizons selected "
-            "only from 1, 2, and 5; evidence_quotes containing exact citation_id and verbatim "
-            "quote substrings; and risk_factors. Generalize the economic mechanism across "
+            "only from 1, 2, 5, 10, and 20; evidence_quotes containing exact citation_id and "
+            "verbatim quote substrings; and risk_factors. The supplied documents are news "
+            "stories from one deduplicated event episode. Generalize the mechanism across "
             "issuers rather than memorizing the ticker. Do not propose an order, position "
             "size, risk override, or claim that an event predicts a return."
         )
@@ -1585,9 +2445,10 @@ class EventAlphaService:
             "current event with cited historical analogs, including differences and failed "
             "cases. Return exactly one JSON object with schema_version="
             f"{EVENT_ASSESSMENT_SCHEMA_VERSION}; recommendation RESEARCH_LONG, HOLD, or "
-            "ABSTAIN; selected_horizon_sessions 1, 2, or 5; confidence from 0 to 1; "
+            "ABSTAIN; selected_horizon_sessions 1, 2, 5, 10, or 20; confidence from 0 to 1; "
             "playbook_name; event_pattern; analogy_reasoning; entry_confirmation containing "
-            "maximum_opening_gap_fraction, minimum_relative_volume, and "
+            "maximum_opening_gap_fraction, minimum_relative_volume fixed to 0 because the "
+            "daily next-open contract cannot know same-session relative volume, and "
             "maximum_event_age_hours; nonempty invalidation_conditions; and cited_event_ids. "
             "Every cited ID must be an exact EVENT:<event_card_id> supplied in the input, and "
             "the current event must be cited. Prefer ABSTAIN when analogs conflict. Do not emit "

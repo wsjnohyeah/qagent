@@ -96,12 +96,16 @@ A Git commit cannot contain its own content-derived hash without changing that h
   abstains when
   independent evidence is missing, and exposes the full lineage as Decision Inspector graph
   `ai_infrastructure_graph@0.1.0`.
-- Event Alpha V1 adds a parallel case-based research lane for sparse catalysts. The LLM creates
+- Event Alpha is a parallel, news-first case-research lane for sparse events. The LLM creates
   citation-bound Event Cards and compares bounded cross-stock analogs; deterministic code owns
-  evidence cutoffs, 1/2/5-session outcomes, robustness statistics, and the research-candidate
-  gate. It trains no predictive event ML model. Event Playbooks are research-only and cannot
-  enter Shadow or Paper until an event-aware replay and exact execution certificate exist.
-  Production serves the current implementation at exact image `cda8ba5`, the feature is enabled, and Event Card
+  evidence cutoffs, 1/2/5/10/20-session outcomes, discovery and later chronological holdout
+  gates, match thresholds, execution certificates, and risk. It trains no predictive event ML
+  model. A Playbook becomes Candidate-Shadow eligible only after at least three later matching
+  events across two symbols pass the robust holdout gate. Only a bullish, future-first-seen
+  news Card observed after that current certificate can compile a one-shot StrategySpec for an
+  isolated `$10,000` Shadow sandbox. Historical replay and SEC/IR inputs cannot trigger this
+  path, and Event strategies cannot enter Paper. Production still serves the prior
+  research-only implementation at exact image `cda8ba5` until ADR 0048 is deployed. Event Card
   extraction plus analog synthesis use the dedicated Meta `event_research` route. At the latest
   inspection the case memory held 49 cards, 69 deterministic 1/2/5-session outcomes, and 23
   assessments. No Playbook exists: 22 assessments lacked enough analogs, while the first
@@ -985,7 +989,7 @@ year or more of data.
 | Event ingestion | `src/agentic_quant/document_ingestion.py` | raw-first document/fact ingestion and normalized events |
 | Document persistence | `src/agentic_quant/document_store.py` | immutable versions, entities, search, catalyst dedup, SEC facts |
 | Event operations | `src/agentic_quant/event_cli.py` | bounded provider ingestion, search, and health CLI |
-| Event Alpha | `src/agentic_quant/event_alpha.py` | citation-bound Event Cards, cross-stock case outcomes/statistics, LLM playbooks, and a hard research-only boundary |
+| Event Alpha | `src/agentic_quant/event_alpha.py` | news Event Episodes/Cards, cross-stock outcomes, LLM Playbooks, chronological validation, and future-match Candidate Shadow compilation |
 | Research engine | `src/agentic_quant/research.py` | point-in-time price/event features and cost-aware deterministic baselines |
 | Portfolio replay | `src/agentic_quant/backtest_engine.py` | event-driven cash/share accounting, fills, marks, costs, and liquidity caps |
 | Research persistence | `src/agentic_quant/research_store.py` | immutable evidence/features/specs/experiments/trades and as-of reads |
@@ -1001,7 +1005,7 @@ year or more of data.
 | ML training/registry | `src/agentic_quant/ml.py`, `configs/ml_policy.yaml` | PIT labels, logistic/stump walk-forward, calibration, drift, JSON registry, forecasts |
 | Strategy generator | `src/agentic_quant/strategy_generation.py` | evidence/forecast-bound LLM generation, adversarial critique, constrained research DSL |
 | Runtime worker | `src/agentic_quant/worker.py` | supervised shadow and autonomous research schedulers with persistent heartbeats |
-| Schema migrations | `migrations/` | Alembic schema history through Event Alpha revision `20260912_0038` |
+| Schema migrations | `migrations/` | Alembic schema history through news Event Playbook revision `20260916_0040` |
 
 ## Current executable risk baseline
 
@@ -2686,8 +2690,9 @@ Ordered near-term work:
 7. Extend fill realism and add an operator-selected provider-lag/sequence notification channel.
    Dead-letter inspection and single-event requeue are now confirmation-gated.
 8. Build a labeled corpus and measure catalyst-dedup precision/recall.
-9. Populate Event Alpha's case memory and design an event-specific walk-forward/execution
-   certificate before any Playbook can enter broker-free Shadow.
+9. Deploy and observe the news-first Event Playbook path. Accumulate genuine later holdouts and
+   verify that only a qualifying future-first-seen news match enters isolated Candidate Shadow;
+   Event strategies remain excluded from Paper.
 
 Historical note: C061 first replaced invalid one-session fallbacks with genuinely
 horizon-bound evidence. Candidate observation may collect broker-free forward evidence but
@@ -5564,6 +5569,50 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: allow autonomous case memory to grow. Implement and validate a
   separate event-aware replay/execution certificate before granting any Event Playbook Shadow
   eligibility; do not weaken the current gate merely to create output.
+
+### D055 — Event Alpha is news-first and may enter only isolated Candidate Shadow
+
+- Date: 2026-09-16 PDT.
+- The operator clarified that Event Alpha should learn relationships between material news and
+  later price behavior, retrieve comparable news cases, and form reusable Playbooks. SEC and IR
+  are not the main event source. Event hypotheses may be observed in Shadow once independently
+  validated, but the LLM must not size exposure or become risk authority.
+- Decision: accept news only; treat the existing 36-hour deduplicated catalyst as one Event
+  Episode; measure 1/2/5/10/20-session outcomes; require a separate chronological holdout of at
+  least three later events across two symbols; and allow only a bullish `FORWARD_FIRST_SEEN`
+  match created after the latest eligible certificate to compile a one-shot strategy. Reuse the
+  deterministic isolated-sandbox contract: `$10,000` starting value, 2% current-equity risk,
+  volatility-aware stop capped at 15%, 2R target, fixed-session exit, and `$8,800` failure floor.
+  Event strategies remain Candidate-only and Paper-ineligible. Formal record: ADR 0048.
+
+### C114 — `Build news-first Event Playbook Shadow`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-16 PDT.
+- User intent: implement the complete news → Event Card → price response → analog Playbook →
+  validation → forward Shadow pipeline, then deploy it.
+- Scope: restrict Event Alpha evidence and scheduling to news; upgrade Card/assessment schemas;
+  expand deterministic outcomes to 1/2/5/10/20 sessions; persist append-only Playbook validations
+  and forward matches; compile exact one-shot `event_playbook` StrategySpecs; integrate current-
+  certificate checks and catalyst lineage with isolated Shadow; expose validation/match APIs and
+  a readable Control Center flow; add migration 0040, ADR 0048, tests, and operator docs.
+- Architecture/decision impact: Event Alpha is no longer a research-only dead end. It can grant
+  Candidate Shadow authority only through code-computed later-event holdout evidence and a new
+  forward-observed news match. Historical provider replay cannot trigger. New evidence can
+  invalidate an older eligible certificate. The LLM remains semantic research authority only;
+  deterministic risk and every Paper/live boundary remain unchanged.
+- Validation: focused Event Alpha tests pass (12/12). `make release-check` passed Flake8,
+  strict mypy across 62 source files, all 233 tests, local and authenticated Docker doctors,
+  repository secret scan, image rebuild, PostgreSQL migration, and Alembic zero-drift check. A
+  fresh SQLite database also passed base-to-0040 upgrade, 0040-to-0039 downgrade, re-upgrade,
+  and zero-drift inspection. CI, deployment, and production runtime evidence remain pending.
+- Expected global state after commit: source head is migration `20260916_0040` with a news-only,
+  causally validated Event Candidate-Shadow path. Existing Event artifacts remain immutable but
+  old schemas cannot validate or trigger the new path. Production remains on `cda8ba5` until the
+  exact image passes CI and the guarded deploy.
+- Corrections/follow-ups: after push, record exact CI/image/backup/deploy results, production
+  schema and route state, new-schema Event counts, and whether any Playbook or match genuinely
+  qualifies. Do not manufacture a passing Event strategy as a deployment test.
 
 ## Template for future commit entries
 

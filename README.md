@@ -124,15 +124,14 @@ the unchanged `$80/day` combined project ceiling. The project monthly ceiling is
 Same-period consumption is reconstructed from durable reservations across policy versions, so
 deploying a higher ceiling does not reset money already spent that day.
 
-Event Alpha adds a parallel, LLM-led research lane for sparse catalysts without training a
-predictive event classifier. It turns citation-bound catalysts into generalized Event Cards,
-calculates cross-stock 1/2/5-session outcomes and outlier-resistant statistics in deterministic
-code, and lets the LLM propose a case-based Playbook or abstain. Same-symbol history is excluded
-from analogs; future outcomes, corrected historical documents, and header-only SEC evidence fail
-closed. Older actionable bullish cards are revisited when their bounded semantic analog set
-changes; unchanged cases do not spend again. A passing
-Playbook is a `RESEARCH_CANDIDATE` only: V1 has no Event Alpha Shadow or broker path. See ADR
-0044, ADR 0047, and `runbooks/event_alpha.md`.
+Event Alpha adds a parallel, news-first LLM research lane for sparse events without training a
+predictive event classifier. It clusters related news into Event Episodes, creates citation-bound
+Event Cards, and deterministically measures cross-stock 1/2/5/10/20-session outcomes. The LLM may
+propose a case-based Playbook or abstain; code alone runs the discovery gate and validates the
+Playbook on later unseen events. Only a current held-out certificate plus a future, first-seen
+news match can compile a one-shot strategy for isolated Candidate Shadow. Historical replay,
+SEC/IR records, Paper, Robinhood orders, and live money cannot trigger this path. See ADR 0044,
+ADR 0047, ADR 0048, and `runbooks/event_alpha.md`.
 
 Phase 4B exposes that gateway in the local Control Center. The operator can create immutable
 workload-routing revisions while preserving model, route, token, latency, source, and
@@ -661,6 +660,8 @@ AGENTS.md                mandatory operating rules for coding/deployment agents
 - `GET /v1/event-alpha/cards/{event_card_id}`
 - `GET /v1/event-alpha/assessments`
 - `GET /v1/event-alpha/playbooks`
+- `GET /v1/event-alpha/validations`
+- `GET /v1/event-alpha/matches`
 - `POST /v1/event-alpha/run` — development-only bounded research cycle
 - `GET /v1/research/experiments`
 - `GET /v1/research/experiments/{experiment_run_id}/events`

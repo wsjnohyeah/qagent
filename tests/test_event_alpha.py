@@ -14,6 +14,7 @@ from sqlalchemy import insert
 
 from agentic_quant.api import create_app
 from agentic_quant.config import Settings
+from agentic_quant.control_plane import SystemObjectStore
 from agentic_quant.database import catalysts
 from agentic_quant.document_store import DocumentStore
 from agentic_quant.domain import (
@@ -51,6 +52,8 @@ from agentic_quant.market_calendar import MarketSessionClock
 from agentic_quant.market_store import MarketDataStore
 from agentic_quant.migrations import upgrade_database
 from agentic_quant.research_store import ResearchStore
+from agentic_quant.risk import RestrictionRegistry, RiskPolicy
+from agentic_quant.shadow import ShadowRuntime
 
 
 ROOT = Path(__file__).parents[1]
@@ -81,7 +84,7 @@ class EventAlphaProvider:
                 "source_quality_score": "0.90",
                 "confidence": "0.72",
                 "generalized_tags": ["contract_award", "demand_acceleration"],
-                "expected_horizons": [1, 2, 5],
+                "expected_horizons": [1, 2, 5, 10, 20],
                 "evidence_quotes": [
                     {
                         "citation_id": document["citation_id"],
@@ -108,7 +111,7 @@ class EventAlphaProvider:
                 ),
                 "entry_confirmation": {
                     "maximum_opening_gap_fraction": "0.12",
-                    "minimum_relative_volume": "1.5",
+                    "minimum_relative_volume": "0",
                     "maximum_event_age_hours": 48,
                 },
                 "invalidation_conditions": [
@@ -222,6 +225,7 @@ def _record_card(
     *,
     symbol: str,
     event_time: datetime,
+    availability_basis: str = "PROVIDER_PUBLISHED_REPLAY",
 ) -> dict[str, object]:
     catalyst_id = uuid7()
     with store.engine.begin() as connection:
@@ -247,7 +251,7 @@ def _record_card(
             "symbol": symbol,
             "event_time": event_time,
             "available_from": event_time,
-            "availability_basis": "PROVIDER_PUBLISHED_REPLAY",
+            "availability_basis": availability_basis,
             "as_of": AS_OF,
             "schema_version": EVENT_CARD_SCHEMA_VERSION,
             "prompt_version": EVENT_CARD_PROMPT_VERSION,
@@ -263,8 +267,11 @@ def _record_card(
             "source_quality_score": Decimal("0.9"),
             "confidence": Decimal("0.7"),
             "generalized_tags_json": ["contract_award", "demand_acceleration"],
-            "expected_horizons_json": [1, 2, 5],
-            "evidence_json": {"fixture": True},
+            "expected_horizons_json": [1, 2, 5, 10, 20],
+            "evidence_json": {
+                "fixture": True,
+                "documents": [{"source_kind": "news"}],
+            },
             "card_json": {"narrative": "Fixture historical case"},
             "llm_invocation_id": None,
             "rejection_reason": None,
@@ -279,6 +286,7 @@ def _record_outcome(
     *,
     event_card_id: str,
     total_return: Decimal,
+    available_from: datetime | None = None,
 ) -> None:
     store.record_outcome(
         {
@@ -287,7 +295,7 @@ def _record_outcome(
             "horizon_sessions": 5,
             "entry_time": AS_OF - timedelta(days=20),
             "exit_time": AS_OF - timedelta(days=15),
-            "available_from": AS_OF - timedelta(days=15),
+            "available_from": available_from or AS_OF - timedelta(days=15),
             "entry_price": Decimal("100"),
             "exit_price": Decimal("100") * (Decimal("1") + total_return),
             "total_return": total_return,
@@ -301,7 +309,7 @@ def _record_outcome(
     )
 
 
-def _daily_bars(symbol: str, count: int = 10) -> tuple[StockBar, ...]:
+def _daily_bars(symbol: str, count: int = 22) -> tuple[StockBar, ...]:
     clock = MarketSessionClock("XNYS")
     sessions = clock.calendar.sessions_in_range("2026-08-03", "2026-09-01")[:count]
     price = Decimal("100")
@@ -384,7 +392,7 @@ def test_event_outcomes_use_first_causal_open_and_fixed_horizons(
         str(card["event_card_id"]), observed_as_of=AS_OF
     )
 
-    assert [item["horizon_sessions"] for item in outcomes] == [1, 2, 5]
+    assert [item["horizon_sessions"] for item in outcomes] == [1, 2, 5, 10, 20]
     assert outcomes[0]["entry_time"] == MarketSessionClock(
         "XNYS"
     ).daily_bar_session_open(bars[0].event_time)
@@ -449,9 +457,11 @@ def test_cross_symbol_analog_statistics_create_research_only_playbook(
         "eligible_for_playbook_candidate": True,
         "eligible_for_event_shadow": False,
         "failures": [],
+        "analog_count": 5,
+        "unique_symbol_count": 5,
         "note": (
-            "Research candidate only. Event-aware walk-forward replay and an exact "
-            "Shadow execution certificate are not implemented in V1."
+            "Research candidate only until later chronological news events pass "
+            "the deterministic holdout gate and bind an exact Shadow certificate."
         ),
     }
     playbooks = store.playbooks()
@@ -510,7 +520,7 @@ def test_outlier_driven_event_pattern_fails_deterministic_gate(
         analogy_reasoning="The aggregate mean is positive only because one case dominates.",
         entry_confirmation=EventEntryConfirmation(
             maximum_opening_gap_fraction=Decimal("0.1"),
-            minimum_relative_volume=Decimal("1.5"),
+            minimum_relative_volume=Decimal("0"),
             maximum_event_age_hours=24,
         ),
         invalidation_conditions=("The event thesis is contradicted.",),
@@ -546,7 +556,7 @@ def test_event_card_prompt_exposes_strict_mechanism_storage_bound(
 ) -> None:
     *_, service = _services(settings)
 
-    assert EVENT_CARD_SCHEMA_VERSION == "event_card@0.1.1"
+    assert EVENT_CARD_SCHEMA_VERSION == "event_card@0.2.0"
     assert "mechanism between 3 and 120 characters" in service._card_instructions()
 
 
@@ -592,7 +602,7 @@ def test_event_cycle_audits_unsafe_evidence_and_continues_to_next_card(
     assert "corrected backfilled" in rejected["rejection_reason"]
 
 
-def test_event_cycle_rejects_header_only_sec_evidence_without_llm_spend(
+def test_event_cycle_excludes_sec_evidence_from_news_research_without_llm_spend(
     settings: Settings,
 ) -> None:
     ledger, provider, store, _, service = _services(settings)
@@ -618,12 +628,11 @@ def test_event_cycle_rejects_header_only_sec_evidence_without_llm_spend(
     )
 
     assert result["status"] == "COMPLETED"
-    assert result["evidence_rejections"] == 1
+    assert result["selected_catalysts"] == 0
+    assert result["evidence_rejections"] == 0
     assert result["cards_recorded"] == 0
     assert provider.calls == []
-    rejected = store.cards(limit=1)[0]
-    assert rejected["status"] == "REJECTED"
-    assert "header-only evidence" in rejected["rejection_reason"]
+    assert store.cards(limit=1) == []
 
 
 def test_event_cycle_reassesses_an_older_card_when_analogs_change(
@@ -679,6 +688,132 @@ def test_event_cycle_reassesses_an_older_card_when_analogs_change(
         "PLAYBOOK_CANDIDATE",
     }
     assert len(store.playbooks()) == 1
+
+
+def test_news_playbook_requires_later_holdouts_before_forward_match(
+    settings: Settings,
+) -> None:
+    ledger, provider, store, research, service = _services(settings)
+    for index, (symbol, value) in enumerate(
+        zip(
+            ("AAPL", "MSFT", "NVDA", "DELL", "ORCL"),
+            (
+                Decimal("0.03"),
+                Decimal("0.02"),
+                Decimal("0.04"),
+                Decimal("0.01"),
+                Decimal("-0.005"),
+            ),
+            strict=True,
+        )
+    ):
+        discovery = _record_card(
+            store,
+            symbol=symbol,
+            event_time=AS_OF - timedelta(days=200 - index),
+        )
+        _record_outcome(
+            store,
+            event_card_id=str(discovery["event_card_id"]),
+            total_return=value,
+            available_from=AS_OF - timedelta(days=150),
+        )
+    anchor = _record_card(
+        store,
+        symbol="SMCI",
+        event_time=AS_OF - timedelta(days=100),
+    )
+    assessment = asyncio.run(
+        service.assess_card(
+            str(anchor["event_card_id"]),
+            as_of=AS_OF - timedelta(days=90),
+        )
+    )
+    assert assessment["status"] == "PLAYBOOK_CANDIDATE"
+    assert provider.calls == [EVENT_ASSESSMENT_PROMPT_VERSION]
+    assert service.validate_playbooks(as_of=AS_OF - timedelta(days=90))[0][
+        "status"
+    ] == "INSUFFICIENT_HOLDOUT"
+
+    for index, (symbol, value) in enumerate(
+        zip(
+            ("AVGO", "ANET", "VRT"),
+            (Decimal("0.04"), Decimal("0.02"), Decimal("0.01")),
+            strict=True,
+        )
+    ):
+        holdout = _record_card(
+            store,
+            symbol=symbol,
+            event_time=AS_OF - timedelta(days=80 - index * 10),
+        )
+        _record_outcome(
+            store,
+            event_card_id=str(holdout["event_card_id"]),
+            total_return=value,
+            available_from=AS_OF - timedelta(days=40 - index * 5),
+        )
+
+    validation = service.validate_playbooks(as_of=AS_OF)[0]
+    assert validation["status"] == "SHADOW_ELIGIBLE"
+    assert validation["holdout_statistics_json"]["analog_count"] == 3
+    assert store.health_summary()["event_alpha_shadow_eligible_playbooks"] == 1
+
+    objects = SystemObjectStore(ledger.engine, ledger)
+    objects.ensure_defaults()
+    shadow = ShadowRuntime(
+        ledger.engine,
+        research,
+        objects,
+        risk_policy=RiskPolicy.from_yaml(settings.risk_policy_path),
+        restrictions=RestrictionRegistry.from_yaml(
+            settings.restricted_securities_path
+        ),
+    )
+    service.shadow = shadow
+    service.auto_shadow_enabled = True
+
+    trigger_time = datetime.now(UTC) + timedelta(minutes=1)
+    trigger = _record_card(
+        store,
+        symbol="AAPL",
+        event_time=trigger_time,
+        availability_basis="FORWARD_FIRST_SEEN",
+    )
+    matches = service.activate_forward_matches(
+        as_of=trigger_time + timedelta(hours=1)
+    )
+    assert len(matches) == 1
+    assert matches[0]["event_card_id"] == trigger["event_card_id"]
+    assert matches[0]["status"] == "SHADOW_STARTED"
+    assert matches[0]["strategy_spec_id"] is not None
+    deployment = shadow.deployment(str(matches[0]["shadow_deployment_id"]))
+    assert deployment["status"] == "ACTIVE"
+    assert deployment["admission_tier"] == "CANDIDATE"
+    assert deployment["strategy_type"] == "event_playbook"
+
+    for index, symbol in enumerate(("AMD", "MU", "ARM", "MRVL")):
+        negative = _record_card(
+            store,
+            symbol=symbol,
+            event_time=AS_OF - timedelta(days=35 - index * 5),
+        )
+        _record_outcome(
+            store,
+            event_card_id=str(negative["event_card_id"]),
+            total_return=Decimal("-0.10"),
+            available_from=AS_OF - timedelta(days=10 - index),
+        )
+    invalidated = service.validate_playbooks(as_of=AS_OF + timedelta(days=1))[0]
+    assert invalidated["status"] == "REJECTED"
+    assert store.health_summary()["event_alpha_shadow_eligible_playbooks"] == 0
+    adoption = shadow.adoption(str(deployment["adoption_id"]))
+    with pytest.raises(ValueError, match="stale or no longer Shadow eligible"):
+        shadow.adoption_preview(
+            strategy_spec_id=str(matches[0]["strategy_spec_id"]),
+            validation_report_id=str(adoption["validation_report_id"]),
+            admission_tier="CANDIDATE",
+        )
 
 
 def test_unprocessed_event_candidates_are_balanced_across_symbols(

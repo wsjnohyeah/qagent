@@ -931,6 +931,75 @@ event_alpha_playbooks = Table(
     Column("created_at", DateTime(timezone=True), nullable=False, index=True),
 )
 
+event_alpha_validations = Table(
+    "event_alpha_validations",
+    metadata,
+    Column("event_validation_id", String(36), primary_key=True),
+    Column(
+        "event_playbook_id",
+        String(36),
+        ForeignKey("event_alpha_playbooks.event_playbook_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("as_of", DateTime(timezone=True), nullable=False, index=True),
+    Column("schema_version", String(80), nullable=False),
+    Column("status", String(40), nullable=False, index=True),
+    Column("holdout_card_ids_json", JSON, nullable=False),
+    Column("holdout_statistics_json", JSON, nullable=False),
+    Column("gate_assessment_json", JSON, nullable=False),
+    Column("input_sha256", String(64), nullable=False, index=True),
+    Column("code_git_sha", String(64), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+    UniqueConstraint(
+        "event_playbook_id",
+        "schema_version",
+        "input_sha256",
+        name="uq_event_alpha_validations_input",
+    ),
+)
+
+event_alpha_matches = Table(
+    "event_alpha_matches",
+    metadata,
+    Column("event_match_id", String(36), primary_key=True),
+    Column(
+        "event_playbook_id",
+        String(36),
+        ForeignKey("event_alpha_playbooks.event_playbook_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "event_validation_id",
+        String(36),
+        ForeignKey("event_alpha_validations.event_validation_id"),
+        nullable=False,
+        index=True,
+    ),
+    Column(
+        "event_card_id",
+        String(36),
+        ForeignKey("event_alpha_cards.event_card_id"),
+        nullable=False,
+        index=True,
+    ),
+    Column("symbol", String(24), nullable=False, index=True),
+    Column("similarity_score", Numeric(8, 6), nullable=False),
+    Column("status", String(40), nullable=False, index=True),
+    Column("reason", String(240), nullable=False),
+    Column("strategy_spec_id", String(36), nullable=True, index=True),
+    Column("shadow_deployment_id", String(36), nullable=True, index=True),
+    Column("input_sha256", String(64), nullable=False, index=True),
+    Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+    UniqueConstraint(
+        "event_playbook_id",
+        "event_validation_id",
+        "event_card_id",
+        name="uq_event_alpha_matches_case",
+    ),
+)
+
 llm_routing_revisions = Table(
     "llm_routing_revisions",
     metadata,
@@ -1570,6 +1639,12 @@ shadow_signal_candidates = Table(
     Column("decision_bar_id", String(36), nullable=False, index=True),
     Column("symbol", String(24), nullable=False, index=True),
     Column("action", String(16), nullable=False),
+    Column(
+        "catalyst_id",
+        String(64),
+        nullable=False,
+        server_default="NOT_APPLICABLE_BASELINE",
+    ),
     Column("as_of", DateTime(timezone=True), nullable=False),
     Column("planned_entry", Numeric(20, 8), nullable=False),
     Column("invalidation", Numeric(20, 8), nullable=False),

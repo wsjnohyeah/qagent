@@ -16,6 +16,8 @@ from agentic_quant.config import TradingMode
 from agentic_quant.control_plane import SystemObjectStore
 from agentic_quant.data_quality import DataQualityError, MarketDataQualityService
 from agentic_quant.database import (
+    event_alpha_cards,
+    event_alpha_validations,
     ledger_events,
     shadow_deployments,
     shadow_events,
@@ -36,6 +38,7 @@ from agentic_quant.domain import (
     CorporateActionType,
     Direction,
     FeatureSnapshot,
+    PointInTimeFeatureSnapshot,
     RiskEvaluationContext,
     RiskDecision,
     SignalAction,
@@ -279,10 +282,39 @@ class ShadowRuntime:
                 f"Strategy is not eligible for {normalized_tier.lower()} Shadow "
                 "review under the deterministic gate"
             )
-        if str(report.validation_subject) != "static_strategy":
+        validation_subject = str(report.validation_subject)
+        if validation_subject not in {"static_strategy", "event_playbook"}:
             raise ValueError(
                 "An adaptive-selector report cannot authorize one static strategy"
             )
+        if validation_subject == "event_playbook" and normalized_tier != "CANDIDATE":
+            raise ValueError("Event Playbooks are eligible only for Candidate Shadow")
+        if validation_subject == "event_playbook":
+            robustness = dict(report.robustness_metrics or {})
+            playbook_id = str(robustness.get("event_playbook_id") or "")
+            event_validation_id = str(
+                robustness.get("event_validation_id") or ""
+            )
+            if not playbook_id or not event_validation_id:
+                raise ValueError("Event validation lineage is incomplete")
+            with self.engine.connect() as connection:
+                latest_event_validation = connection.execute(
+                    select(event_alpha_validations)
+                    .where(
+                        event_alpha_validations.c.event_playbook_id == playbook_id
+                    )
+                    .order_by(event_alpha_validations.c.created_at.desc())
+                    .limit(1)
+                ).one_or_none()
+            if (
+                latest_event_validation is None
+                or str(latest_event_validation.event_validation_id)
+                != event_validation_id
+                or str(latest_event_validation.status) != "SHADOW_ELIGIBLE"
+            ):
+                raise ValueError(
+                    "Event Playbook validation is stale or no longer Shadow eligible"
+                )
         validated_ids = dict(report.validated_strategy_spec_ids or {})
         if validated_ids.get(str(spec.strategy_type)) != strategy_spec_id:
             raise ValueError(
@@ -303,7 +335,7 @@ class ShadowRuntime:
         if strategy_spec is None:
             raise ValueError("Strategy specification not found")
         expected_contract = validation_execution_contract(
-            validation_subject="static_strategy",
+            validation_subject=validation_subject,
             validated_strategy_spec_ids={
                 str(strategy_spec.strategy_type): strategy_spec_id
             },
@@ -326,38 +358,43 @@ class ShadowRuntime:
             )
         if str(report.execution_contract_sha256) != _canonical_hash(expected_contract):
             raise ValueError("Validation execution contract hash is invalid")
-        current_policy = (
-            load_promotion_gate_policy(self._promotion_policy_path)
-            if self._promotion_policy_path is not None
-            else self._promotion_policy
-        )
-        if gate.get("policy_sha256") != promotion_policy_sha256(current_policy):
-            raise ValueError(
-                "Validation admission assessment is stale under the current "
-                "promotion policy"
+        if validation_subject == "static_strategy":
+            current_policy = (
+                load_promotion_gate_policy(self._promotion_policy_path)
+                if self._promotion_policy_path is not None
+                else self._promotion_policy
             )
-        current_trial_count = self.research_store.strategy_trial_count(
-            symbol=str(report.symbol),
-            timeframe=str(report.timeframe),
-            holding_period_sessions=strategy_holding_period_sessions(
-                strategy_spec.data_requirements
-            ),
-        )
-        assessed_trial_count = int(
-            dict(report.robustness_metrics or {}).get(
-                "selection_search_trial_count",
-                0,
-            )
-        )
-        if require_current_search_count and assessed_trial_count != current_trial_count:
-            raise ValueError(
-                "Validation admission assessment is stale under the current "
-                "research search count"
-            )
-        universe_admission = (
-            self._universe_admission(
+            if gate.get("policy_sha256") != promotion_policy_sha256(current_policy):
+                raise ValueError(
+                    "Validation admission assessment is stale under the current "
+                    "promotion policy"
+                )
+            current_trial_count = self.research_store.strategy_trial_count(
                 symbol=str(report.symbol),
-                validation_report_id=validation_report_id,
+                timeframe=str(report.timeframe),
+                holding_period_sessions=strategy_holding_period_sessions(
+                    strategy_spec.data_requirements
+                ),
+            )
+            assessed_trial_count = int(
+                dict(report.robustness_metrics or {}).get(
+                    "selection_search_trial_count",
+                    0,
+                )
+            )
+            if require_current_search_count and assessed_trial_count != current_trial_count:
+                raise ValueError(
+                    "Validation admission assessment is stale under the current "
+                    "research search count"
+                )
+        universe_admission = (
+            (
+                self._event_universe_admission(symbol=str(report.symbol))
+                if validation_subject == "event_playbook"
+                else self._universe_admission(
+                    symbol=str(report.symbol),
+                    validation_report_id=validation_report_id,
+                )
             )
             if require_current_universe_authority
             else None
@@ -376,6 +413,23 @@ class ShadowRuntime:
             "universe_admission": universe_admission,
             "live_broker_effect": False,
         }
+
+    def _event_universe_admission(self, *, symbol: str) -> dict[str, Any]:
+        normalized_symbol = symbol.upper()
+        for slug, authority in (
+            ("trading-universe", "MANUAL_TRADING_UNIVERSE"),
+            (AUTO_TRADING_POOL_SLUG, "SCANNER_LLM_TRADING_POOL"),
+        ):
+            value = self.objects.get_list(slug)
+            if value is not None and normalized_symbol in {
+                str(item).upper() for item in value["members"]
+            }:
+                return {
+                    "authority": authority,
+                    "list_slug": slug,
+                    "list_revision": int(value["current_revision"]),
+                }
+        raise ValueError("Event Shadow symbol is outside every governed trading pool")
 
     def _universe_admission(
         self,
@@ -2081,8 +2135,12 @@ class ShadowRuntime:
             as_of=decision_bar.available_from,
             bars=tuple(bar for bar in bars if bar.event_time <= decision_bar.event_time),
         )
-        action = self._signal_action(refreshed, snapshot.values)
         decision_completed_at = self._now()
+        action, signal_time, catalyst_id = self._signal_decision(
+            refreshed,
+            snapshot,
+            observed_at=decision_completed_at,
+        )
         candidate = decision = plan = evaluation_context = None
         earliest_execution_at: datetime | None = None
         pending_activation: dict[str, Any] | None = None
@@ -2138,11 +2196,27 @@ class ShadowRuntime:
                 decision_bar_id=decision_bar.bar_id,
                 snapshot_id=snapshot.feature_snapshot_id,
                 snapshot_values=snapshot.values,
-                signal_time=snapshot.as_of,
+                signal_time=signal_time,
+                catalyst_id=catalyst_id,
                 evaluation_time=decision_completed_at,
                 earliest_execution_at=earliest_execution_at,
                 exit_time=expiry,
-                planned_entry=decision_bar.close,
+                planned_entry=(
+                    decision_bar.close
+                    * (
+                        _ONE
+                        + Decimal(
+                            str(
+                                dict(refreshed.get("parameters_json") or {}).get(
+                                    "maximum_opening_gap_fraction",
+                                    "0",
+                                )
+                            )
+                        )
+                    )
+                    if str(refreshed["strategy_type"]) == "event_playbook"
+                    else decision_bar.close
+                ),
                 known_liquidity_volume=decision_bar.volume,
                 market_data_healthy=market_data_healthy,
             )
@@ -2176,6 +2250,7 @@ class ShadowRuntime:
                         decision_bar_id=decision_bar.bar_id,
                         symbol=candidate.symbol,
                         action=action.value,
+                        catalyst_id=candidate.catalyst_id,
                         as_of=candidate.as_of,
                         planned_entry=candidate.planned_entry,
                         invalidation=candidate.invalidation,
@@ -2470,6 +2545,7 @@ class ShadowRuntime:
                     shadow_trade_plans,
                     shadow_signal_candidates.c.feature_snapshot_id,
                     shadow_signal_candidates.c.as_of.label("signal_as_of"),
+                    shadow_signal_candidates.c.catalyst_id,
                     shadow_signal_candidates.c.decision_bar_id,
                     shadow_risk_decisions.c.evaluation_context_json,
                 )
@@ -2584,7 +2660,7 @@ class ShadowRuntime:
                 strategy_version=str(deployment["strategy_version"]),
                 as_of=signal_as_of,
                 feature_snapshot_id=str(pending["feature_snapshot_id"]),
-                catalyst_id="NOT_APPLICABLE_BASELINE",
+                catalyst_id=str(pending["catalyst_id"]),
                 planned_entry=(
                     limit_fill[0]
                     if limit_fill is not None
@@ -2612,8 +2688,12 @@ class ShadowRuntime:
                 policy=policy,
                 restrictions=self.restrictions,
                 context=RiskEvaluationContext(
-                    catalyst_required=False,
-                    catalyst_verified=False,
+                    catalyst_required=(
+                        str(pending["catalyst_id"]) != "NOT_APPLICABLE_BASELINE"
+                    ),
+                    catalyst_verified=(
+                        str(pending["catalyst_id"]) != "NOT_APPLICABLE_BASELINE"
+                    ),
                     restriction_status_known=True,
                     liquidity_confirmed=int(
                         context.get("liquidity_source_volume") or 0
@@ -3510,6 +3590,7 @@ class ShadowRuntime:
         snapshot_id: str,
         snapshot_values: dict[str, Any],
         signal_time: datetime,
+        catalyst_id: str,
         evaluation_time: datetime,
         earliest_execution_at: datetime,
         exit_time: datetime,
@@ -3544,11 +3625,15 @@ class ShadowRuntime:
             candidate_id=uuid7(),
             symbol=str(deployment["symbol"]),
             direction=Direction.LONG,
-            setup_type=f"baseline_shadow:{deployment['strategy_type']}",
+            setup_type=(
+                "event_shadow:validated_playbook"
+                if str(deployment["strategy_type"]) == "event_playbook"
+                else f"baseline_shadow:{deployment['strategy_type']}"
+            ),
             strategy_version=str(deployment["strategy_version"]),
             as_of=signal_time,
             feature_snapshot_id=snapshot_id,
-            catalyst_id="NOT_APPLICABLE_BASELINE",
+            catalyst_id=catalyst_id,
             planned_entry=planned_entry,
             invalidation=invalidation,
             targets=(target,),
@@ -3567,8 +3652,8 @@ class ShadowRuntime:
             quote_age_seconds=0,
         )
         context = RiskEvaluationContext(
-            catalyst_required=False,
-            catalyst_verified=False,
+            catalyst_required=catalyst_id != "NOT_APPLICABLE_BASELINE",
+            catalyst_verified=catalyst_id != "NOT_APPLICABLE_BASELINE",
             restriction_status_known=True,
             liquidity_confirmed=known_liquidity_volume > 0,
             market_data_healthy=market_data_healthy,
@@ -3823,15 +3908,68 @@ class ShadowRuntime:
         realized = Decimal(str(deployment["realized_pnl"])) + pnl_delta
         return values, portfolio.cash, realized
 
-    @staticmethod
-    def _signal_action(
+    def _signal_decision(
+        self,
         deployment: dict[str, Any],
-        values: dict[str, Any],
-    ) -> SignalAction:
-        return strategy_signal_action(
-            strategy_type=str(deployment["strategy_type"]),
-            parameters=dict(deployment.get("parameters_json") or {}),
-            values=dict(values),
+        snapshot: PointInTimeFeatureSnapshot,
+        *,
+        observed_at: datetime,
+    ) -> tuple[SignalAction, datetime, str]:
+        if str(deployment["strategy_type"]) != "event_playbook":
+            return (
+                strategy_signal_action(
+                    strategy_type=str(deployment["strategy_type"]),
+                    parameters=dict(deployment.get("parameters_json") or {}),
+                    values=dict(snapshot.values),
+                ),
+                snapshot.as_of,
+                "NOT_APPLICABLE_BASELINE",
+            )
+        parameters = dict(deployment.get("parameters_json") or {})
+        event_card_id = str(parameters.get("trigger_event_card_id") or "")
+        catalyst_id = str(parameters.get("trigger_catalyst_id") or "")
+        if not event_card_id or not catalyst_id:
+            raise ValueError("Event strategy is missing immutable trigger lineage")
+        with self.engine.connect() as connection:
+            card = connection.execute(
+                select(event_alpha_cards).where(
+                    event_alpha_cards.c.event_card_id == event_card_id
+                )
+            ).one_or_none()
+            attempted = int(
+                connection.execute(
+                    select(func.count())
+                    .select_from(shadow_signal_candidates)
+                    .where(
+                        shadow_signal_candidates.c.shadow_deployment_id
+                        == deployment["shadow_deployment_id"]
+                    )
+                ).scalar_one()
+            )
+        if card is None:
+            raise ValueError("Event strategy trigger card is missing")
+        available_from = _utc(card.available_from)
+        assert available_from is not None
+        maximum_age = timedelta(
+            hours=int(parameters.get("maximum_event_age_hours", 48))
+        )
+        eligible = (
+            attempted == 0
+            and str(card.status) == "COMPLETED"
+            and str(card.availability_basis) == "FORWARD_FIRST_SEEN"
+            and str(card.direction) == "BULLISH"
+            and str(card.direction) == str(parameters.get("direction"))
+            and str(card.event_type) == str(parameters.get("event_type"))
+            and str(card.catalyst_id) == catalyst_id
+            and available_from.isoformat()
+            == str(parameters.get("trigger_available_from"))
+            and str(card.symbol) == str(deployment["symbol"])
+            and available_from <= observed_at <= available_from + maximum_age
+        )
+        return (
+            SignalAction.LONG if eligible else SignalAction.FLAT,
+            available_from,
+            catalyst_id,
         )
 
     def _next_event_sequence(self, deployment_id: str) -> int:

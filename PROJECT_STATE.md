@@ -80,14 +80,14 @@
   retires at a `$8,800` marked-value floor. Explicit commission is zero while spread,
   slippage, impact, liquidity, and gap behavior remain modeled. The legacy migration is
   confirmation-gated and a deployment-time exposure boundary can stage Monday activation.
-- Production now runs the bounded Event Alpha V1 from ADRs 0044 and 0045. A bounded
-  coordinator sidecar creates citation-bound Event Cards, deterministic 1/2/5-session outcomes,
-  cross-stock analog statistics, LLM case assessments, and immutable research Playbooks without
-  a predictive event ML model. Unchanged case sets are idempotent for LLM spend and a sidecar
-  failure cannot interrupt Technical Alpha. Event Playbooks are research candidates only: no
-  Event Alpha replay certificate, Shadow adapter, Paper path, or runtime enablement exists yet.
-  Event Alpha schema `20260912_0038` and the Event Alpha UI/API are deployed with
-  `EVENT_ALPHA_ENABLED=true`. A dedicated
+- Production currently runs the bounded Event Alpha V1 from ADRs 0044–0047. Local source now
+  implements ADR 0048: Event Alpha accepts news only, clusters a 36-hour Event Episode, measures
+  deterministic 1/2/5/10/20-session outcomes, validates Playbooks on later unseen events, and
+  can compile a qualifying future-news match into one immutable Candidate strategy in an
+  isolated Shadow sandbox. Historical replay cannot trigger, the latest validation certificate
+  is authoritative, and Event strategies cannot enter Paper. Schema head `20260916_0040`, the
+  Event UI, and Shadow adapter await this change's guarded production rollout.
+  A dedicated
   `event_research` workload routes only Event Card extraction and analog synthesis to Meta
   `muse-spark-1.3`, caps that workload at `$40/day`, and shares the `$80/day` Meta/project
   ceiling with technical research. Production now runs `event_card@0.1.1`, states the mechanism
@@ -98,9 +98,10 @@
   two cards were processed, and two changed older cases were re-evaluated as
   `INSUFFICIENT_ANALOGS`. The `$1,400` monthly project ceiling remains deployed and same-period
   usage is reconstructed from the reservation ledger rather than reset on a policy change.
-- Event Alpha source now rejects header-only SEC evidence before paid inference and fairly
+- Deployed Event Alpha rejects header-only SEC evidence before paid inference and fairly
   re-evaluates older actionable bullish cards when later backfill changes their bounded analog
-  set. Its five-analog/three-symbol and robustness thresholds remain unchanged: a current
+  set. The pending news-only source replaces SEC/IR filtering with source-level exclusion. Its
+  five-analog/three-symbol discovery threshold remains unchanged: a current
   production audit found that all 24 numeric-only passes were low-information `other`/`UNKNOWN`
   filing stubs, while assessments of substantive bullish events either lacked enough comparable cases or had
   adverse analog returns. No Playbook or execution authority is manufactured to satisfy an
@@ -111,7 +112,7 @@
   after which the previously approved autonomous Shadow/Paper state was restored through an
   audited `runtime.resume` action. `LIVE_TRADING_ENABLED` remains false and Event Playbooks
   remain ineligible for Shadow or Paper.
-- Production and source are on migration `20260913_0039`. It removes a duplicated volatility-geometry
+- Production is on migration `20260913_0039`; local source head is `20260916_0040`. Revision 0039 removes a duplicated volatility-geometry
   suffix from per-signal risk-policy lineage and expands the persisted Shadow policy-version
   field to 240 characters. The pre-repair worker exposed the former 80-character limit as 37
   append-only deployment failures rather than creating partial trade plans; post-repair ticks
@@ -164,7 +165,8 @@
 - Immutable evidence packets, point-in-time feature snapshots, strategy specifications,
   experiment runs, backtest trades, corporate actions, historical universe membership,
   feature parity checks, walk-forward reports, and Event Alpha case memory are stored through
-  Alembic revision `20260913_0039`, including exact validation and ML-training contracts, normalized Paper
+  Alembic revision `20260916_0040`, including exact Event Playbook validation/match lineage,
+  validation and ML-training contracts, normalized Paper
   order legs, shadow risk lineage, fenced workflow
   attempts, generation-attempt audit, runtime leases, and the event outbox.
 - The Phase 3 runner provides buy-and-hold, long/cash momentum, and long/cash
@@ -367,11 +369,11 @@
   commit-SHA image with matching embedded/OCI source provenance; deployment rejects mismatches.
 - The source now batches large SEC company-fact writes and resolves their durable IDs in
   bounded queries after a production AAPL response with 5,291 facts exposed PostgreSQL's
-  per-statement parameter ceiling. The regression suite contains 227 tests.
+  per-statement parameter ceiling. The regression suite contains 233 tests.
 - The last complete release audit passed lint, strict typing, the full test suite,
   authenticated local and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, fresh schema
   upgrade and PostgreSQL schema-drift checks. The current source migration head is
-  `20260913_0039`; production is on the same revision.
+  `20260916_0040`; production remains on `20260913_0039` until the guarded rollout.
 - A local real read-only dynamic scan merged 258 source names, retained 40 review candidates
   and 20 deep-research stocks, included SNDK, and excluded sampled leveraged/single-stock
   ETFs. Its budgeted Meta re-rank cost an estimated `$0.008322` and moved SNDK from
@@ -498,9 +500,9 @@
    rather than configured spread, and symbol-change/delisting replay.
 7. Add an operator-selected provider-lag/sequence-gap notification channel; dead-letter replay
    is now inspectable and confirmation-gated in the Control Center.
-8. Populate Event Alpha's historical case memory under the existing USD budget, then specify and
-   implement an event-aware walk-forward/execution certificate before considering any broker-free
-   Shadow admission. Do not translate a Playbook directly into a technical `StrategySpec`.
+8. Deploy and observe ADR 0048: rebuild news-only current-schema Event Cards, accumulate later
+   holdout certificates, and verify that only a qualifying future-first-seen news match enters
+   isolated Candidate Shadow. Do not enroll an Event strategy in Paper.
 
 ## Blocked
 
@@ -575,6 +577,9 @@
 - ADR 0047: route every active LLM workload to Meta, reject inactive-provider overrides,
   prefilter header-only SEC Event evidence without provider spend, and fairly revisit older
   actionable cards when their semantic analog set changes without weakening the Playbook gate.
+- ADR 0048: make Event Alpha news-only, extend outcomes to 1/2/5/10/20 sessions, require later
+  chronological holdout validation, and allow only future-first-seen matches to enter isolated
+  Candidate Shadow under deterministic risk. Paper remains prohibited.
 - ADR 0024: isolate Alpaca Paper behind an exact host, durable idempotent intents, account and
   risk reconciliation, and per-deployment administrator confirmation; retain no live path.
 - ADR 0025: reject Shadow certificates at the Paper boundary; require a separately validated

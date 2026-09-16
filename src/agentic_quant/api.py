@@ -407,6 +407,11 @@ def create_app(
         promotion_policy_path=app_settings.research_promotion_policy_path,
         new_exposure_not_before=app_settings.shadow_new_exposure_not_before,
     )
+    event_alpha.shadow = shadow
+    event_alpha.auto_shadow_enabled = (
+        app_settings.event_alpha_enabled
+        and app_settings.coordinator_auto_shadow_enabled
+    )
     resolved_paper_factory = paper_broker_factory
     if (
         resolved_paper_factory is None
@@ -1890,6 +1895,18 @@ def create_app(
         limit: int = Query(default=100, ge=1, le=500),
     ) -> list[dict[str, Any]]:
         return event_alpha_store.playbooks(limit=limit)
+
+    @application.get("/v1/event-alpha/validations")
+    def event_alpha_validations(
+        limit: int = Query(default=100, ge=1, le=500),
+    ) -> list[dict[str, Any]]:
+        return event_alpha_store.validations(limit=limit)
+
+    @application.get("/v1/event-alpha/matches")
+    def event_alpha_matches(
+        limit: int = Query(default=100, ge=1, le=500),
+    ) -> list[dict[str, Any]]:
+        return event_alpha_store.matches(limit=limit)
 
     @application.post("/v1/event-alpha/run")
     async def event_alpha_run(payload: EventAlphaRunRequest) -> dict[str, Any]:

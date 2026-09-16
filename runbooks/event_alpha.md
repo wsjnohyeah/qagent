@@ -2,101 +2,97 @@
 
 ## Purpose and authority boundary
 
-Event Alpha is the LLM-led, case-based research lane for sparse market events. It runs beside
-the existing ML + LLM technical lane. V1 produces Event Cards, realized case outcomes, analog
-assessments, and immutable research playbooks. It does not train a predictive event model and
-cannot enter Shadow, Paper, Robinhood order submission, or live trading.
+Event Alpha is the news-first, LLM-led case-research lane for sparse market events. It runs
+beside the ML + LLM technical lane. It creates point-in-time Event Episodes and Cards, measures
+their later returns, proposes cross-stock Playbooks, validates those Playbooks on later unseen
+events, and can admit an exact future-news match to isolated broker-free Candidate Shadow.
 
-The LLM owns semantic normalization and the research hypothesis. Deterministic code owns time
-cutoffs, evidence selection, returns, robustness statistics, the research-candidate gate, and
-all existing risk boundaries.
+The LLM owns semantic normalization, analogy, and the hypothesis. Deterministic code owns source
+selection, time cutoffs, returns, validation, match thresholds, position sizing, restrictions,
+stops, targets, idempotency, and the sandbox circuit breaker. Event strategies cannot enter
+Paper, Robinhood order submission, or live trading.
 
 ## Enablement
 
-Event Alpha is safe-off by default. When enabled, both Event Card extraction and analog
-assessment use the dedicated `event_research` workload, routed to Meta Muse Spark with a
-`$40/day` workload ceiling. All other active LLM workloads also route to Meta. The Meta provider
-and project-wide ceilings are therefore both `$80/day`, while the `$1,400/month` project ceiling
-still applies.
+Event Alpha is safe-off by default. When enabled, Card extraction and analog synthesis use the
+dedicated `event_research` workload, currently routed to Meta Muse Spark with a `$40/day`
+workload ceiling. All active LLM routes currently use Meta, whose provider and project-wide
+daily ceilings are `$80`; the project monthly ceiling is `$1,400`.
 
 ```dotenv
 AUTONOMOUS_COORDINATOR_ENABLED=true
 COORDINATOR_PAID_RESEARCH_ENABLED=true
+COORDINATOR_AUTO_SHADOW_ENABLED=true
 EVENT_ALPHA_ENABLED=true
 EVENT_ALPHA_MAX_CARDS_PER_CYCLE=2
 EVENT_ALPHA_MINIMUM_ANALOGS=5
 EVENT_ALPHA_MINIMUM_SYMBOLS=3
 ```
 
-Settings validation rejects Event Alpha unless both the autonomous coordinator and paid research
-are enabled. Keep the per-cycle card limit small: one card extraction and one analog synthesis
-can each incur a premium-model call. An unchanged case set reuses its prior assessment and does
-not spend again because wall-clock time advanced.
+Settings reject Event Alpha unless the autonomous coordinator and paid research are enabled.
+Event Shadow admission also requires the existing automatic broker-free Shadow switch. Keep the
+per-cycle Card bound small: a new Card and a viable analog synthesis may each incur a model call.
+Unchanged inputs reuse immutable prior results and do not spend again just because time advanced.
 
-## Pipeline
+## End-to-end pipeline
 
-1. Source-specific ingestion archives Alpaca News, SEC, or approved IR evidence and resolves a
-   deterministic catalyst.
-2. The bounded coordinator balances work across the active scanner symbols by current-schema
-   card count. Within each symbol it alternates the oldest and newest unprocessed catalyst. This
-   prevents a high-volume issuer from monopolizing the global query while still growing both
-   historical memory and current-event coverage.
-3. Header-only SEC records with fewer than 30 words are rejected before an LLM call because
-   they cannot establish event direction or mechanism. Other extraction calls create a strict
-   Event Card with exact source quotations. Invented
-   citations, non-verbatim quotes, bad horizons, and malformed output are persisted as rejected.
-   Each call is capped at eight source versions, prioritizing primary and recent evidence.
-   Schema `event_card@0.1.1` explicitly states the 120-character mechanism bound so value-tier
-   models do not lose otherwise valid cards to an implicit database-width constraint.
-4. When daily bars become causally complete, deterministic code records raw 1/2/5-session price
-   reactions from the first session open strictly after the evidence became available. These are
-   case-study outcomes, not cost-aware strategy backtests.
-5. The current card is compared with prior cards from other symbols whose requested outcome was
-   available by the assessment cutoff.
-6. Newly extracted actionable bullish cards are assessed immediately. A bounded fair pass also
-   revisits older actionable cards when newly backfilled analogs change their semantic input
-   hash; unchanged cases do not spend again.
-7. If at least five analogs across three symbols exist, a bounded LLM call compares the winning
-   and losing cases and may propose a playbook. Deterministic robustness checks then mark it
-   `PLAYBOOK_CANDIDATE` or `RESEARCH_ONLY`.
-
-`PLAYBOOK_CANDIDATE` means a hypothesis is worth implementing and replaying. It does not mean
-the strategy is validated, Shadow eligible, profitable, or safe to trade.
+1. The coordinator incrementally backfills and refreshes Alpaca News for governed scanner
+   symbols. SEC and IR remain separate evidence datasets and do not enter Event Alpha.
+2. Same-symbol, same deterministic-type news documents with substantially similar headlines are
+   deduplicated into a 36-hour Event Episode (`catalyst`). Up to eight point-in-time news versions
+   form one bounded evidence packet.
+3. Meta extracts a cited `event_card@0.2.0`: event type, direction, causal mechanism, generalized
+   tags, and expected 1/2/5/10/20-session horizons. Missing news, corrected backfill that was not
+   known at the time, malformed output, and invented quotations fail closed.
+4. Deterministic code measures raw next-session-open to 1/2/5/10/20-session-close returns, plus
+   favorable and adverse path. Outcomes remain invisible until their exit bar is available.
+5. Historical Cards are compared across symbols. With at least five discovery events across
+   three symbols, Meta may propose a Playbook or abstain. Median return, mean without the best
+   event, profit factor, and worst outcome are code-computed gates.
+6. A Playbook is then evaluated only on matching events later than its anchor event. The latest
+   append-only certificate is authoritative and replaces any earlier certificate when new
+   holdout evidence arrives.
+7. A `SHADOW_ELIGIBLE` Playbook can match only a `FORWARD_FIRST_SEEN`, bullish, current-schema
+   news Card observed after that certificate. Event type must match and generalized-tag Jaccard
+   similarity must be at least 0.65. Historical replay can never trigger a deployment.
+8. A match compiles one immutable `event_playbook` StrategySpec and exact execution certificate,
+   then starts one isolated `$10,000` Candidate Shadow sandbox. It submits at most one next-session
+   DAY limit plan, applies the existing volatility-aware stop capped at 15%, a 2R target, 2% of
+   current-sandbox-equity risk, fixed-session timed exit, and the `$8,800` permanent failure floor.
 
 ## Time semantics
 
-- `event_time`: when the underlying event occurred or was published.
-- `available_from`: earliest evidence timestamp the Event Alpha decision is allowed to use.
-- `FORWARD_FIRST_SEEN`: the system ingested the source within 24 hours and uses the actual stored
-  version timestamp.
-- `PROVIDER_PUBLISHED_REPLAY`: the provider supplied older evidence later; the case is explicitly
-  retrospective and uses the provider publication timestamp only for research replay.
-- A corrected historical document that was not observed at the time is excluded rather than
-  backdated.
-- An analog outcome is invisible until its exit bar is available. Future outcomes cannot enter
-  an earlier assessment.
+- `event_time`: when the news event was published.
+- `available_from`: earliest timestamp the stored version may influence a decision.
+- `FORWARD_FIRST_SEEN`: the system ingested the news within 24 hours and uses its actual stored
+  availability.
+- `PROVIDER_PUBLISHED_REPLAY`: the provider supplied older news later. It is research memory only.
+- A corrected historical document not observed at the time is excluded rather than backdated.
+- Discovery analogs must be available at the assessment cutoff. Validation events must be later
+  than the anchor and causally complete at the validation cutoff.
+- A future trigger must be available after the current validation certificate was created.
 
-## Deterministic research-candidate gate
+## Deterministic gates
 
-For the LLM-selected 1, 2, or 5-session horizon, V1 requires:
+Discovery for the LLM-selected 1, 2, 5, 10, or 20-session horizon requires:
 
 - at least `EVENT_ALPHA_MINIMUM_ANALOGS` completed prior events;
-- at least `EVENT_ALPHA_MINIMUM_SYMBOLS` other issuers;
-- positive median return;
-- positive mean after removing the best event;
-- profit factor at least 1.10;
-- worst analog return no lower than -20%; and
-- an LLM `RESEARCH_LONG` recommendation with valid Event Card citations.
+- at least `EVENT_ALPHA_MINIMUM_SYMBOLS` issuers;
+- positive median return and positive mean after removing the best event;
+- profit factor at least 1.10 and worst return no lower than -20%; and
+- a cited LLM `RESEARCH_LONG` hypothesis.
 
-A long proposal must cite the current card and at least one supplied analog from its selected
-horizon; citing a card visible only in another horizon is rejected.
-
-These are research-memory checks, not a Shadow validation policy. The stored positive rate is
-diagnostic evidence rather than a universal win-rate threshold.
+Independent chronological validation then requires at least three later events across two
+symbols, at least 50% positive outcomes, positive median, positive mean without the best event,
+profit factor at least 1.10, and no outcome below -20%. Passing means Candidate Shadow evidence,
+not proven profitability or Paper eligibility. The latest validation always wins; a later
+failure makes an earlier eligible certificate stale.
 
 ## Inspection
 
-Use the Control Center's **Event Alpha** page or these authenticated read endpoints:
+Use the Control Center **Event Alpha** page. It shows news Event Cards, discovery assessments,
+latest Playbook validation statistics, forward matches, and linked Shadow sandboxes. Authenticated
+read endpoints are:
 
 ```text
 GET /v1/event-alpha/status
@@ -104,21 +100,20 @@ GET /v1/event-alpha/cards?symbol=AAPL
 GET /v1/event-alpha/cards/{event_card_id}
 GET /v1/event-alpha/assessments
 GET /v1/event-alpha/playbooks
+GET /v1/event-alpha/validations
+GET /v1/event-alpha/matches
 ```
 
-The card detail shows the immutable evidence packet and completed outcomes. The assessment shows
-the LLM reasoning alongside counts, issuer breadth, median, profit factor, and largest-winner
-sensitivity. `GET /v1/llm/invocations/{id}` remains the source of exact prompt/output and usage
-lineage.
-
-Development may trigger one bounded cycle with `POST /v1/event-alpha/run`. Production has no
-manual mutation endpoint; the dedicated coordinator owns scheduling.
+`GET /v1/llm/invocations/{id}` remains the source of exact prompt/output and usage lineage.
+Development may trigger one bounded cycle with `POST /v1/event-alpha/run`; production scheduling
+belongs to the coordinator.
 
 ## Failure and recovery
 
-- Budget exhaustion, provider failure, invalid JSON, invalid citations, or insufficient analogs
-  fail this sidecar closed without stopping Technical Alpha or existing Shadow accounting.
-- Rejected cards are immutable. A materially revised schema/prompt requires a version bump.
-- Assessments rerun only when the semantic Event Card/analog set changes.
-- Do not manually promote an Event Playbook into a technical `StrategySpec`. Implement the
-  event-aware replay and certification boundary first.
+- Budget exhaustion, provider failure, invalid output, insufficient analogs, or failed validation
+  closes only the Event sidecar and cannot stop Technical Alpha or existing Shadow accounting.
+- Event Cards, outcomes, assessments, validations, and matches are append-only evidence.
+- A current rejected/insufficient certificate supersedes an older eligible certificate.
+- Operator-paused or retired strategies cannot be resumed by automatic Event admission.
+- Do not manually convert historical replay into a forward trigger or enroll an Event strategy
+  in Paper. A separate explicit design and security review is required before that boundary moves.
