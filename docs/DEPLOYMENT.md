@@ -65,7 +65,7 @@ COORDINATOR_DOCUMENT_MAX_PAGES=100
 COORDINATOR_PAID_RESEARCH_ENABLED=false
 # Enable only after exact Candidate/Qualified validation and Shadow risk controls are reviewed.
 COORDINATOR_AUTO_SHADOW_ENABLED=false
-# Optional LLM-led event research sidecar. It requires paid research and has no Shadow path.
+# Optional news-first Event research. Candidate Shadow also requires the auto-Shadow switch.
 EVENT_ALPHA_ENABLED=false
 EVENT_ALPHA_MAX_CARDS_PER_CYCLE=2
 EVENT_ALPHA_MINIMUM_ANALOGS=5
@@ -235,10 +235,13 @@ Verify and record:
 - The bootstrap output says `ready_paused` and the stored environment ID matches this stack.
 - `GET /v1/coordinator/status` is readable and the coordinator heartbeat is present when
   enabled. `WAITING_PAID_RESEARCH_ENABLEMENT` is expected until paid automation is approved.
-- If Event Alpha is enabled, `GET /v1/event-alpha/status` shows bounded card growth, explicit
-  availability bases, and no repeated assessment invocation when its semantic analog set is
-  unchanged. Confirm `predictive_ml_used=false` and `shadow_eligible=false`; no Event Playbook
-  may appear as an adopted technical strategy.
+- If Event Alpha is enabled, `GET /v1/event-alpha/status` shows `source_policy=NEWS_ONLY`,
+  1/2/5/10/20-session horizons, bounded current-schema Card growth, explicit availability bases,
+  and no repeated assessment call when its semantic input is unchanged. Confirm
+  `predictive_ml_used=false`. Any `SHADOW_ELIGIBLE` Playbook must have a current later-event
+  holdout certificate; any deployment must trace to a bullish `FORWARD_FIRST_SEEN` match created
+  after that certificate and use Candidate admission. Historical replay must never create a
+  match or deployment, and Event strategies must remain absent from Paper.
 - When dynamic discovery is enabled, `GET /v1/market-scanner/status` has a recent completed
   or explicit fallback run, its raw object IDs resolve, and every coordinator job carries the
   same `universe_scan_id`. If autonomous pool admission is enabled, verify the recorded list

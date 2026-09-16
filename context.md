@@ -5587,7 +5587,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C114 — `Build news-first Event Playbook Shadow`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `8789fac2f55dbabf5587c189fe6423f0e8d30a1c`.
 - Date: 2026-09-16 PDT.
 - User intent: implement the complete news → Event Card → price response → analog Playbook →
   validation → forward Shadow pipeline, then deploy it.
@@ -5613,6 +5613,25 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: after push, record exact CI/image/backup/deploy results, production
   schema and route state, new-schema Event counts, and whether any Playbook or match genuinely
   qualifies. Do not manufacture a passing Event strategy as a deployment test.
+
+### C115 — `Align Event Alpha deployment verification`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-16 PDT.
+- User intent: deploy the completed news-first Event Alpha pipeline safely after implementation.
+- Scope: update the guarded deployment contract so operators verify the new news-only source,
+  five horizons, latest chronological certificate, future-first-seen match lineage, Candidate
+  Shadow tier, and Paper exclusion instead of applying the superseded V1 research-only check.
+- Architecture/decision impact: none beyond C114/ADR 0048. This is an operational correction
+  required to keep the deployment runbook aligned with executable safety gates.
+- Validation: documentation diff and repository secret scan pending before commit. Functional
+  commit `8789fac2f55dbabf5587c189fe6423f0e8d30a1c` already passed the full local release gate;
+  GitHub Actions run `35072011793` is in progress.
+- Expected global state after commit: a future deployment agent has an accurate post-deploy
+  verification contract for Event Candidate Shadow. Production remains on `cda8ba5` until both
+  exact commits pass CI and the guarded rollout.
+- Corrections/follow-ups: include this documentation commit in the immutable deployment image
+  and record the actual production evidence afterward.
 
 ## Template for future commit entries
 
