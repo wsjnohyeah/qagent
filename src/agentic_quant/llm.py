@@ -475,6 +475,12 @@ class LLMGateway:
     ) -> LLMInvocation:
         routing_version, routing_sha256, routes = self._effective_routing()
         provider_name = provider_override or routes[request.workload]
+        if provider_override is not None and provider_override not in set(
+            routes.values()
+        ):
+            raise LLMConfigurationError(
+                f"{provider_override.value} is disabled by the active routing policy"
+            )
         config = self.routing.providers[provider_name]
         reasoning_effort = request.reasoning_effort or config.reasoning_effort
         timeout_seconds = min(

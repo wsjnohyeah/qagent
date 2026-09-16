@@ -44,6 +44,8 @@ EVENT_ALPHA_GATE_VERSION = "event_alpha_gate@0.1.0"
 EVENT_ALPHA_HORIZONS = (1, 2, 5)
 EVENT_ALPHA_MAX_DOCUMENTS = 8
 EVENT_ALPHA_MAX_EVIDENCE_REJECTIONS_PER_CYCLE = 50
+EVENT_ALPHA_MAX_ASSESSMENT_SCAN = 500
+EVENT_ALPHA_MIN_SEC_EVIDENCE_WORDS = 30
 HISTORICAL_PROVIDER_REPLAY = "PROVIDER_PUBLISHED_REPLAY"
 FORWARD_OBSERVED = "FORWARD_FIRST_SEEN"
 
@@ -500,6 +502,34 @@ class EventAlphaStore:
         with self.engine.connect() as connection:
             return [self._row(row) or {} for row in connection.execute(statement)]
 
+    def cards_for_assessment(self, *, limit: int = 500) -> list[dict[str, Any]]:
+        latest_assessment = (
+            select(
+                event_alpha_assessments.c.event_card_id,
+                func.max(event_alpha_assessments.c.created_at).label(
+                    "latest_assessment_at"
+                ),
+            )
+            .group_by(event_alpha_assessments.c.event_card_id)
+            .subquery()
+        )
+        statement = (
+            select(event_alpha_cards, latest_assessment.c.latest_assessment_at)
+            .outerjoin(
+                latest_assessment,
+                latest_assessment.c.event_card_id
+                == event_alpha_cards.c.event_card_id,
+            )
+            .where(event_alpha_cards.c.status == "COMPLETED")
+            .order_by(
+                latest_assessment.c.latest_assessment_at.asc().nullsfirst(),
+                event_alpha_cards.c.event_time.desc(),
+            )
+            .limit(limit)
+        )
+        with self.engine.connect() as connection:
+            return [self._row(row) or {} for row in connection.execute(statement)]
+
     def record_outcome(self, values: dict[str, Any]) -> bool:
         identity = ("event_card_id", "horizon_sessions")
         with self.engine.begin() as connection:
@@ -724,6 +754,7 @@ class EventAlphaService:
         if as_of.tzinfo is None:
             raise ValueError("Event Card cutoff must be timezone-aware")
         evidence = self.store.catalyst_evidence(catalyst_id, as_of=as_of)
+        self._validate_evidence_substance(evidence)
         payload = {
             "schema_version": EVENT_CARD_SCHEMA_VERSION,
             "as_of": as_of.isoformat(),
@@ -903,27 +934,9 @@ class EventAlphaService:
         card = self.store.card(event_card_id)
         if card is None or card["status"] != "COMPLETED":
             raise ValueError("A completed Event Card is required")
-        analogs_by_horizon = {
-            horizon: self._ranked_analogs(card, horizon=horizon, as_of=as_of)
-            for horizon in EVENT_ALPHA_HORIZONS
-        }
-        statistics = {
-            str(horizon): self._statistics(values)
-            for horizon, values in analogs_by_horizon.items()
-        }
-        input_material = {
-            "schema_version": EVENT_ASSESSMENT_SCHEMA_VERSION,
-            "current_event": self._public_card(card),
-            "analog_statistics": statistics,
-            "analogs": {
-                str(horizon): [self._public_analog(value) for value in values[:12]]
-                for horizon, values in analogs_by_horizon.items()
-            },
-        }
-        # The cutoff belongs in the immutable invocation envelope, but not in the
-        # semantic identity. An unchanged case set must not spend LLM budget again
-        # merely because the coordinator clock advanced.
-        input_sha256 = _canonical_hash(input_material)
+        analogs_by_horizon, statistics, input_material, input_sha256 = (
+            self._assessment_material(card=card, as_of=as_of)
+        )
         prior = self.store.assessment_for_input(
             event_card_id=event_card_id,
             input_sha256=input_sha256,
@@ -1140,13 +1153,47 @@ class EventAlphaService:
                     }
                 )
         assessments: list[dict[str, Any]] = []
-        recent_completed = [
+        new_targets = [
             item
-            for item in self.store.cards(limit=max(20, max_cards * 4))
-            if item.get("status") == "COMPLETED"
-            and _utc(item["available_from"]) <= as_of
-        ][:max_cards]
-        for target in recent_completed:
+            for item in extracted
+            if self._eligible_for_long_assessment(item, as_of=as_of)
+        ]
+        new_ids = {str(item["event_card_id"]) for item in new_targets}
+        recovery_targets: list[dict[str, Any]] = []
+        reassessment_targets: list[dict[str, Any]] = []
+        for item in self.store.cards_for_assessment(
+            limit=EVENT_ALPHA_MAX_ASSESSMENT_SCAN
+        ):
+            if str(item["event_card_id"]) in new_ids:
+                continue
+            if not self._eligible_for_long_assessment(item, as_of=as_of):
+                continue
+            _, _, _, input_sha256 = self._assessment_material(
+                card=item,
+                as_of=as_of,
+            )
+            if (
+                self.store.assessment_for_input(
+                    event_card_id=str(item["event_card_id"]),
+                    input_sha256=input_sha256,
+                )
+                is None
+            ):
+                if item.get("latest_assessment_at") is None:
+                    if len(new_targets) + len(recovery_targets) < max_cards:
+                        recovery_targets.append(item)
+                elif len(reassessment_targets) < max_cards:
+                    reassessment_targets.append(item)
+            if (
+                len(new_targets) + len(recovery_targets) >= max_cards
+                and len(reassessment_targets) >= max_cards
+            ):
+                break
+        targets = (
+            (new_targets + recovery_targets)[:max_cards]
+            + reassessment_targets
+        )
+        for target in targets:
             try:
                 assessments.append(
                     await self.assess_card(str(target["event_card_id"]), as_of=as_of)
@@ -1234,6 +1281,75 @@ class EventAlphaService:
             reverse=True,
         )
         return ranked[:40]
+
+    def _assessment_material(
+        self,
+        *,
+        card: dict[str, Any],
+        as_of: datetime,
+    ) -> tuple[
+        dict[int, list[dict[str, Any]]],
+        dict[str, dict[str, Any]],
+        dict[str, Any],
+        str,
+    ]:
+        analogs_by_horizon = {
+            horizon: self._ranked_analogs(card, horizon=horizon, as_of=as_of)
+            for horizon in EVENT_ALPHA_HORIZONS
+        }
+        statistics = {
+            str(horizon): self._statistics(values)
+            for horizon, values in analogs_by_horizon.items()
+        }
+        input_material = {
+            "schema_version": EVENT_ASSESSMENT_SCHEMA_VERSION,
+            "current_event": self._public_card(card),
+            "analog_statistics": statistics,
+            "analogs": {
+                str(horizon): [self._public_analog(value) for value in values[:12]]
+                for horizon, values in analogs_by_horizon.items()
+            },
+        }
+        # The cutoff belongs in the immutable invocation envelope, but not in the
+        # semantic identity. An unchanged case set must not spend LLM budget again
+        # merely because the coordinator clock advanced.
+        return (
+            analogs_by_horizon,
+            statistics,
+            input_material,
+            _canonical_hash(input_material),
+        )
+
+    @staticmethod
+    def _eligible_for_long_assessment(
+        card: dict[str, Any],
+        *,
+        as_of: datetime,
+    ) -> bool:
+        return (
+            card.get("status") == "COMPLETED"
+            and card.get("event_type") != EventType.OTHER.value
+            and card.get("direction") == EventDirection.BULLISH.value
+            and _utc(card["available_from"]) <= as_of
+        )
+
+    @staticmethod
+    def _validate_evidence_substance(evidence: dict[str, Any]) -> None:
+        documents = list(evidence.get("documents") or [])
+        if not documents:
+            raise ValueError("Event evidence has no usable documents")
+        header_only_sec = all(
+            item.get("provider") == "sec_edgar"
+            and item.get("source_kind") == "sec_filing"
+            and len(str(item.get("text") or "").split())
+            < EVENT_ALPHA_MIN_SEC_EVIDENCE_WORDS
+            for item in documents
+        )
+        if header_only_sec:
+            raise ValueError(
+                "SEC filing body is unavailable; header-only evidence cannot support "
+                "event semantics"
+            )
 
     @staticmethod
     def _statistics(values: list[dict[str, Any]]) -> dict[str, Any]:

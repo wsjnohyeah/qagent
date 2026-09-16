@@ -2,8 +2,9 @@
 
 ## Scope
 
-The gateway connects research-plane workloads to OpenAI GPT-5.6 Sol and Meta Muse Spark
-1.3. The constrained generator may use it to propose and critique a research-only strategy
+The gateway retains provider definitions for OpenAI GPT-5.6 Sol and Meta Muse Spark 1.3, while
+the active policy routes every workload to Meta. The constrained generator may use it to
+propose and critique a research-only strategy
 specification. It never receives broker credentials, approves risk, promotes candidates, or
 submits orders.
 
@@ -13,11 +14,12 @@ Model allocation is versioned in `configs/model_routing.yaml`. The initial polic
 
 | Workload | Provider | Cost tier |
 |---|---|---|
-| `critical_research` | OpenAI GPT-5.6 Sol | premium |
-| `strategy_generation` | OpenAI GPT-5.6 Sol | premium |
-| `strategy_critique` | OpenAI GPT-5.6 Sol | premium |
+| `critical_research` | Meta Muse Spark 1.3 | value |
+| `strategy_generation` | Meta Muse Spark 1.3 | value |
+| `strategy_critique` | Meta Muse Spark 1.3 | value |
 | `interactive_explanation` | Meta Muse Spark 1.3 | value |
 | `routine_pipeline` | Meta Muse Spark 1.3 | value |
+| `event_research` | Meta Muse Spark 1.3 | value |
 
 Add credentials only to the repository's ignored `.env` file. The gateway deliberately uses
 project-specific names so it cannot inherit a machine-wide `OPENAI_API_KEY` accidentally:
@@ -38,8 +40,9 @@ The model panel shows provider readiness, model/cost/reasoning metadata, and the
 provider for every workload. Saving the complete workload map creates an immutable SQL
 routing revision; it never edits the base YAML or exposes a credential.
 
-`Auto` in System Steward follows the effective `interactive_explanation` route. Selecting
-OpenAI or Meta overrides the provider for only that invocation. Conversations are durable,
+`Auto` in System Steward follows the effective `interactive_explanation` route. An explicit
+override is accepted only when that provider is active somewhere in the effective route map;
+under the current Meta-only policy an OpenAI override fails closed. Conversations are durable,
 but each request sends only the six most recent prior messages, truncated to 3,000 characters
 each, plus a question-relevant system snapshot. The current message is included once. Each
 call is capped at 1,200 output tokens and 120 seconds. The invocation audit stores output,

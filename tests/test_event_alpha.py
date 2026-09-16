@@ -592,6 +592,95 @@ def test_event_cycle_audits_unsafe_evidence_and_continues_to_next_card(
     assert "corrected backfilled" in rejected["rejection_reason"]
 
 
+def test_event_cycle_rejects_header_only_sec_evidence_without_llm_spend(
+    settings: Settings,
+) -> None:
+    ledger, provider, store, _, service = _services(settings)
+    documents = DocumentStore(ledger.engine)
+    document = _document(
+        symbol="AAPL",
+        published_at=AS_OF - timedelta(hours=2),
+        ingested_at=AS_OF - timedelta(hours=1),
+    ).model_copy(
+        update={
+            "provider": "sec_edgar",
+            "source_kind": "sec_filing",
+            "source_tier": SourceTier.PRIMARY,
+            "title": "AAPL 8-K filing",
+            "summary": "8-K; report date 2026-09-12",
+            "body_text": None,
+        }
+    )
+    _persist_catalyst(documents, document)
+
+    result = asyncio.run(
+        service.run_cycle(symbols=("AAPL",), as_of=AS_OF, max_cards=1)
+    )
+
+    assert result["status"] == "COMPLETED"
+    assert result["evidence_rejections"] == 1
+    assert result["cards_recorded"] == 0
+    assert provider.calls == []
+    rejected = store.cards(limit=1)[0]
+    assert rejected["status"] == "REJECTED"
+    assert "header-only evidence" in rejected["rejection_reason"]
+
+
+def test_event_cycle_reassesses_an_older_card_when_analogs_change(
+    settings: Settings,
+) -> None:
+    _, provider, store, _, service = _services(settings)
+    current = _record_card(
+        store,
+        symbol="SMCI",
+        event_time=AS_OF - timedelta(days=1),
+    )
+    initial = asyncio.run(
+        service.assess_card(str(current["event_card_id"]), as_of=AS_OF)
+    )
+    assert initial["status"] == "INSUFFICIENT_ANALOGS"
+    assert provider.calls == []
+
+    for index, (symbol, value) in enumerate(
+        zip(
+            ("AAPL", "MSFT", "NVDA", "DELL", "ORCL"),
+            (
+                Decimal("0.03"),
+                Decimal("0.02"),
+                Decimal("0.04"),
+                Decimal("0.01"),
+                Decimal("-0.005"),
+            ),
+            strict=True,
+        )
+    ):
+        analog = _record_card(
+            store,
+            symbol=symbol,
+            event_time=AS_OF - timedelta(days=100 - index),
+        )
+        _record_outcome(
+            store,
+            event_card_id=str(analog["event_card_id"]),
+            total_return=value,
+        )
+
+    result = asyncio.run(service.run_cycle(symbols=(), as_of=AS_OF, max_cards=1))
+
+    assert result["status"] == "COMPLETED"
+    assert EVENT_ASSESSMENT_PROMPT_VERSION in provider.calls
+    current_assessments = [
+        value
+        for value in store.assessments(limit=20)
+        if value["event_card_id"] == current["event_card_id"]
+    ]
+    assert {value["status"] for value in current_assessments} == {
+        "INSUFFICIENT_ANALOGS",
+        "PLAYBOOK_CANDIDATE",
+    }
+    assert len(store.playbooks()) == 1
+
+
 def test_unprocessed_event_candidates_are_balanced_across_symbols(
     settings: Settings,
 ) -> None:

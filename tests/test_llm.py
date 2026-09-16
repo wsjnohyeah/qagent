@@ -363,30 +363,30 @@ def test_gateway_routes_and_persists_immutable_audit(
         )
     )
 
-    assert invocation.provider == LLMProviderName.OPENAI
-    assert invocation.model == "gpt-5.6-sol"
+    assert invocation.provider == LLMProviderName.META
+    assert invocation.model == "muse-spark-1.3"
     assert len(invocation.routing_sha256) == 64
     assert invocation.code_git_sha == "UNAVAILABLE"
     assert invocation.status == LLMInvocationStatus.COMPLETED
-    assert openai.calls == 1
-    assert meta.calls == 0
+    assert openai.calls == 0
+    assert meta.calls == 1
     assert store.health_summary() == {
         "llm_invocations": 1,
         "llm_routing_revisions": 0,
     }
-    assert store.recent(limit=1)[0]["output_preview"] == "completed by openai"
+    assert store.recent(limit=1)[0]["output_preview"] == "completed by meta"
     stored = store.get(invocation.invocation_id)
     assert stored is not None
-    assert stored["output_text"] == "completed by openai"
+    assert stored["output_text"] == "completed by meta"
     assert stored["request_envelope"] == {
-        "model": "gpt-5.6-sol",
+        "model": "muse-spark-1.3",
         "instructions": "Use only supplied evidence.",
         "input": "Evidence packet IDs: packet-1, packet-2",
-        "max_output_tokens": 8192,
-        "reasoning": {"effort": "high"},
-        "store": False,
-        "temperature": None,
-        "top_p": None,
+        "max_output_tokens": 4096,
+        "reasoning": {"effort": "minimal"},
+        "store": None,
+        "temperature": 1.0,
+        "top_p": 1.0,
         "audit_note": (
             "Application payload after credential redaction; HTTP headers omitted"
         ),
@@ -394,6 +394,19 @@ def test_gateway_routes_and_persists_immutable_audit(
     events = ledger.by_correlation_id(invocation.invocation_id)
     assert events[-1]["event_type"] == "llm.invocation.recorded.v1"
     assert "input_text" not in events[-1]["payload"]
+
+    with pytest.raises(LLMConfigurationError, match="disabled by the active routing"):
+        asyncio.run(
+            gateway.complete(
+                LLMRequest(
+                    workload=LLMWorkload.CRITICAL_RESEARCH,
+                    prompt_version="research_synthesis@0.1.0",
+                    instructions="Use only supplied evidence.",
+                    input_text="Do not route this request to an inactive provider.",
+                ),
+                provider_override=LLMProviderName.OPENAI,
+            )
+        )
 
 
 def test_gateway_settles_budget_for_billed_incomplete_response(
@@ -404,8 +417,8 @@ def test_gateway_settles_budget_for_billed_incomplete_response(
     store = LLMStore(ledger.engine)
     routing = load_llm_routing_config(_routing_path())
     provider = IncompleteProvider(
-        LLMProviderName.OPENAI,
-        routing.providers[LLMProviderName.OPENAI],
+        LLMProviderName.META,
+        routing.providers[LLMProviderName.META],
     )
     budget = LLMBudgetManager(
         ledger.engine,
@@ -413,7 +426,7 @@ def test_gateway_settles_budget_for_billed_incomplete_response(
     )
     gateway = LLMGateway(
         routing=routing,
-        providers={LLMProviderName.OPENAI: provider},
+        providers={LLMProviderName.META: provider},
         store=store,
         budget_manager=budget,
     )
@@ -539,7 +552,7 @@ def test_control_center_route_revision_changes_effective_provider(
     assert changed_status["routes"]["interactive_explanation"] == "meta"
 
 
-def test_chat_api_supports_explicit_provider_and_bounded_history(
+def test_chat_api_supports_explicit_active_provider_and_bounded_history(
     settings,  # type: ignore[no-untyped-def]
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -572,13 +585,13 @@ def test_chat_api_supports_explicit_provider_and_bounded_history(
                     {"role": "user", "content": "解释这个研究结果"},
                     {"role": "assistant", "content": "这是上轮回答"},
                 ],
-                "provider": "openai",
+                "provider": "meta",
             },
         )
         assert response.status_code == 200
         payload = response.json()
-        assert payload["provider"] == "openai"
-        assert payload["model"] == "gpt-5.6-sol"
+        assert payload["provider"] == "meta"
+        assert payload["model"] == "muse-spark-1.3"
         assert payload["output_text"] == "测试回复"
         assert payload["prompt_version"] == "research_copilot@0.1.0"
         audit = client.get(f"/v1/llm/invocations/{payload['invocation_id']}").json()

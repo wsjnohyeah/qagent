@@ -63,7 +63,9 @@ intelligence:
   exact_source_quotes_required_for_claims: true
   unknown_citations_fail_closed: true
   insufficient_evidence_abstains_before_llm_call: true
-  budget_policy: llm_budget@0.3.0
+  routing_policy: llm_routing@0.3.0
+  active_providers: [meta]
+  budget_policy: llm_budget@0.4.0
   llm_has_execution_authority: false
 event_alpha:
   card_schema: event_card@0.1.1

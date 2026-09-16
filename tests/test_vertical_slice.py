@@ -62,8 +62,8 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert system_status["development_max_backfill_days"] == 120
         assert system_status["development_max_intraday_backfill_days"] == 7
         assert system_status["phase_1b_open_session_validation"] == "completed"
-        assert system_status["llm_routing_version"] == "llm_routing@0.2.0"
-        assert system_status["llm_budget_policy"] == "llm_budget@0.3.0"
+        assert system_status["llm_routing_version"] == "llm_routing@0.3.0"
+        assert system_status["llm_budget_policy"] == "llm_budget@0.4.0"
         assert system_status["ml_policy"] == "ml_policy@0.1.0"
         assert system_status["openai_configured"] is False
         assert system_status["meta_model_configured"] is False
@@ -180,9 +180,10 @@ def test_api_health_and_demo(settings: Settings) -> None:
         missing_validation = client.get("/v1/research/validations/missing")
         assert missing_validation.status_code == 404
         routes = client.get("/v1/llm/routes").json()
-        assert routes["routes"]["critical_research"] == "openai"
+        assert routes["routes"]["critical_research"] == "meta"
         assert routes["routes"]["event_research"] == "meta"
         assert routes["routes"]["interactive_explanation"] == "meta"
+        assert set(routes["routes"].values()) == {"meta"}
         assert routes["route_source"] == "yaml_base"
         assert routes["automatic_fallback"] is False
         route_update = client.put(
@@ -217,7 +218,7 @@ def test_api_health_and_demo(settings: Settings) -> None:
         assert history[0]["reason"] == "API route revision test"
         assert client.get("/v1/llm/invocations").json() == []
         budget = client.get("/v1/llm/budget").json()
-        assert budget["policy_version"] == "llm_budget@0.3.0"
+        assert budget["policy_version"] == "llm_budget@0.4.0"
         assert budget["limits"]["project_daily"] == {
             "max_estimated_cost_usd": "80.00",
         }
@@ -226,7 +227,7 @@ def test_api_health_and_demo(settings: Settings) -> None:
         }
         assert set(budget["limits"]["provider_daily"]) == {"openai", "meta"}
         assert budget["limits"]["provider_daily"]["meta"] == {
-            "max_estimated_cost_usd": "40.00",
+            "max_estimated_cost_usd": "80.00",
         }
         assert budget["limits"]["workload_daily"]["event_research"] == {
             "max_estimated_cost_usd": "40.00",
@@ -310,10 +311,10 @@ def test_unauthenticated_llm_controls_fail_closed_in_production(
     routes = {
         "interactive_explanation": "meta",
         "routine_pipeline": "meta",
-        "critical_research": "openai",
+        "critical_research": "meta",
         "event_research": "meta",
-        "strategy_generation": "openai",
-        "strategy_critique": "openai",
+        "strategy_generation": "meta",
+        "strategy_critique": "meta",
     }
     with TestClient(create_app(production)) as client:
         route_update = client.put(

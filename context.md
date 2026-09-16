@@ -16,7 +16,7 @@ estimated-cost ceiling, but its outputs remain research-only pending a separate 
 execution certificate. Off-site backup/alerting and statistical/elapsed production evidence
 remain open.
 
-Current documented baseline: C111 — `Record fair Event Alpha production verification`
+Current documented baseline: C112 — `Route LLM workloads to Meta and refresh Event cases`
 
 ## Purpose and authority
 
@@ -86,10 +86,11 @@ A Git commit cannot contain its own content-derived hash without changing that h
   authority.
 - Phase 5A adds persisted fail-closed market-data audits, configured half-spread fill costs,
   governed point-in-time reference imports, and idempotent resumable backfill partitions.
-- A front-loaded Phase 4B gateway and local Control Center now present one audited contract over OpenAI GPT-5.6 Sol
-  and Meta Muse Spark 1.3. Workload routing is versioned and cost-tier-aware; missing project
-  credentials fail closed and no model has any monetary authority. Development operators can
-  save immutable route revisions and chat through Auto or either explicit provider.
+- A front-loaded Phase 4B gateway and local Control Center retain one audited contract over
+  OpenAI GPT-5.6 Sol and Meta Muse Spark 1.3. The source `llm_routing@0.3.0` policy routes every
+  active workload to Meta, and inactive-provider overrides fail closed. Missing project
+  credentials fail closed and no model has any monetary authority. Production remains on the
+  preceding policy until this revision passes immutable deployment.
 - Phase 4 retrieves only evidence versions available by `as_of`, reserves LLM budget before
   each provider call, requires typed research-only output and exact source quotations,
   abstains when
@@ -106,6 +107,14 @@ A Git commit cannot contain its own content-derived hash without changing that h
   assessments. No Playbook exists: 22 assessments lacked enough analogs, while the first
   five-analog/cross-three-symbol comparison produced a reasoned `ABSTAIN` that also failed the
   deterministic robustness gate. This is working research rejection, not an execution outage.
+  A later production audit found 205 completed cards and 207 assessments but still no Playbook.
+  All 24 assessments that passed the numeric gate while receiving an LLM abstention were
+  low-information `other`/`UNKNOWN` filing stubs; among 46 assessment records covering
+  substantive bullish events, 35 lacked
+  five analogs across three issuers and the other 11 had adverse or fragile analog outcomes.
+  Source now rejects header-only SEC evidence before paid inference and fairly rechecks older
+  actionable bullish cards after their semantic analog set changes. The evidence thresholds are
+  intentionally unchanged.
 - Phase 5 trains logistic and boosted-stump candidates on executable next-open-to-future-close
   labels indexed by actual bars. It uses embargoed chronological folds and separate purged
   calibration, model-selection, and untouched final holdout partitions, measures PSI drift,
@@ -736,8 +745,9 @@ also records OOS trade win rate with a Wilson 95% interval, profit factor, large
 concentration, and return after removing that winner.
 
 The front-loaded Phase 4A gateway gives OpenAI and Meta one internal Responses-style
-contract. `configs/model_routing.yaml` sends critical research/generation/critique to the
-premium OpenAI route and interactive explanation/routine pipelines to the value Meta route.
+contract. `configs/model_routing.yaml` now sends every active workload to Meta
+`muse-spark-1.3`; OpenAI remains only a dormant provider definition and historical audit label.
+An explicit override is accepted only if that provider is present in the effective route map.
 Every attempt is bounded and audited; hashes plus a sanitized request envelope support the
 administrator's prompt inspector without retaining credentials. A constrained generation and
 adversarial-critique loop can emit only an immutable research DSL specification; neither
@@ -745,8 +755,9 @@ model can reach runtime risk, portfolio, execution, or broker components.
 
 Phase 4B introduced the no-build model control surface. Phase 6 now places route saves behind
 administrator confirmation and replaces session-local Research Copilot history with persistent
-System Steward conversations. The automatic interactive route or either explicit provider can
-serve a request; output, usage, latency, model, source SHA, and routing lineage remain durable.
+System Steward conversations. The automatic interactive route serves Meta under the current
+policy; an inactive-provider override fails closed. Output, usage, latency, model, source SHA,
+and routing lineage remain durable.
 Paid research operations remain development-scoped while the remote environment is commissioned.
 
 Phase 4 adds a point-in-time evidence retriever and an evidence-bound analyst. It selects
@@ -755,9 +766,9 @@ with the exact feature snapshot and later ML forecast, and treats retrieved text
 data. `research_analysis@0.2.0` accepts only research recommendations; each factual claim
 must reproduce an exact quote from each cited bundle item. Malformed, invented, or
 contradictory support is retained as rejected output, and missing independent evidence causes
-a zero-cost abstention. `llm_budget@0.2.0` atomically reserves conservative estimated-USD
-capacity across project/provider/workload windows. Its daily project, OpenAI, and critical-
-research ceilings are `$40`; policy-version changes reconstruct current-period consumption
+a zero-cost abstention. `llm_budget@0.4.0` atomically reserves conservative estimated-USD
+capacity across project/provider/workload windows. The project and sole active Meta-provider
+daily ceilings are `$80`; existing per-workload ceilings remain separate. Policy-version changes reconstruct current-period consumption
 from the durable reservation ledger instead of resetting it. Token counts are diagnostics, never an
 operator limit. Confirmed Control Center revisions can replace the complete workload dollar-
 limit map without resetting current-period spend or exceeding the YAML project cap.
@@ -5470,6 +5481,49 @@ lifecycle. No Paper order was used as a build or deployment test.
   three-symbol, median/trimmed-return, profit-factor, worst-loss, and LLM recommendation gates do
   not pass. Implement a separate reviewed event walk-forward/execution certificate before any
   Event Playbook is admitted to isolated Shadow.
+
+### D054 — All active LLM workloads use Meta without weakening research gates
+
+- Date: 2026-09-15 PDT.
+- The operator directed the project to stop using GPT/OpenAI and route all future LLM workloads
+  to Meta Muse Spark. The production Event Alpha audit showed that zero Playbooks was not caused
+  by an excessively strict numeric gate: all 24 numeric-only passes were `other`/`UNKNOWN`
+  header-only filing cases that Meta correctly declined to turn into a directional hypothesis.
+- Decision: route every active workload to Meta in `llm_routing@0.3.0`; fail closed on an
+  explicit provider override whose provider is absent from the effective route map; preserve the
+  `$80/day` project ceiling while raising the Meta provider ceiling to `$80/day`; reject
+  header-only SEC evidence without paid inference; and fairly re-evaluate older actionable
+  bullish cards when later backfill changes their semantic analog set. Keep the five-analog,
+  three-symbol and deterministic robustness thresholds unchanged. Formal record: ADR 0047.
+
+### C112 — `Route LLM workloads to Meta and refresh Event cases`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-15 PDT.
+- User intent: stop all GPT/OpenAI LLM use, move every workload to Meta, and determine why Event
+  Alpha had not produced a Playbook rather than lowering rules blindly.
+- Scope: upgrade the base route to `llm_routing@0.3.0` with all six workloads on Meta; reject
+  inactive-provider overrides; upgrade the budget to `llm_budget@0.4.0` and raise only Meta's
+  provider ceiling to the unchanged `$80/day` project ceiling; prefilter header-only SEC
+  evidence; add bounded fair reassessment of older actionable bullish cards after analog-set
+  changes; add regression coverage and ADR 0047; refresh README, runbooks, manifest, project
+  state, and durable context.
+- Architecture/decision impact: OpenAI remains configured only for historical compatibility and
+  is inactive under the effective route map. Event Alpha spends less on content-free filing
+  stubs and can reconsider a prior insufficient assessment as its case memory grows. Statistical
+  admission, broker authority, deterministic risk, Shadow/Paper boundaries, and live-money
+  prohibition are unchanged.
+- Validation: focused Event Alpha/LLM/vertical-slice tests passed. `make check` passed Flake8,
+  strict mypy across 62 source files, and all 232 tests. `make doctor` and the repository secret
+  scan passed.
+- Expected global state after commit: source is ready for exact-SHA CI and guarded production
+  deployment. Production still runs `747060b` with the former mixed-provider base until this
+  revision is published and deployed; existing immutable LLM invocations, Event Cards,
+  outcomes, assessments, Playbooks, and budget spend remain unchanged.
+- Corrections/follow-ups: publish and deploy the exact image, verify all effective routes resolve
+  to Meta and same-period spend is reconstructed under the new policy, confirm Event Alpha
+  records a header-only rejection without a provider call and/or an eligible changed-case
+  reassessment, then record the production rollout without claiming a Playbook must exist.
 
 ## Template for future commit entries
 

@@ -119,7 +119,7 @@ class StructuredProvider:
         invalid_citation: bool = False,
         contradictory_claim: bool = False,
     ) -> None:
-        self.name = LLMProviderName.OPENAI
+        self.name = LLMProviderName.META
         self.config = routing.providers[self.name]
         self.invalid_citation = invalid_citation
         self.contradictory_claim = contradictory_claim
@@ -190,7 +190,7 @@ def _services(
     )
     gateway = LLMGateway(
         routing=routing,
-        providers={LLMProviderName.OPENAI: provider},
+        providers={LLMProviderName.META: provider},
         store=LLMStore(ledger.engine),
         ledger=ledger,
         budget_manager=budget,
@@ -459,7 +459,7 @@ def test_budget_breaker_blocks_before_provider_call(
     )
     gateway = LLMGateway(
         routing=routing,
-        providers={LLMProviderName.OPENAI: provider},
+        providers={LLMProviderName.META: provider},
         store=LLMStore(ledger.engine),
         budget_manager=LLMBudgetManager(ledger.engine, policy),
     )

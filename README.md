@@ -106,9 +106,10 @@ Phase 5A adds fail-closed market-data checks, explicit half-spread fill cost, go
 corporate-action/universe imports, and durable resumable backfill partitions. These are
 scale-independent workflow guarantees; they do not require a large local dataset.
 
-Phase 4 adds an audited Responses API gateway for OpenAI GPT-5.6 Sol and Meta Muse Spark
-1.3. Versioned workload routing assigns premium and value-tier models without giving either
-provider access to broker credentials, risk authority, or order submission.
+Phase 4 adds an audited Responses API gateway with provider definitions for OpenAI GPT-5.6 Sol
+and Meta Muse Spark 1.3. The active `llm_routing@0.3.0` policy routes every workload to Meta;
+an explicit provider override is accepted only for a provider present in the effective route
+map. Neither provider receives broker credentials, risk authority, or order submission.
 
 The evidence-bound analyst retrieves only document versions known at the requested cutoff,
 requires structured research-only output and exact supporting quotations, abstains on
@@ -117,10 +118,9 @@ reservations stop over-budget calls before they reach a provider. Token counts r
 diagnostic telemetry, not operator-configured limits. An interrupted provider call releases
 its abandoned reservation after the configured provider timeout plus a five-minute safety
 margin, so a process restart cannot permanently consume budget capacity.
-`llm_budget@0.3.0` preserves the `$40` OpenAI technical-research ceiling and gives Event Alpha
-its own `$40/day` `event_research` workload routed to Meta Muse Spark. The combined project
-daily ceiling is `$80`. The project monthly ceiling is `$1,400`: the former `$200` technical
-allowance plus at most `$40 × 30` for the newly approved Event Alpha workload.
+`llm_budget@0.4.0` preserves the existing per-workload ceilings, gives Event Alpha its own
+`$40/day` `event_research` allowance, and caps the sole active Meta provider at `$80/day` behind
+the unchanged `$80/day` combined project ceiling. The project monthly ceiling is `$1,400`.
 Same-period consumption is reconstructed from durable reservations across policy versions, so
 deploying a higher ceiling does not reset money already spent that day.
 
@@ -128,13 +128,16 @@ Event Alpha adds a parallel, LLM-led research lane for sparse catalysts without 
 predictive event classifier. It turns citation-bound catalysts into generalized Event Cards,
 calculates cross-stock 1/2/5-session outcomes and outlier-resistant statistics in deterministic
 code, and lets the LLM propose a case-based Playbook or abstain. Same-symbol history is excluded
-from analogs; future outcomes and corrected historical documents fail closed. A passing
+from analogs; future outcomes, corrected historical documents, and header-only SEC evidence fail
+closed. Older actionable bullish cards are revisited when their bounded semantic analog set
+changes; unchanged cases do not spend again. A passing
 Playbook is a `RESEARCH_CANDIDATE` only: V1 has no Event Alpha Shadow or broker path. See ADR
-0044 and `runbooks/event_alpha.md`.
+0044, ADR 0047, and `runbooks/event_alpha.md`.
 
 Phase 4B exposes that gateway in the local Control Center. The operator can create immutable
-workload-routing revisions and chat through `Auto`, OpenAI, or Meta while preserving model,
-route, token, latency, source, and configuration lineage. Paid research calls remain
+workload-routing revisions while preserving model, route, token, latency, source, and
+configuration lineage. The current policy uses `Auto`/Meta for chat and every autonomous
+workload; inactive-provider overrides fail closed. Paid research calls remain
 development-scoped while the authenticated remote deployment path is being commissioned.
 
 A dormant Robinhood Agentic Trading bridge lets the VPS act as its own official-host-pinned MCP

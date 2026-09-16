@@ -35,6 +35,14 @@
   a `$1,400` monthly ceiling. It preserves same-day spend across policy versions,
   single-attempt invalid LLM
   output handling, and leakage-safe annual ML under a six-year daily-bar target.
+- Source now carries the operator-directed Meta-only policy: `llm_routing@0.3.0` routes every
+  interactive, routine, technical-research, Event, strategy-generation, and critique workload
+  to Meta `muse-spark-1.3`. `llm_budget@0.4.0` preserves the `$80/day` project ceiling and raises
+  Meta's provider ceiling to the same value so the existing technical and Event workload
+  allowances do not accidentally compete under the former `$40` Meta cap. OpenAI remains only
+  as a dormant provider definition and historical audit label; an explicit call fails closed
+  while it is absent from the effective route map. Production remains on the preceding policy
+  versions until this source revision passes the release gates and is deployed.
 - Autonomous research supports 1/2/5/10/20/63/126/252-session groups. Its deterministic
   daily UTC schedule assigns 21 of 24 hourly slots to the 1/2/5/10/20-session core and one
   background slot to each longer horizon. One-session research is a prior-completed-bar to
@@ -92,6 +100,13 @@
   factor was below 1.10. The Event workload had consumed an estimated `$0.077574` for the UTC day.
   The `$1,400` monthly project ceiling is deployed and preserves the approximately `$199.96`
   already consumed this month rather than resetting spend.
+- Event Alpha source now rejects header-only SEC evidence before paid inference and fairly
+  re-evaluates older actionable bullish cards when later backfill changes their bounded analog
+  set. Its five-analog/three-symbol and robustness thresholds remain unchanged: a current
+  production audit found that all 24 numeric-only passes were low-information `other`/`UNKNOWN`
+  filing stubs, while assessments of substantive bullish events either lacked enough comparable cases or had
+  adverse analog returns. No Playbook or execution authority is manufactured to satisfy an
+  output target.
 - Production and source are on migration `20260913_0039`. It removes a duplicated volatility-geometry
   suffix from per-signal risk-policy lineage and expands the persisted Shadow policy-version
   field to 240 characters. The pre-repair worker exposed the former 80-character limit as 37
@@ -170,8 +185,8 @@
 - Phase 5A validates bar identity, chronology, OHLC, availability, and exchange intervals
   before research; models half-spread on both fill sides; imports point-in-time reference
   batches with source/version hashes; and resumes idempotent date-partitioned backfills.
-- The Phase 4A gateway routes critical research to OpenAI `gpt-5.6-sol` and interactive or
-  routine work to Meta `muse-spark-1.3` through versioned configuration. Calls are bounded,
+- The Phase 4A gateway retains both provider adapters while the current versioned policy routes
+  every active workload to Meta `muse-spark-1.3`. Calls are bounded,
   fail closed without project credentials, and retain immutable hashes, usage, latency,
   status, and output.
 - Both Responses API adapters pass mocked contract tests and bounded live probes using
@@ -553,6 +568,9 @@
 - ADR 0046: schedule Event Alpha fairly across active scanner symbols by current-schema attempt
   count, alternating old and new cases per issuer so one high-volume symbol cannot starve the
   cross-symbol evidence gate.
+- ADR 0047: route every active LLM workload to Meta, reject inactive-provider overrides,
+  prefilter header-only SEC Event evidence without provider spend, and fairly revisit older
+  actionable cards when their semantic analog set changes without weakening the Playbook gate.
 - ADR 0024: isolate Alpaca Paper behind an exact host, durable idempotent intents, account and
   risk reconciliation, and per-deployment administrator confirmation; retain no live path.
 - ADR 0025: reject Shadow certificates at the Paper boundary; require a separately validated

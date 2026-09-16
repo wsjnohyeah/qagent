@@ -15,10 +15,9 @@ all existing risk boundaries.
 
 Event Alpha is safe-off by default. When enabled, both Event Card extraction and analog
 assessment use the dedicated `event_research` workload, routed to Meta Muse Spark with a
-`$40/day` workload/provider ceiling. Technical critical research remains routed to OpenAI and
-does not consume Event Alpha's workload allowance. The project-wide `$80/day` and `$1,400/month`
-ceilings still apply; the monthly value preserves the former `$200` allowance and adds at most
-30 Event Alpha days at `$40/day`.
+`$40/day` workload ceiling. All other active LLM workloads also route to Meta. The Meta provider
+and project-wide ceilings are therefore both `$80/day`, while the `$1,400/month` project ceiling
+still applies.
 
 ```dotenv
 AUTONOMOUS_COORDINATOR_ENABLED=true
@@ -42,7 +41,9 @@ not spend again because wall-clock time advanced.
    card count. Within each symbol it alternates the oldest and newest unprocessed catalyst. This
    prevents a high-volume issuer from monopolizing the global query while still growing both
    historical memory and current-event coverage.
-3. The extraction call creates a strict Event Card with exact source quotations. Invented
+3. Header-only SEC records with fewer than 30 words are rejected before an LLM call because
+   they cannot establish event direction or mechanism. Other extraction calls create a strict
+   Event Card with exact source quotations. Invented
    citations, non-verbatim quotes, bad horizons, and malformed output are persisted as rejected.
    Each call is capped at eight source versions, prioritizing primary and recent evidence.
    Schema `event_card@0.1.1` explicitly states the 120-character mechanism bound so value-tier
@@ -52,7 +53,10 @@ not spend again because wall-clock time advanced.
    case-study outcomes, not cost-aware strategy backtests.
 5. The current card is compared with prior cards from other symbols whose requested outcome was
    available by the assessment cutoff.
-6. If at least five analogs across three symbols exist, a bounded LLM call compares the winning
+6. Newly extracted actionable bullish cards are assessed immediately. A bounded fair pass also
+   revisits older actionable cards when newly backfilled analogs change their semantic input
+   hash; unchanged cases do not spend again.
+7. If at least five analogs across three symbols exist, a bounded LLM call compares the winning
    and losing cases and may propose a playbook. Deterministic robustness checks then mark it
    `PLAYBOOK_CANDIDATE` or `RESEARCH_ONLY`.
 

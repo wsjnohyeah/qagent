@@ -110,8 +110,9 @@ which data, budget, statistical, or human prerequisite is not yet satisfied.
 The Steward is the default top-level page and uses the full central workspace. Its sidebar
 contains persistent conversation history; assistant messages are rendered as escaped,
 locally parsed Markdown with headings, lists, tables, quotations, links, and code blocks.
-Raw model HTML is never trusted or rendered. `Auto route`, OpenAI, and Meta remain selectable
-per request. Use Command/Control+Enter to send.
+Raw model HTML is never trusted or rendered. `Auto route` follows the effective workload map.
+The current `llm_routing@0.3.0` policy routes every workload to Meta; an explicit OpenAI request
+fails closed while OpenAI is absent from that map. Use Command/Control+Enter to send.
 
 Each request supplies a bounded, freshly queried snapshot of counts, lists, dataset coverage,
 strategies, validations, research analyses, models, ingestions, quality reports, workflow jobs,

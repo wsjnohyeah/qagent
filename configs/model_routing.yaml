@@ -1,4 +1,4 @@
-version: llm_routing@0.2.0
+version: llm_routing@0.3.0
 
 providers:
   openai:
@@ -25,10 +25,10 @@ providers:
 routes:
   interactive_explanation: meta
   routine_pipeline: meta
-  critical_research: openai
+  critical_research: meta
   event_research: meta
-  strategy_generation: openai
-  strategy_critique: openai
+  strategy_generation: meta
+  strategy_critique: meta
 
 # Automatic cross-provider fallback is intentionally disabled. A fallback can silently
 # change cost, behavior, and reproducibility; future route changes must be explicit and
