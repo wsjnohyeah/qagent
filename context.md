@@ -11,12 +11,12 @@ and new isolated `$10,000` sandbox exposure cannot execute before the September 
 Paid ML + LLM research and source-specific historical backfill are
 active. Production automatically admits exact deterministic Candidate/Qualified results to
 broker-free Shadow; Paper enrollment remains separately human-confirmed and live money remains
-impossible. Event Alpha case research is also active through a dedicated Meta route and `$40/day`
-estimated-cost ceiling, but its outputs remain research-only pending a separate event replay and
-execution certificate. Off-site backup/alerting and statistical/elapsed production evidence
+impossible. News-first Event Alpha is active through a dedicated Meta route and `$40/day`
+estimated-cost ceiling; a Playbook may enter only isolated Candidate Shadow after later-event
+validation and a new forward-observed news match. Off-site backup/alerting and statistical/elapsed production evidence
 remain open.
 
-Current documented baseline: C113 — `Record Meta-only production rollout`
+Current documented baseline: C116 — `Record news Event Shadow production rollout`
 
 ## Purpose and authority
 
@@ -104,26 +104,13 @@ A Git commit cannot contain its own content-derived hash without changing that h
   events across two symbols pass the robust holdout gate. Only a bullish, future-first-seen
   news Card observed after that current certificate can compile a one-shot StrategySpec for an
   isolated `$10,000` Shadow sandbox. Historical replay and SEC/IR inputs cannot trigger this
-  path, and Event strategies cannot enter Paper. Production still serves the prior
-  research-only implementation at exact image `cda8ba5` until ADR 0048 is deployed. Event Card
-  extraction plus analog synthesis use the dedicated Meta `event_research` route. At the latest
-  inspection the case memory held 49 cards, 69 deterministic 1/2/5-session outcomes, and 23
-  assessments. No Playbook exists: 22 assessments lacked enough analogs, while the first
-  five-analog/cross-three-symbol comparison produced a reasoned `ABSTAIN` that also failed the
-  deterministic robustness gate. This is working research rejection, not an execution outage.
-  A later production audit found 205 completed cards and 207 assessments but still no Playbook.
-  All 24 assessments that passed the numeric gate while receiving an LLM abstention were
-  low-information `other`/`UNKNOWN` filing stubs; among 46 assessment records covering
-  substantive bullish events, 35 lacked
-  five analogs across three issuers and the other 11 had adverse or fragile analog outcomes.
-  Source now rejects header-only SEC evidence before paid inference and fairly rechecks older
-  actionable bullish cards after their semantic analog set changes. The evidence thresholds are
-  intentionally unchanged.
-  At the post-rollout checkpoint the case memory held 287 cards (208 completed and 79 rejected),
-  211 assessments, and zero Playbooks. A bounded diagnostic cycle processed two cards, rejected
-  three header-only SEC records before inference, and re-evaluated two changed older cases as
-  `INSUFFICIENT_ANALOGS`, with no business error. This is evidence that the corrected scheduler
-  is active; it is not evidence that a tradable Event strategy already exists.
+  path, and Event strategies cannot enter Paper. Production runs exact image `37a27f9` and
+  schema `20260916_0040`; extraction plus analog synthesis use the dedicated Meta
+  `event_research` route. The first new-schema production cycles created four news Cards, ten
+  outcomes, and three assessments. Two substantive Cards completed, two body-empty news records
+  failed before paid inference, and both paid Event calls used Meta. There is no current-schema
+  Playbook, validation, or forward match yet; this is evidence accumulation rather than an
+  execution failure, and no passing result was manufactured for deployment.
 - Phase 5 trains logistic and boosted-stump candidates on executable next-open-to-future-close
   labels indexed by actual bars. It uses embargoed chronological folds and separate purged
   calibration, model-selection, and untouched final holdout partitions, measures PSI drift,
@@ -5616,7 +5603,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C115 — `Align Event Alpha deployment verification`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `37a27f9b3fda858d5e6b962748d3405dca733fbf`.
 - Date: 2026-09-16 PDT.
 - User intent: deploy the completed news-first Event Alpha pipeline safely after implementation.
 - Scope: update the guarded deployment contract so operators verify the new news-only source,
@@ -5624,14 +5611,46 @@ lifecycle. No Paper order was used as a build or deployment test.
   Shadow tier, and Paper exclusion instead of applying the superseded V1 research-only check.
 - Architecture/decision impact: none beyond C114/ADR 0048. This is an operational correction
   required to keep the deployment runbook aligned with executable safety gates.
-- Validation: documentation diff and repository secret scan pending before commit. Functional
-  commit `8789fac2f55dbabf5587c189fe6423f0e8d30a1c` already passed the full local release gate;
-  GitHub Actions run `35072011793` is in progress.
+- Validation: documentation diff and repository secret scan passed. Functional commit
+  `8789fac2f55dbabf5587c189fe6423f0e8d30a1c` passed GitHub Actions run `35072011793`; this exact
+  documentation commit passed run `35072237701` and published the deployed image.
 - Expected global state after commit: a future deployment agent has an accurate post-deploy
   verification contract for Event Candidate Shadow. Production remains on `cda8ba5` until both
   exact commits pass CI and the guarded rollout.
 - Corrections/follow-ups: include this documentation commit in the immutable deployment image
   and record the actual production evidence afterward.
+
+### C116 — `Record news Event Shadow production rollout`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-16 PDT.
+- User intent: deploy the complete news-first Event Alpha pipeline and leave production safely
+  running.
+- Scope: record exact CI/image provenance, verified backup, guarded migration/deployment, audited
+  runtime resume, current-schema Event evidence, Meta routing, UI/API availability, and remaining
+  evidence-dependent state.
+- Architecture/decision impact: none beyond C114/C115/ADR 0048. This entry distinguishes
+  deployed capability from genuine strategy evidence: the path is live, but no Playbook,
+  validation, match, or Event sandbox exists until real data passes every gate.
+- Validation: GitHub Actions runs `35072011793` and `35072237701` passed; exact image
+  `37a27f9b3fda858d5e6b962748d3405dca733fbf` has matching OCI revision. Backup
+  `/opt/agentic-quant/backups/20260916T081832Z` passed file checksums, object-archive inspection,
+  and PostgreSQL catalog validation. The guarded deploy drained the live Shadow lease, migrated
+  PostgreSQL to `20260916_0040`, returned `ready_paused`, and passed API/Shadow/Paper/coordinator
+  health gates. External TLS readiness is 200; unauthenticated system/Event reads are 401; the
+  deployed page contains the new validation and forward-match UI.
+- Global state after commit: production runs exact image `37a27f9`, all five containers are
+  healthy, all active LLM routes remain Meta under the unoverridden base policies, and audited
+  action `01a0a964-2da6-72df-af53-c411b3422699` restored `new_exposure_paused=false`.
+  `LIVE_TRADING_ENABLED=false`. The first cycles contain four v2 news Cards, ten v2 outcomes,
+  and three v2 assessments; two completed post-rollout Event calls used Meta. There are zero
+  Playbooks, validations, matches, or Event sandboxes because no real case set has yet passed.
+  The new Shadow worker is alive through its fenced lease. Its last completed pre-rollout tick
+  remains `DEGRADED` only for three pre-existing NBIS data-quality failures retained as audit
+  evidence; no new Event deployment failure exists.
+- Corrections/follow-ups: allow the bounded news history and later holdout set to accumulate,
+  inspect the first genuine Playbook validation and future match, and keep Event strategies out
+  of Paper. Off-site backup replication and external notifications remain operator inputs.
 
 ## Template for future commit entries
 

@@ -11,7 +11,7 @@
   strictly Qualified and forward observation history remains short.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `cda8ba53009dd904cf2cb727a60c43c5e59cc796` image, PostgreSQL, Redis, API, Shadow worker,
+  `37a27f9b3fda858d5e6b962748d3405dca733fbf` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled. The last pre-migration inspection found 106
@@ -80,39 +80,29 @@
   retires at a `$8,800` marked-value floor. Explicit commission is zero while spread,
   slippage, impact, liquidity, and gap behavior remain modeled. The legacy migration is
   confirmation-gated and a deployment-time exposure boundary can stage Monday activation.
-- Production currently runs the bounded Event Alpha V1 from ADRs 0044–0047. Local source now
-  implements ADR 0048: Event Alpha accepts news only, clusters a 36-hour Event Episode, measures
+- Production runs ADR 0048 Event Alpha: it accepts news only, clusters a 36-hour Event Episode, measures
   deterministic 1/2/5/10/20-session outcomes, validates Playbooks on later unseen events, and
   can compile a qualifying future-news match into one immutable Candidate strategy in an
   isolated Shadow sandbox. Historical replay cannot trigger, the latest validation certificate
-  is authoritative, and Event strategies cannot enter Paper. Schema head `20260916_0040`, the
-  Event UI, and Shadow adapter await this change's guarded production rollout.
+  is authoritative, and Event strategies cannot enter Paper. Schema head is `20260916_0040`.
   A dedicated
   `event_research` workload routes only Event Card extraction and analog synthesis to Meta
   `muse-spark-1.3`, caps that workload at `$40/day`, and shares the `$80/day` Meta/project
-  ceiling with technical research. Production now runs `event_card@0.1.1`, states the mechanism
-  bound explicitly, and durably audits expected unsafe-evidence exclusions while continuing to
-  the next eligible catalyst. At the post-rollout checkpoint it held 287 cards (208 completed,
-  79 rejected), 211 assessments, and zero Playbooks. A bounded production diagnostic completed
-  without business errors: three header-only SEC records were rejected before paid inference,
-  two cards were processed, and two changed older cases were re-evaluated as
-  `INSUFFICIENT_ANALOGS`. The `$1,400` monthly project ceiling remains deployed and same-period
-  usage is reconstructed from the reservation ledger rather than reset on a policy change.
-- Deployed Event Alpha rejects header-only SEC evidence before paid inference and fairly
-  re-evaluates older actionable bullish cards when later backfill changes their bounded analog
-  set. The pending news-only source replaces SEC/IR filtering with source-level exclusion. Its
-  five-analog/three-symbol discovery threshold remains unchanged: a current
-  production audit found that all 24 numeric-only passes were low-information `other`/`UNKNOWN`
-  filing stubs, while assessments of substantive bullish events either lacked enough comparable cases or had
-  adverse analog returns. No Playbook or execution authority is manufactured to satisfy an
-  output target.
-- GitHub Actions run `35064503800` passed verification and published exact image `cda8ba5`.
-  Guarded production rollout used verified backup `/opt/agentic-quant/backups/20260916T064008Z`;
+  ceiling with technical research. The first deployed cycles created four current-schema news
+  Cards, ten causally complete outcomes, and three assessments; two substantive Cards completed
+  and two empty-body news records failed before paid inference. Two completed post-rollout Event
+  calls used Meta. There is not yet a genuine Playbook, validation, or forward match, and none is
+  manufactured as a deployment test. The `$1,400` monthly project ceiling remains deployed and
+  same-period usage is reconstructed from durable reservations.
+- GitHub Actions runs `35072011793` and `35072237701` passed; the latter published exact image
+  `37a27f9`. Guarded production rollout used verified backup
+  `/opt/agentic-quant/backups/20260916T081832Z`;
   all five containers passed health gates. Bootstrap failed closed with new exposure paused,
   after which the previously approved autonomous Shadow/Paper state was restored through an
-  audited `runtime.resume` action. `LIVE_TRADING_ENABLED` remains false and Event Playbooks
-  remain ineligible for Shadow or Paper.
-- Production is on migration `20260913_0039`; local source head is `20260916_0040`. Revision 0039 removes a duplicated volatility-geometry
+  audited `runtime.resume` action `01a0a964-2da6-72df-af53-c411b3422699`.
+  `LIVE_TRADING_ENABLED` remains false; Event Playbooks are Candidate-Shadow-only and remain
+  ineligible for Paper.
+- Production and source are on migration `20260916_0040`. Revision 0039 removes a duplicated volatility-geometry
   suffix from per-signal risk-policy lineage and expands the persisted Shadow policy-version
   field to 240 characters. The pre-repair worker exposed the former 80-character limit as 37
   append-only deployment failures rather than creating partial trade plans; post-repair ticks
@@ -362,8 +352,8 @@
   stop/target geometry used identically by research and shadow. Candidate/snapshot mismatches
   and future signal/feature timestamps also reject.
 - GitHub `origin` is `https://github.com/wsjnohyeah/qagent.git`; production currently runs the
-  verified immutable functional commit `8ecdc7f5f52e99610d57852a59bea10790e5e35c` with the
-  isolated-sandbox and Event Alpha releases deployed.
+  verified immutable commit `37a27f9b3fda858d5e6b962748d3405dca733fbf` with the
+  isolated-sandbox and news Event Playbook releases deployed.
 - GitHub Actions uses the current Node 24-based `actions/checkout@v7.0.1` and
   `astral-sh/setup-uv@v10.0.1` releases. A verified `main` push publishes an immutable GHCR
   commit-SHA image with matching embedded/OCI source provenance; deployment rejects mismatches.
@@ -373,7 +363,7 @@
 - The last complete release audit passed lint, strict typing, the full test suite,
   authenticated local and PostgreSQL/MinIO/Redis doctors, JavaScript parsing, fresh schema
   upgrade and PostgreSQL schema-drift checks. The current source migration head is
-  `20260916_0040`; production remains on `20260913_0039` until the guarded rollout.
+  `20260916_0040`; production is on the same revision.
 - A local real read-only dynamic scan merged 258 source names, retained 40 review candidates
   and 20 deep-research stocks, included SNDK, and excluded sampled leveraged/single-stock
   ETFs. Its budgeted Meta re-rank cost an estimated `$0.008322` and moved SNDK from
