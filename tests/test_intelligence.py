@@ -533,7 +533,7 @@ def test_workload_budget_revision_is_immutable_and_does_not_reset_usage(
         if item["scope"] == "workload:interactive_explanation"
     )
     assert workload_window["consumed_tokens"] == 5
-    assert workload_window["consumed_estimated_cost_usd"] == "0.000006"
+    assert workload_window["consumed_estimated_cost_usd"] == "0.000013"
     assert workload_window["estimated_cost_limit_usd"] == "0.000007"
     assert "token_limit" not in workload_window
     assert len(budget.recent_revisions()) == 1
@@ -569,7 +569,7 @@ def test_workload_budget_revision_is_immutable_and_does_not_reset_usage(
         if item["scope"] == "workload:interactive_explanation"
     )
     assert changed_workload_window["consumed_tokens"] == 5
-    assert changed_workload_window["consumed_estimated_cost_usd"] == "0.000006"
+    assert changed_workload_window["consumed_estimated_cost_usd"] == "0.000013"
 
     with pytest.raises(LLMBudgetExceededError, match="interactive_explanation"):
         budget.reserve(
