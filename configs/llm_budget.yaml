@@ -23,19 +23,20 @@ limits:
     openai:
       max_estimated_cost_usd: "5.00"
     meta:
-      # All active workloads route to Meta; sub-limits are scaled 1/8 with the
-      # $10 project cap (was $80) so no workload can exceed the project ceiling.
+      # All active workloads route to Meta. Workload sub-limits are deliberately
+      # NOT scaled to the $10 project cap: each workload gets $5/day and they
+      # compete freely under the shared $10 project ceiling (enforced globally).
       max_estimated_cost_usd: "10.00"
   workload_daily:
     interactive_explanation:
-      max_estimated_cost_usd: "0.625"
+      max_estimated_cost_usd: "5.00"
     routine_pipeline:
-      max_estimated_cost_usd: "0.625"
+      max_estimated_cost_usd: "5.00"
     critical_research:
       max_estimated_cost_usd: "5.00"
     event_research:
       max_estimated_cost_usd: "5.00"
     strategy_generation:
-      max_estimated_cost_usd: "1.875"
+      max_estimated_cost_usd: "5.00"
     strategy_critique:
-      max_estimated_cost_usd: "1.875"
+      max_estimated_cost_usd: "5.00"
