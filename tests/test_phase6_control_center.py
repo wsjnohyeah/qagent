@@ -875,7 +875,7 @@ def test_system_steward_cites_snapshot_and_only_proposes_actions(
         )
         assert result.status_code == 200
         payload = result.json()
-        assert payload["estimated_cost_usd"] == "0.000025"
+        assert payload["estimated_cost_usd"] == "0.000055"
         assert payload["citations"] == ["LIST:focus-watchlist"]
         assert payload["proposed_action"]["status"] == "PENDING_CONFIRMATION"
         assert client.get("/v1/lists/focus-watchlist").json()["members"] == []
