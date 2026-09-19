@@ -510,7 +510,7 @@ def test_workload_budget_revision_is_immutable_and_does_not_reset_usage(
     preview = budget.preview_workload_limits(revised)
     assert preview["before"]["interactive_explanation"][
         "max_estimated_cost_usd"
-    ] == "5.00"
+    ] == "0.625"
     assert preview["after"]["interactive_explanation"][
         "max_estimated_cost_usd"
     ] == "0.000007"
@@ -562,7 +562,7 @@ def test_workload_budget_revision_is_immutable_and_does_not_reset_usage(
     assert changed_summary["policy_source"] == "yaml_base"
     assert changed_summary["limits"]["workload_daily"][
         "interactive_explanation"
-    ]["max_estimated_cost_usd"] == "5.00"
+    ]["max_estimated_cost_usd"] == "0.625"
     changed_workload_window = next(
         item
         for item in changed_summary["windows"]

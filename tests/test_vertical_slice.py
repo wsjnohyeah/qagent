@@ -220,17 +220,17 @@ def test_api_health_and_demo(settings: Settings) -> None:
         budget = client.get("/v1/llm/budget").json()
         assert budget["policy_version"] == "llm_budget@0.4.0"
         assert budget["limits"]["project_daily"] == {
-            "max_estimated_cost_usd": "80.00",
+            "max_estimated_cost_usd": "10.00",
         }
         assert budget["limits"]["project_monthly"] == {
             "max_estimated_cost_usd": "1400.00",
         }
         assert set(budget["limits"]["provider_daily"]) == {"openai", "meta"}
         assert budget["limits"]["provider_daily"]["meta"] == {
-            "max_estimated_cost_usd": "80.00",
+            "max_estimated_cost_usd": "10.00",
         }
         assert budget["limits"]["workload_daily"]["event_research"] == {
-            "max_estimated_cost_usd": "40.00",
+            "max_estimated_cost_usd": "5.00",
         }
         assert len(budget["windows"]) == 10
         assert client.get("/v1/intelligence/analyses").json() == []

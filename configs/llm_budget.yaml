@@ -21,21 +21,21 @@ limits:
     max_estimated_cost_usd: "1400.00"
   provider_daily:
     openai:
-      max_estimated_cost_usd: "40.00"
+      max_estimated_cost_usd: "5.00"
     meta:
-      # All active workloads route to Meta; the $40 technical/event allowances
-      # are preserved but non-binding behind the $10 project cap.
-      max_estimated_cost_usd: "80.00"
+      # All active workloads route to Meta; sub-limits are scaled 1/8 with the
+      # $10 project cap (was $80) so no workload can exceed the project ceiling.
+      max_estimated_cost_usd: "10.00"
   workload_daily:
     interactive_explanation:
-      max_estimated_cost_usd: "5.00"
+      max_estimated_cost_usd: "0.625"
     routine_pipeline:
-      max_estimated_cost_usd: "5.00"
+      max_estimated_cost_usd: "0.625"
     critical_research:
-      max_estimated_cost_usd: "40.00"
+      max_estimated_cost_usd: "5.00"
     event_research:
-      max_estimated_cost_usd: "40.00"
+      max_estimated_cost_usd: "5.00"
     strategy_generation:
-      max_estimated_cost_usd: "15.00"
+      max_estimated_cost_usd: "1.875"
     strategy_critique:
-      max_estimated_cost_usd: "15.00"
+      max_estimated_cost_usd: "1.875"
