@@ -2,20 +2,22 @@
 
 ## Current
 
-- Source now implements ADR 0049. `shadow_graduation@0.1.0` exposes a non-mutating,
+- Production now implements ADR 0049. `shadow_graduation@0.1.0` exposes a non-mutating,
   horizon-aware fast graduation assessment from each sandbox's durable events while leaving the
   sandbox active. Event Alpha validation `event_playbook_validation@0.2.0` distinguishes
   discovery-qualified `INSUFFICIENT_HOLDOUT` Playbooks from deterministic `REJECTED` failures:
   only the former may collect exploratory Candidate Shadow evidence from a genuinely new
   `FORWARD_FIRST_SEEN` news Card. One Card starts at most one sandbox, near-duplicate hypotheses
   reuse a Playbook family, and Event forward evidence is aggregated at the Playbook level.
-  Paper, Robinhood mutation, and live-money authority are unchanged. Exact-SHA CI and production
-  deployment are pending.
-- Source now makes Forward Shadow reuse the same point-in-time, provider-verified listing or
+  Paper, Robinhood mutation, and live-money authority are unchanged. The initial production
+  snapshot reports zero early graduates, 423 short-horizon sandboxes still observing, and 194
+  long-horizon sandboxes still observing.
+- Production makes Forward Shadow reuse the same point-in-time, provider-verified listing or
   post-suspension history boundary as coordinator research. This corrects the production NBIS
   counterexample where ten valid post-resumption sandboxes repeatedly degraded a Shadow tick by
   rechecking obsolete pre-boundary history. Internal and trailing gaps after the boundary still
-  fail closed. Deployment and audited restoration of new Shadow exposure are pending.
+  fail closed. A production NBIS replay retained 481 records from the verified
+  `2024-10-21` boundary and passed every data-quality check with zero missing intervals.
 
 - Implemented foundations through the corrected Phase 6.1 baseline, the four pre-cloud
   hardening milestones, and a unified Phase 7 Alpaca Paper lifecycle, including
@@ -26,7 +28,7 @@
   strictly Qualified and forward observation history remains short.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `dc5d5d74973965e826aa0184450dbbb05153ab0e` image, PostgreSQL, Redis, API, Shadow worker,
+  `d9ab3c9d5f58e5e185d08af084613472aecf05b1` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled. The last pre-migration inspection found 106
@@ -38,7 +40,8 @@
   sandbox is active until a fresh exact report passes. C094 remains active,
   deterministic automatic Candidate/Qualified Shadow admission is enabled, and the audited
   runtime is resumed. The first two post-repair Shadow ticks succeeded with zero deployment
-  failures; the worker remains enabled and new exposure is not paused. There are no Paper
+  failures; the worker remains enabled and new exposure is not paused. The first full
+  post-deployment Shadow tick is currently in progress under a fresh fenced lease. There are no Paper
   enrollments or orders. Live money remains structurally disabled.
 - Production runs `research_gate@0.5.0`, horizon-specific
   Candidate Shadow activity minima, horizon-specific research-trial accounting, budget-
@@ -104,8 +107,10 @@
   Meta/project ceiling. At the latest pre-ADR-0049 inspection production held 2,490
   current-schema Cards, 29 discovery-qualified Playbooks, 18 latest validations with
   insufficient later holdouts, 11 deterministic rejections, and no forward Event match. ADR
-  0049 source will allow only those insufficient—not rejected—Playbooks to gather future-first-
-  seen exploratory Shadow evidence after deployment. The `$1,400` monthly project ceiling
+  0049 now allows only those insufficient—not rejected—Playbooks to gather future-first-seen
+  exploratory Shadow evidence. Fresh `event_playbook_validation@0.2.0` certificates classify
+  the same 18/11 split, and zero historical Card was converted into a forward match. The `$1,400`
+  monthly project ceiling
   remains deployed and same-period usage is reconstructed from durable reservations.
 - GitHub Actions runs `35072011793` and `35072237701` passed; the latter published exact image
   `37a27f9`. Guarded production rollout used verified backup

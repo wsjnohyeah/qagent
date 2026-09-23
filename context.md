@@ -5720,6 +5720,41 @@ lifecycle. No Paper order was used as a build or deployment test.
   Shadow tick, verify new Event validation counts and zero historical-replay matches, restore
   already approved broker-free exposure through an audited action, and record production state.
 
+### C119 — `Record Shadow graduation and Event rollout`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-23 PDT.
+- User intent: deploy C118, make Event strategy evidence easier to collect, expose the faster
+  graduation rules, and verify production rather than stopping at a successful build.
+- Scope: record exact-SHA CI/image publication, verified backup, guarded deployment, audited
+  restoration of autonomous broker-free exposure, production Event validation counts,
+  graduation counts, external health/authentication checks, and the NBIS boundary replay.
+- Architecture/decision impact: none beyond ADR 0049. Production still starts paused on every
+  worker replacement and requires a fresh audited resume. The first current-schema Event
+  validation after deployment becomes the time boundary for exploratory forward matches; no
+  pre-deployment historical Card receives forward authority.
+- Validation: GitHub Actions run `35837445934` passed and published exact image
+  `d9ab3c9d5f58e5e185d08af084613472aecf05b1`. Backup
+  `/opt/agentic-quant/backups/20260923T075152Z` passed PostgreSQL catalog, object archive, and
+  checksum verification. The guarded deployment passed migration/bootstrap and API, Shadow,
+  Paper, coordinator, PostgreSQL, and Redis health gates; all five containers run the exact
+  image and the external TLS readiness endpoint returns 200 while an unauthenticated protected
+  endpoint returns 401. Audited action `01a0cd79-ee12-77d4-ae8a-00a7e799e863` restored
+  `new_exposure_paused=false`; `LIVE_TRADING_ENABLED=false` was verified inside the image.
+  A production NBIS boundary replay reduced 1,474 stored bars to the 481 valid bars beginning
+  `2024-10-21` and passed every quality rule with zero gaps or zero-volume warnings.
+- Global state after commit: production runs exact image `d9ab3c9`. All pipelines are enabled;
+  the first full post-deployment Shadow tick is in progress under a fresh fenced lease. The
+  graduation API classifies the 617 returned historical/current deployments as zero early
+  graduates, 423 short-horizon observers, and 194 long-horizon observers. Event Alpha has 29
+  Playbooks under the new validation contract: 18 exploratory-insufficient, zero held-out
+  eligible, and 11 rejected. It has zero forward matches and zero forward-validated Playbooks,
+  proving deployment did not relabel historical news as a live trigger. Paper has no enrollment
+  or order, Robinhood mutation remains disabled, and live money remains impossible.
+- Corrections/follow-ups: observe completion of the in-flight Shadow tick and the next genuine
+  first-seen news match. Graduation and Event forward-validation labels will change only when
+  durable new evidence satisfies their rules; no passing output is manufactured for rollout.
+
 ## Template for future commit entries
 
 Copy this section before making a commit:
