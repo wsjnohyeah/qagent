@@ -406,6 +406,8 @@ def create_app(
         now_provider=shadow_now_provider,
         promotion_policy_path=app_settings.research_promotion_policy_path,
         new_exposure_not_before=app_settings.shadow_new_exposure_not_before,
+        market_data_source="alpaca",
+        market_data_feed=app_settings.alpaca_stock_feed,
     )
     event_alpha.shadow = shadow
     event_alpha.auto_shadow_enabled = (

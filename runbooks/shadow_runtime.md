@@ -49,6 +49,11 @@ override and does not claim qualification.
   next-open decision. `PREOPEN_EVALUATION_ARMED` records this choice. Activation after the next
   open continues to skip that bar, so a missed entry can never be backdated.
 - The runtime needs at least 21 decision bars and one following execution bar.
+- Before validating its input bars, Shadow applies the newest applicable
+  `market.history.boundary.observed.v1` event that was already known at the tick time and whose
+  provider probe covered the requested leading window. This is the same audited listing or
+  post-suspension boundary used by research; missing sessions after the boundary still fail
+  closed.
 - Each decision uses evidence available by the decision bar's `available_from` timestamp.
 - Momentum and mean-reversion use their immutable `StrategySpec` parameters and one of the
   approved 1, 2, 5, 10, 20, 63, 126, or 252-session holding horizons. The literal buy-and-hold

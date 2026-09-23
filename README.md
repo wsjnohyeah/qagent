@@ -219,7 +219,10 @@ Newly listed symbols do not fabricate pre-listing gaps. After a complete leading
 provider probe, the coordinator records an immutable provider-observed history boundary and
 strictly validates every session from that boundary forward. Expanding the requested lookback
 beyond the recorded probe forces a new query; internal/trailing gaps still fail closed, and
-insufficient post-listing history still stops at the existing research gates.
+insufficient post-listing history still stops at the existing research gates. Forward Shadow
+uses the same point-in-time verified boundary before running its independent market-data
+quality check, so a validated post-suspension strategy is not rejected again against obsolete
+pre-boundary history.
 
 An extended suspension is handled separately and more strictly: only a 20-session-or-longer
 missing interval preceded by at least 20 explicit zero-volume provider bars and followed by a

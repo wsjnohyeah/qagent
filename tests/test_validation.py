@@ -26,6 +26,10 @@ from agentic_quant.domain import BacktestCostModel, EventEnvelope, StockBar
 from agentic_quant.ids import uuid7
 from agentic_quant.ledger import EventLedger
 from agentic_quant.market_calendar import MarketSessionClock
+from agentic_quant.market_history import (
+    MARKET_HISTORY_BOUNDARY_EVENT,
+    MARKET_HISTORY_BOUNDARY_POLICY_VERSION,
+)
 from agentic_quant.market_scanner import MARKET_SCAN_EVENT
 from agentic_quant.market_store import MarketDataStore
 from agentic_quant.migrations import upgrade_database
@@ -128,6 +132,66 @@ def test_shadow_tick_isolates_one_deployment_failure(
         run = connection.execute(select(shadow_runs)).one()
     assert run.status == "DEGRADED"
     assert run.error_code == "ValueError"
+
+
+def test_shadow_uses_point_in_time_verified_history_boundary(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    store = ResearchStore(ledger.engine)
+    objects = SystemObjectStore(ledger.engine, ledger)
+    objects.ensure_defaults()
+    bars = _regime_bars(count=60)
+    boundary_index = 30
+    boundary_known_at = bars[boundary_index].available_from
+    ledger.append(
+        EventEnvelope(
+            event_id=uuid7(),
+            event_type=MARKET_HISTORY_BOUNDARY_EVENT,
+            event_time=boundary_known_at,
+            emitted_at=boundary_known_at,
+            producer="research-coordinator",
+            correlation_id=uuid7(),
+            payload={
+                "policy_version": MARKET_HISTORY_BOUNDARY_POLICY_VERSION,
+                "symbol": "AAPL",
+                "timeframe": "1Day",
+                "source": "alpaca",
+                "feed": "sip",
+                "probed_start": bars[0].event_time.isoformat(),
+                "observed_start": bars[boundary_index].event_time.isoformat(),
+                "observed_at": boundary_known_at.isoformat(),
+                "evidence_ingestion_run_ids": ["test-ingestion"],
+                "interpretation": "PROVIDER_OBSERVED_POST_SUSPENSION_START",
+            },
+        )
+    )
+    shadow = ShadowRuntime(
+        ledger.engine,
+        store,
+        objects,
+        risk_policy=RiskPolicy.from_yaml(settings.risk_policy_path),
+        restrictions=RestrictionRegistry.from_yaml(
+            settings.restricted_securities_path
+        ),
+    )
+
+    before_boundary_is_known = shadow._bars_with_verified_history_boundary(
+        symbol="AAPL",
+        timeframe="1Day",
+        observed_at=boundary_known_at - timedelta(microseconds=1),
+        bars=bars,
+    )
+    after_boundary_is_known = shadow._bars_with_verified_history_boundary(
+        symbol="AAPL",
+        timeframe="1Day",
+        observed_at=bars[-1].available_from,
+        bars=bars,
+    )
+
+    assert before_boundary_is_known == bars
+    assert after_boundary_is_known == bars[boundary_index:]
 
 
 def _regime_bars(count: int = 60) -> tuple[StockBar, ...]:

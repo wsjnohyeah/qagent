@@ -33,6 +33,11 @@ from agentic_quant.llm import LLMConfigurationError
 from agentic_quant.llm import LLMProviderError
 from agentic_quant.llm_budget import LLMBudgetExceededError
 from agentic_quant.market_calendar import get_market_calendar
+from agentic_quant.market_history import (
+    MARKET_HISTORY_BOUNDARY_EVENT,
+    MARKET_HISTORY_BOUNDARY_POLICY_VERSION,
+    known_market_history_boundary,
+)
 from agentic_quant.market_ingestion import MarketDataIngestionService
 from agentic_quant.market_scanner import AUTO_TRADING_POOL_SLUG, MARKET_SCAN_EVENT
 from agentic_quant.market_store import MarketDataStore
@@ -73,8 +78,6 @@ from agentic_quant.validation import (
 from agentic_quant.virtual_account import STRATEGY_SANDBOX_INITIAL_EQUITY
 
 
-MARKET_HISTORY_BOUNDARY_EVENT = "market.history.boundary.observed.v1"
-MARKET_HISTORY_BOUNDARY_POLICY_VERSION = "market_history_boundary@0.2.0"
 DOCUMENT_HISTORY_COVERAGE_EVENT = "document.history.coverage.v1"
 SEC_REFERENCE_REFRESH_EVENT = "sec.reference.refresh.v1"
 MINIMUM_SUSPENSION_SESSIONS = 20
@@ -250,34 +253,17 @@ class ResearchCoordinatorHandler:
         symbol: str,
         timeframe: str,
         desired_start: datetime,
+        known_at: datetime,
     ) -> tuple[str, datetime] | None:
-        with self.ledger.engine.connect() as connection:
-            rows = connection.execute(
-                select(ledger_events.c.event_id, ledger_events.c.payload)
-                .where(
-                    ledger_events.c.event_type == MARKET_HISTORY_BOUNDARY_EVENT,
-                    ledger_events.c.payload["symbol"].as_string()
-                    == symbol.upper(),
-                    ledger_events.c.payload["timeframe"].as_string()
-                    == timeframe,
-                )
-                .order_by(ledger_events.c.sequence.desc())
-                .limit(100)
-            ).all()
-        for row in rows:
-            payload = dict(row.payload)
-            if (
-                payload.get("source") != "alpaca"
-                or payload.get("feed") != self.settings.alpaca_stock_feed
-                or payload.get("policy_version")
-                != MARKET_HISTORY_BOUNDARY_POLICY_VERSION
-            ):
-                continue
-            probed_start = datetime.fromisoformat(str(payload["probed_start"]))
-            observed_start = datetime.fromisoformat(str(payload["observed_start"]))
-            if probed_start <= desired_start:
-                return str(row.event_id), max(desired_start, observed_start)
-        return None
+        return known_market_history_boundary(
+            self.ledger.engine,
+            symbol=symbol,
+            timeframe=timeframe,
+            desired_start=desired_start,
+            known_at=known_at,
+            source="alpaca",
+            feed=self.settings.alpaca_stock_feed,
+        )
 
     def _record_history_boundary(
         self,
@@ -399,6 +385,7 @@ class ResearchCoordinatorHandler:
             symbol=symbol,
             timeframe=timeframe,
             desired_start=desired_start,
+            known_at=as_of,
         )
         coverage_start = known_boundary[1] if known_boundary else desired_start
         stored = self.market.bars_between(

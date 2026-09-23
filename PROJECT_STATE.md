@@ -2,6 +2,12 @@
 
 ## Current
 
+- Source now makes Forward Shadow reuse the same point-in-time, provider-verified listing or
+  post-suspension history boundary as coordinator research. This corrects the production NBIS
+  counterexample where ten valid post-resumption sandboxes repeatedly degraded a Shadow tick by
+  rechecking obsolete pre-boundary history. Internal and trailing gaps after the boundary still
+  fail closed. Deployment and audited restoration of new Shadow exposure are pending.
+
 - Implemented foundations through the corrected Phase 6.1 baseline, the four pre-cloud
   hardening milestones, and a unified Phase 7 Alpaca Paper lifecycle, including
   Phase 1B open-session checks, corrected point-in-time research/ML contracts, constrained

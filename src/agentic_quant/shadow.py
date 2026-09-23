@@ -43,11 +43,13 @@ from agentic_quant.domain import (
     RiskDecision,
     SignalAction,
     SignalCandidate,
+    StockBar,
     TradePlan,
     Verdict,
 )
 from agentic_quant.ids import uuid7
 from agentic_quant.market_calendar import MarketSessionClock
+from agentic_quant.market_history import known_market_history_boundary
 from agentic_quant.market_scanner import AUTO_TRADING_POOL_SLUG, MARKET_SCAN_EVENT
 from agentic_quant.research import (
     PointInTimeFeatureBuilder,
@@ -114,6 +116,8 @@ class ShadowRuntime:
         promotion_policy: PromotionGatePolicy | None = None,
         promotion_policy_path: Path | None = None,
         new_exposure_not_before: datetime | None = None,
+        market_data_source: str = "alpaca",
+        market_data_feed: str = "sip",
     ) -> None:
         self.engine = engine
         self.research_store = research_store
@@ -142,6 +146,8 @@ class ShadowRuntime:
             if new_exposure_not_before is not None
             else None
         )
+        self.market_data_source = market_data_source
+        self.market_data_feed = market_data_feed
         self._tick_lock = asyncio.Lock()
 
     def _now(self) -> datetime:
@@ -149,6 +155,29 @@ class ShadowRuntime:
         if value.tzinfo is None:
             raise ValueError("Shadow runtime clock must be timezone-aware")
         return value.astimezone(UTC)
+
+    def _bars_with_verified_history_boundary(
+        self,
+        *,
+        symbol: str,
+        timeframe: str,
+        observed_at: datetime,
+        bars: tuple[StockBar, ...],
+    ) -> tuple[StockBar, ...]:
+        if not bars:
+            return bars
+        boundary = known_market_history_boundary(
+            self.engine,
+            symbol=symbol,
+            timeframe=timeframe,
+            desired_start=bars[0].event_time,
+            known_at=observed_at,
+            source=self.market_data_source,
+            feed=self.market_data_feed,
+        )
+        if boundary is None:
+            return bars
+        return tuple(bar for bar in bars if bar.event_time >= boundary[1])
 
     def initialize_virtual_account(
         self,
@@ -2061,6 +2090,12 @@ class ShadowRuntime:
             symbol=str(deployment["symbol"]),
             timeframe=str(deployment["timeframe"]),
             as_of_end=observed_at,
+        )
+        bars = self._bars_with_verified_history_boundary(
+            symbol=str(deployment["symbol"]),
+            timeframe=str(deployment["timeframe"]),
+            observed_at=observed_at,
+            bars=bars,
         )
         if len(bars) < 22:
             return 0, created

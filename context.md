@@ -1,6 +1,6 @@
 # Master Project Context
 
-Last updated: 2026-09-16 PDT
+Last updated: 2026-09-23 PDT
 
 Context format: v1
 
@@ -16,7 +16,7 @@ estimated-cost ceiling; a Playbook may enter only isolated Candidate Shadow afte
 validation and a new forward-observed news match. Off-site backup/alerting and statistical/elapsed production evidence
 remain open.
 
-Current documented baseline: C116 — `Record news Event Shadow production rollout`
+Current documented baseline: C117 — `Honor verified history boundaries in Shadow`
 
 ## Purpose and authority
 
@@ -5651,6 +5651,37 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: allow the bounded news history and later holdout set to accumulate,
   inspect the first genuine Playbook validation and future match, and keep Event strategies out
   of Paper. Off-site backup replication and external notifications remain operator inputs.
+
+### C117 — `Honor verified history boundaries in Shadow`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-23 PDT.
+- User intent: explain why production stopped opening new Shadow positions, repair the
+  `DEGRADED` Shadow condition, and restore autonomous broker-free exposure without enabling
+  live trading.
+- Scope: centralize lookup of audited `market.history.boundary.observed.v1` events; make both
+  coordinator research and Forward Shadow apply only a current-policy boundary that was known
+  at the observation time, matches the configured provider/feed, and covers the requested
+  leading window; pass the configured Alpaca feed into Shadow; add a regression for pre/post
+  boundary visibility; and update the README, Shadow runbook, ADR 0029, and project state.
+- Architecture/decision impact: no quality threshold is weakened. The correction makes Shadow
+  consume the same verified listing/post-suspension segment already used by research and exact
+  validation. Missing or invalid sessions inside that segment remain fatal. Production startup
+  continues to pause exposure by design; restoration remains a separate audited administrator
+  action, and `LIVE_TRADING_ENABLED=false` remains mandatory.
+- Validation: focused boundary/Shadow tests pass. `make check` passed Flake8, strict mypy
+  across 63 source files, and all 234 tests; `make doctor`, the repository secret scan, the
+  authenticated full-Compose doctor, and PostgreSQL Alembic zero-drift check also pass.
+  CI/image publication, guarded deployment, a post-deploy Shadow tick, and audited runtime
+  resume remain required before production completion is claimed.
+- Expected global state after commit: source can publish an immutable image in which the ten
+  active NBIS sandboxes use their persisted `2024-10-21` post-suspension boundary instead of
+  repeatedly failing against obsolete pre-boundary history. Production remains on `dc5d5d7`,
+  with new exposure paused by its last worker startup, until the guarded rollout and audited
+  resume complete.
+- Corrections/follow-ups: record the exact CI/image/backup/deploy evidence, confirm a Shadow
+  run with zero NBIS deployment failures, then restore new broker-free exposure and update the
+  durable production state. Do not change Paper enrollment or live-money controls.
 
 ## Template for future commit entries
 

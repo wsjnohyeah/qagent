@@ -32,6 +32,10 @@ errors. A completely empty response becomes `WAITING_MARKET_HISTORY`, not a retr
 
 - Newly listed companies can enter the same scalable workflow without fabricating pre-listing
   bars or weakening internal-gap checks.
+- Research validation and Forward Shadow both consume the same point-in-time boundary event.
+  Shadow therefore checks only the verified current segment for a validated listing or
+  post-suspension history, while continuing to reject any internal or trailing gap within that
+  segment.
 - The boundary means “earliest history returned after a complete provider probe,” not a legal
   IPO/listing-date claim and not historical-universe membership evidence.
 - Young symbols may still stop at minimum-history, model, or validation gates; the change does
