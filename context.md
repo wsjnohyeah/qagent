@@ -5683,6 +5683,43 @@ lifecycle. No Paper order was used as a build or deployment test.
   run with zero NBIS deployment failures, then restore new broker-free exposure and update the
   durable production state. Do not change Paper enrollment or live-money controls.
 
+### C118 — `Add fast Shadow graduation and exploratory Event evidence`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-23 PDT.
+- User intent: deploy the previously approved faster Shadow graduation rules and make Event
+  Playbooks more likely to produce useful forward strategy evidence without admitting failed
+  hypotheses or weakening deterministic risk controls.
+- Scope: add versioned, derived graduation assessments for 1/2/5/10/20-session sandboxes; expose
+  the policy and per-deployment evidence through the API and Control Center; upgrade Event
+  validation/strategy contracts to `0.2.0`; permit discovery-qualified
+  `INSUFFICIENT_HOLDOUT` Playbooks to enter explicitly exploratory, future-first-seen Candidate
+  Shadow; continue blocking `REJECTED` Playbooks and historical replay; prefer fully held-out
+  Playbooks, limit each forward news Card to one sandbox, reuse materially identical Playbook
+  families, and aggregate forward Event outcomes at the Playbook level; add ADR 0049, tests, and
+  operator documentation.
+- Architecture/decision impact: Shadow graduation is evidence metadata rather than a deployment
+  lifecycle state, so successful sandboxes continue trading. Fast graduation requires the
+  horizon-specific session/trade minimums, two wins, positive realized P&L, profit factor at
+  least 1.05, drawdown no greater than 10%, current contract, and a best-trade sensitivity check.
+  Event exploratory admission moves the independent forward-observation layer earlier but never
+  grants Paper or live authority. The LLM remains unable to size, waive risk, or submit orders.
+- Validation: focused Event Alpha, graduation, and Phase 6 Control Center tests passed. The full
+  release gate passed Flake8, strict mypy across 64 source files, all 239 tests, local and
+  authenticated Compose doctors, the repository secret scan, image rebuild, and PostgreSQL
+  Alembic zero-drift inspection. Production backup
+  `/opt/agentic-quant/backups/20260923T075152Z` passed checksum, object archive, and PostgreSQL
+  catalog verification. Exact-SHA CI/image publication and guarded deployment remain pending.
+- Expected global state after commit: source is ready for immutable CI publication and guarded
+  production rollout. Production remains on `dc5d5d74973965e826aa0184450dbbb05153ab0e`
+  until deployment. The current 18 insufficient Event Playbooks will receive fresh `0.2.0`
+  validations after rollout and may react only to news first seen after those validations; the
+  11 rejected Playbooks remain blocked. Existing technical sandboxes retain all history and gain
+  readable derived graduation evidence without changing their `ACTIVE` state.
+- Corrections/follow-ups: after exact-SHA deployment, verify the NBIS boundary fix with a clean
+  Shadow tick, verify new Event validation counts and zero historical-replay matches, restore
+  already approved broker-free exposure through an audited action, and record production state.
+
 ## Template for future commit entries
 
 Copy this section before making a commit:

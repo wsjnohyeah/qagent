@@ -15,9 +15,9 @@ Paper, Robinhood order submission, or live trading.
 ## Enablement
 
 Event Alpha is safe-off by default. When enabled, Card extraction and analog synthesis use the
-dedicated `event_research` workload, currently routed to Meta Muse Spark with a `$40/day`
-workload ceiling. All active LLM routes currently use Meta, whose provider and project-wide
-daily ceilings are `$80`; the project monthly ceiling is `$1,400`.
+dedicated `event_research` workload, currently routed to Meta Muse Spark with a `$5/day`
+workload ceiling. All active LLM routes currently use Meta; workloads compete under the shared
+`$10/day` provider/project ceiling. The project monthly ceiling is `$1,400`.
 
 ```dotenv
 AUTONOMOUS_COORDINATOR_ENABLED=true
@@ -51,10 +51,13 @@ Unchanged inputs reuse immutable prior results and do not spend again just becau
    event, profit factor, and worst outcome are code-computed gates.
 6. A Playbook is then evaluated only on matching events later than its anchor event. The latest
    append-only certificate is authoritative and replaces any earlier certificate when new
-   holdout evidence arrives.
-7. A `SHADOW_ELIGIBLE` Playbook can match only a `FORWARD_FIRST_SEEN`, bullish, current-schema
-   news Card observed after that certificate. Event type must match and generalized-tag Jaccard
-   similarity must be at least 0.65. Historical replay can never trigger a deployment.
+   holdout evidence arrives. Equivalent event type/direction/horizon hypotheses with at least
+   0.65 tag similarity reuse the existing Playbook family.
+7. A `SHADOW_ELIGIBLE` Playbook, or a discovery-qualified Playbook whose latest status is only
+   `INSUFFICIENT_HOLDOUT`, can match a `FORWARD_FIRST_SEEN`, bullish, current-schema news Card
+   observed after that certificate. The latter is explicitly `EVENT_EXPLORATORY_FORWARD`.
+   `REJECTED` remains blocked. Event type must match and generalized-tag Jaccard similarity must
+   be at least 0.65. Historical replay can never trigger, and one Card starts at most one sandbox.
 8. A match compiles one immutable `event_playbook` StrategySpec and exact execution certificate,
    then starts one isolated `$10,000` Candidate Shadow sandbox. It submits at most one next-session
    DAY limit plan, applies the existing volatility-aware stop capped at 15%, a 2R target, 2% of
@@ -87,6 +90,13 @@ symbols, at least 50% positive outcomes, positive median, positive mean without 
 profit factor at least 1.10, and no outcome below -20%. Passing means Candidate Shadow evidence,
 not proven profitability or Paper eligibility. The latest validation always wins; a later
 failure makes an earlier eligible certificate stale.
+
+An insufficient holdout is not a failed holdout. If the discovery gate passed, it may collect
+exploratory forward evidence from genuinely new news while the complete holdout set grows.
+Across future one-shot matches, `EVENT_FORWARD_VALIDATED` requires at least three closed trades
+on two symbols, at least two winners, positive net P&L, profit factor at least 1.05, and no worse
+than a `$50` loss after removing the best trade. This is still Candidate Shadow evidence and is
+never Paper eligible.
 
 ## Inspection
 

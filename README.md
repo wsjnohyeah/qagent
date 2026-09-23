@@ -118,9 +118,9 @@ reservations stop over-budget calls before they reach a provider. Token counts r
 diagnostic telemetry, not operator-configured limits. An interrupted provider call releases
 its abandoned reservation after the configured provider timeout plus a five-minute safety
 margin, so a process restart cannot permanently consume budget capacity.
-`llm_budget@0.4.0` preserves the existing per-workload ceilings, gives Event Alpha its own
-`$40/day` `event_research` allowance, and caps the sole active Meta provider at `$80/day` behind
-the unchanged `$80/day` combined project ceiling. The project monthly ceiling is `$1,400`.
+`llm_budget@0.4.0` gives every workload, including Event Alpha, a `$5/day` allowance while all
+active Meta workloads compete under the same `$10/day` provider/project ceiling. The project
+monthly ceiling is `$1,400`.
 Same-period consumption is reconstructed from durable reservations across policy versions, so
 deploying a higher ceiling does not reset money already spent that day.
 
@@ -128,10 +128,13 @@ Event Alpha adds a parallel, news-first LLM research lane for sparse events with
 predictive event classifier. It clusters related news into Event Episodes, creates citation-bound
 Event Cards, and deterministically measures cross-stock 1/2/5/10/20-session outcomes. The LLM may
 propose a case-based Playbook or abstain; code alone runs the discovery gate and validates the
-Playbook on later unseen events. Only a current held-out certificate plus a future, first-seen
-news match can compile a one-shot strategy for isolated Candidate Shadow. Historical replay,
-SEC/IR records, Paper, Robinhood orders, and live money cannot trigger this path. See ADR 0044,
-ADR 0047, ADR 0048, and `runbooks/event_alpha.md`.
+Playbook on later unseen events. A discovery-qualified Playbook with an insufficient holdout may
+collect explicitly labeled exploratory evidence only from a future, first-seen news match; a
+deterministically rejected Playbook remains blocked. A complete holdout pass is the stronger tier.
+One future Card starts at most one isolated Candidate Shadow sandbox, and materially duplicate
+hypotheses reuse a Playbook family. Historical replay, SEC/IR records, Paper, Robinhood orders,
+and live money cannot trigger this path. See ADR 0044, ADR 0047, ADR 0048, ADR 0049, and
+`runbooks/event_alpha.md`.
 
 Phase 4B exposes that gateway in the local Control Center. The operator can create immutable
 workload-routing revisions while preserving model, route, token, latency, source, and
@@ -196,6 +199,13 @@ entries, liquidates any open virtual position at the next causally executable pr
 permanently retires that strategy version. Explicit commission is `$0`; spread, slippage,
 market impact, liquidity, and gap risk remain modeled. The legacy shared account is retained
 only as immutable history and as a migration source; Paper remains the portfolio-level test.
+
+`shadow_graduation@0.1.0` derives a non-mutating forward-evidence label from each sandbox's
+append-only journal. The accelerated 1/2/5/10/20-session thresholds require respectively
+5/4/3/3/2 closed trades over 7/10/15/25/40 completed market sessions, plus at least two wins,
+positive realized P&L, profit factor at least 1.05, drawdown no greater than 10%, a current
+contract, and resilience after removing the best trade. Graduation does not stop continued
+Shadow observation and does not grant Paper or live-money authority.
 
 The autonomous coordinator persists an hourly, per-symbol nine-stage DAG from full-window,
 gap-repaired market data and source-specific document history through feature/ML/LLM research,

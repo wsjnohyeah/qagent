@@ -22,6 +22,7 @@ from agentic_quant.database import (
     event_alpha_outcomes,
     event_alpha_playbooks,
     event_alpha_validations,
+    shadow_events,
     validation_reports,
     source_document_versions,
     source_documents,
@@ -50,8 +51,8 @@ EVENT_CARD_PROMPT_VERSION = "event_card_extraction@0.2.0"
 EVENT_ASSESSMENT_SCHEMA_VERSION = "event_analog_assessment@0.2.0"
 EVENT_ASSESSMENT_PROMPT_VERSION = "event_analog_synthesis@0.2.0"
 EVENT_ALPHA_GATE_VERSION = "event_alpha_gate@0.2.0"
-EVENT_ALPHA_VALIDATION_VERSION = "event_playbook_validation@0.1.0"
-EVENT_ALPHA_STRATEGY_VERSION = "event_news_strategy@0.1.0"
+EVENT_ALPHA_VALIDATION_VERSION = "event_playbook_validation@0.2.0"
+EVENT_ALPHA_STRATEGY_VERSION = "event_news_strategy@0.2.0"
 EVENT_ALPHA_HORIZONS = (1, 2, 5, 10, 20)
 EVENT_ALPHA_MAX_DOCUMENTS = 8
 EVENT_ALPHA_MAX_EVIDENCE_REJECTIONS_PER_CYCLE = 50
@@ -60,6 +61,11 @@ EVENT_ALPHA_MIN_NEWS_EVIDENCE_WORDS = 12
 EVENT_ALPHA_MINIMUM_HOLDOUT_EVENTS = 3
 EVENT_ALPHA_MINIMUM_HOLDOUT_SYMBOLS = 2
 EVENT_ALPHA_MATCH_THRESHOLD = Decimal("0.65")
+EVENT_ALPHA_FORWARD_MINIMUM_TRADES = 3
+EVENT_ALPHA_FORWARD_MINIMUM_SYMBOLS = 2
+EVENT_ALPHA_FORWARD_MINIMUM_WINS = 2
+EVENT_ALPHA_FORWARD_MINIMUM_PROFIT_FACTOR = Decimal("1.05")
+EVENT_ALPHA_FORWARD_BEST_TRADE_TOLERANCE_USD = Decimal("-50")
 HISTORICAL_PROVIDER_REPLAY = "PROVIDER_PUBLISHED_REPLAY"
 FORWARD_OBSERVED = "FORWARD_FIRST_SEEN"
 
@@ -961,6 +967,116 @@ class EventAlphaStore:
                 )
             ]
 
+    def forward_playbook_evidence(self, *, limit: int = 500) -> list[dict[str, Any]]:
+        with self.engine.connect() as connection:
+            matches = connection.execute(
+                select(
+                    event_alpha_matches.c.event_playbook_id,
+                    event_alpha_matches.c.shadow_deployment_id,
+                    event_alpha_matches.c.symbol,
+                )
+                .where(event_alpha_matches.c.status == "SHADOW_STARTED")
+                .where(event_alpha_matches.c.shadow_deployment_id.is_not(None))
+                .order_by(event_alpha_matches.c.created_at.desc())
+                .limit(limit)
+            ).all()
+            deployment_ids = {
+                str(row.shadow_deployment_id)
+                for row in matches
+                if row.shadow_deployment_id is not None
+            }
+            exits = connection.execute(
+                select(
+                    shadow_events.c.shadow_deployment_id,
+                    shadow_events.c.realized_pnl_delta,
+                )
+                .where(shadow_events.c.shadow_deployment_id.in_(deployment_ids))
+                .where(shadow_events.c.event_type == "VIRTUAL_FILL_2")
+                .order_by(shadow_events.c.event_time)
+            ).all()
+        match_by_deployment = {
+            str(row.shadow_deployment_id): row for row in matches
+        }
+        grouped: dict[str, dict[str, Any]] = {}
+        for row in matches:
+            playbook_id = str(row.event_playbook_id)
+            grouped.setdefault(
+                playbook_id,
+                {
+                    "event_playbook_id": playbook_id,
+                    "forward_match_count": 0,
+                    "closed_trade_pnls": [],
+                    "closed_symbols": set(),
+                },
+            )["forward_match_count"] += 1
+        for row in exits:
+            match = match_by_deployment.get(str(row.shadow_deployment_id))
+            if match is None:
+                continue
+            evidence = grouped[str(match.event_playbook_id)]
+            evidence["closed_trade_pnls"].append(
+                Decimal(str(row.realized_pnl_delta))
+            )
+            evidence["closed_symbols"].add(str(match.symbol))
+        results = []
+        for evidence in grouped.values():
+            trades = list(evidence.pop("closed_trade_pnls"))
+            symbols = sorted(evidence.pop("closed_symbols"))
+            wins = [value for value in trades if value > 0]
+            losses = [value for value in trades if value < 0]
+            net = sum(trades, Decimal("0"))
+            gross_profit = sum(wins, Decimal("0"))
+            gross_loss = abs(sum(losses, Decimal("0")))
+            profit_factor = (
+                Decimal("999999")
+                if not losses and wins
+                else Decimal("0")
+                if not losses
+                else gross_profit / gross_loss
+            )
+            without_best = net - max(trades) if trades else None
+            graduated = (
+                len(trades) >= EVENT_ALPHA_FORWARD_MINIMUM_TRADES
+                and len(symbols) >= EVENT_ALPHA_FORWARD_MINIMUM_SYMBOLS
+                and len(wins) >= EVENT_ALPHA_FORWARD_MINIMUM_WINS
+                and net > 0
+                and profit_factor >= EVENT_ALPHA_FORWARD_MINIMUM_PROFIT_FACTOR
+                and without_best is not None
+                and without_best >= EVENT_ALPHA_FORWARD_BEST_TRADE_TOLERANCE_USD
+            )
+            results.append(
+                {
+                    **evidence,
+                    "status": (
+                        "EVENT_FORWARD_VALIDATED"
+                        if graduated
+                        else "EVENT_FORWARD_OBSERVING"
+                    ),
+                    "closed_trades": len(trades),
+                    "closed_symbols": symbols,
+                    "wins": len(wins),
+                    "losses": len(losses),
+                    "realized_net_pnl": str(net),
+                    "profit_factor": str(profit_factor),
+                    "best_trade_excluded_pnl": (
+                        str(without_best) if without_best is not None else None
+                    ),
+                    "thresholds": {
+                        "minimum_closed_trades": EVENT_ALPHA_FORWARD_MINIMUM_TRADES,
+                        "minimum_symbols": EVENT_ALPHA_FORWARD_MINIMUM_SYMBOLS,
+                        "minimum_wins": EVENT_ALPHA_FORWARD_MINIMUM_WINS,
+                        "minimum_profit_factor": str(
+                            EVENT_ALPHA_FORWARD_MINIMUM_PROFIT_FACTOR
+                        ),
+                        "best_trade_excluded_pnl": str(
+                            EVENT_ALPHA_FORWARD_BEST_TRADE_TOLERANCE_USD
+                        ),
+                    },
+                    "paper_eligible": False,
+                }
+            )
+        return results
+
     def health_summary(self) -> dict[str, Any]:
         latest_validation_times = (
             select(
@@ -1073,6 +1189,55 @@ class EventAlphaStore:
                             )
                         )
                         .where(event_alpha_validations.c.status == "SHADOW_ELIGIBLE")
+                    ).scalar_one()
+                ),
+                "event_alpha_exploratory_playbooks": int(
+                    connection.execute(
+                        select(
+                            func.count(
+                                func.distinct(
+                                    event_alpha_validations.c.event_playbook_id
+                                )
+                            )
+                        )
+                        .select_from(
+                            event_alpha_validations.join(
+                                latest_validation_times,
+                                and_(
+                                    latest_validation_times.c.event_playbook_id
+                                    == event_alpha_validations.c.event_playbook_id,
+                                    latest_validation_times.c.latest_created_at
+                                    == event_alpha_validations.c.created_at,
+                                ),
+                            )
+                        )
+                        .where(
+                            event_alpha_validations.c.status
+                            == "INSUFFICIENT_HOLDOUT"
+                        )
+                    ).scalar_one()
+                ),
+                "event_alpha_rejected_playbooks": int(
+                    connection.execute(
+                        select(
+                            func.count(
+                                func.distinct(
+                                    event_alpha_validations.c.event_playbook_id
+                                )
+                            )
+                        )
+                        .select_from(
+                            event_alpha_validations.join(
+                                latest_validation_times,
+                                and_(
+                                    latest_validation_times.c.event_playbook_id
+                                    == event_alpha_validations.c.event_playbook_id,
+                                    latest_validation_times.c.latest_created_at
+                                    == event_alpha_validations.c.created_at,
+                                ),
+                            )
+                        )
+                        .where(event_alpha_validations.c.status == "REJECTED")
                     ).scalar_one()
                 ),
                 "event_alpha_matches": int(
@@ -1411,8 +1576,21 @@ class EventAlphaService:
         selected = analogs_by_horizon[proposal.selected_horizon_sessions]
         selected_stats = statistics[str(proposal.selected_horizon_sessions)]
         gate = self._gate(selected_stats, proposal)
+        existing_family = (
+            self._matching_playbook_family(card=card, proposal=proposal)
+            if gate["eligible_for_playbook_candidate"]
+            else None
+        )
+        if existing_family is not None:
+            gate = {
+                **gate,
+                "playbook_family_id": existing_family["event_playbook_id"],
+                "family_reuse": True,
+            }
         status = (
-            "PLAYBOOK_CANDIDATE"
+            "PLAYBOOK_FAMILY_EVIDENCE"
+            if existing_family is not None
+            else "PLAYBOOK_CANDIDATE"
             if gate["eligible_for_playbook_candidate"]
             else "RESEARCH_ONLY"
         )
@@ -1429,7 +1607,7 @@ class EventAlphaService:
             invocation_id=invocation.invocation_id,
             rejection_reason=None,
         )
-        if gate["eligible_for_playbook_candidate"]:
+        if gate["eligible_for_playbook_candidate"] and existing_family is None:
             material = {
                 "assessment": proposal.model_dump(mode="json"),
                 "assessment_input_sha256": input_sha256,
@@ -1595,12 +1773,14 @@ class EventAlphaService:
             "errors": errors,
             "shadow_path_implemented": True,
             "execution_boundary": (
-                "Only a chronologically held-out Event Playbook validation can compile a "
-                "one-shot, news-triggered strategy for isolated broker-free Shadow"
+                "A discovery-qualified Playbook with an insufficient holdout may collect "
+                "exploratory evidence only from future, first-seen news. A deterministic "
+                "holdout pass remains the stronger Event Shadow tier"
             ),
         }
 
     def status(self, *, limit: int = 50) -> dict[str, Any]:
+        forward_evidence = self.store.forward_playbook_evidence(limit=500)
         return {
             **self.summary(),
             "recent_cards": [
@@ -1620,6 +1800,11 @@ class EventAlphaService:
             ),
             "recent_validations": self.store.validations(limit=limit),
             "recent_matches": self.store.matches(limit=limit),
+            "forward_playbook_evidence": forward_evidence,
+            "event_alpha_forward_validated_playbooks": sum(
+                value["status"] == "EVENT_FORWARD_VALIDATED"
+                for value in forward_evidence
+            ),
         }
 
     def summary(self) -> dict[str, Any]:
@@ -1637,6 +1822,9 @@ class EventAlphaService:
             "shadow_path_implemented": True,
             "shadow_eligible": bool(
                 health["event_alpha_shadow_eligible_playbooks"]
+            ),
+            "exploratory_shadow_ready": bool(
+                health["event_alpha_exploratory_playbooks"]
             ),
             "source_policy": "NEWS_ONLY",
             "episode_policy": "36-hour same-symbol/type headline cluster",
@@ -1781,11 +1969,35 @@ class EventAlphaService:
         if as_of.tzinfo is None:
             raise ValueError("Event match cutoff must be timezone-aware")
         results: list[dict[str, Any]] = []
+        activated_card_ids = {
+            str(value["event_card_id"])
+            for value in self.store.matches(limit=5_000)
+            if value.get("status") == "SHADOW_STARTED"
+        }
+        candidates: list[tuple[dict[str, Any], dict[str, Any]]] = []
         for playbook in self.store.playbooks(limit=500):
             playbook_id = str(playbook["event_playbook_id"])
             validation = self.store.latest_validation(playbook_id)
-            if validation is None or validation.get("status") != "SHADOW_ELIGIBLE":
+            if validation is None or validation.get("schema_version") != (
+                EVENT_ALPHA_VALIDATION_VERSION
+            ):
                 continue
+            if validation.get("status") not in {
+                "SHADOW_ELIGIBLE",
+                "INSUFFICIENT_HOLDOUT",
+            }:
+                continue
+            candidates.append((playbook, validation))
+        candidates.sort(
+            key=lambda value: (
+                value[1].get("status") == "SHADOW_ELIGIBLE",
+                _utc(value[1]["created_at"]),
+            ),
+            reverse=True,
+        )
+        for playbook, validation in candidates:
+            playbook_id = str(playbook["event_playbook_id"])
+            exploratory = validation.get("status") == "INSUFFICIENT_HOLDOUT"
             proposal = dict(playbook.get("playbook_json") or {})
             anchor = self.store.playbook_context(playbook_id)
             if anchor is None:
@@ -1798,6 +2010,8 @@ class EventAlphaService:
                 )
             )
             for card in self.store.cards(limit=500):
+                if str(card.get("event_card_id")) in activated_card_ids:
+                    continue
                 if card.get("schema_version") != EVENT_CARD_SCHEMA_VERSION:
                     continue
                 if card.get("status") != "COMPLETED":
@@ -1845,8 +2059,16 @@ class EventAlphaService:
                             validation=validation,
                             card=card,
                             similarity=similarity,
-                            status="VALIDATED_MATCH",
-                            reason="Validated match awaits Event Shadow enablement",
+                            status=(
+                                "EXPLORATORY_MATCH"
+                                if exploratory
+                                else "VALIDATED_MATCH"
+                            ),
+                            reason=(
+                                "Exploratory forward match awaits Event Shadow enablement"
+                                if exploratory
+                                else "Validated match awaits Event Shadow enablement"
+                            ),
                         )
                     )
                     continue
@@ -1862,7 +2084,11 @@ class EventAlphaService:
                         validation_report_id=report_id,
                         reason=(
                             "Automatic Event Alpha Candidate Shadow admission from a "
-                            "chronologically held-out playbook certificate"
+                            + (
+                                "discovery-qualified playbook awaiting forward evidence"
+                                if exploratory
+                                else "chronologically held-out playbook certificate"
+                            )
                         ),
                         approved_by="event-alpha-coordinator",
                         admission_tier="CANDIDATE",
@@ -1895,11 +2121,18 @@ class EventAlphaService:
                         card=card,
                         similarity=similarity,
                         status="SHADOW_STARTED",
-                        reason="One-shot Event strategy entered isolated broker-free Shadow",
+                        reason=(
+                            "Exploratory one-shot Event strategy entered isolated "
+                            "broker-free Shadow"
+                            if exploratory
+                            else "Held-out one-shot Event strategy entered isolated "
+                            "broker-free Shadow"
+                        ),
                         strategy_spec_id=strategy.strategy_spec_id,
                         shadow_deployment_id=str(deployment["shadow_deployment_id"]),
                     )
                 )
+                activated_card_ids.add(str(card["event_card_id"]))
         return results
 
     def _compile_event_strategy(
@@ -1985,16 +2218,23 @@ class EventAlphaService:
         }
         report_hash = _canonical_hash(report_material)
         report_id = stable_uuid("event-alpha-shadow-validation", report_hash)
+        validation_status = str(validation["status"])
+        exploratory = validation_status == "INSUFFICIENT_HOLDOUT"
         gate = {
             "version": EVENT_ALPHA_VALIDATION_VERSION,
             "eligible_for_human_review": False,
             "candidate_shadow": {
                 "eligible_for_human_review": True,
-                "status": "EVENT_HOLDOUT_ELIGIBLE",
+                "status": (
+                    "EVENT_EXPLORATORY_FORWARD"
+                    if exploratory
+                    else "EVENT_HOLDOUT_ELIGIBLE"
+                ),
                 "threshold_failures": [],
                 "evidence_shortfalls": [],
             },
             "event_validation_id": validation["event_validation_id"],
+            "event_validation_status": validation_status,
             "paper_eligible": False,
         }
         values = {
@@ -2006,7 +2246,11 @@ class EventAlphaService:
             "validated_strategy_spec_ids": validated_ids,
             "execution_contract_json": contract,
             "execution_contract_sha256": _canonical_hash(contract),
-            "selection_metric": "event_holdout_median_return",
+            "selection_metric": (
+                "event_discovery_forward_observation"
+                if exploratory
+                else "event_holdout_median_return"
+            ),
             "train_bars": int(
                 dict(playbook.get("gate_assessment_json") or {}).get(
                     "analog_count",
@@ -2025,6 +2269,7 @@ class EventAlphaService:
             "regime_metrics": {},
             "robustness_metrics": {
                 "event_validation_id": validation["event_validation_id"],
+                "event_validation_status": validation_status,
                 "event_playbook_id": playbook["event_playbook_id"],
                 "holdout_card_ids": validation["holdout_card_ids_json"],
                 "trigger_event_card_id": card["event_card_id"],
@@ -2054,6 +2299,36 @@ class EventAlphaService:
                 )
             connection.execute(statement)
         return strategy, report_id
+
+    def _matching_playbook_family(
+        self,
+        *,
+        card: dict[str, Any],
+        proposal: EventPlaybookProposal,
+    ) -> dict[str, Any] | None:
+        """Reuse a materially identical playbook instead of multiplying hypotheses."""
+
+        tags = set(card.get("generalized_tags_json") or [])
+        for playbook in self.store.playbooks(
+            limit=500,
+            assessment_schema_version=EVENT_ASSESSMENT_SCHEMA_VERSION,
+        ):
+            if (
+                playbook.get("event_type") != card.get("event_type")
+                or playbook.get("direction") != card.get("direction")
+                or int(playbook.get("holding_period_sessions") or 0)
+                != proposal.selected_horizon_sessions
+            ):
+                continue
+            context = self.store.playbook_context(str(playbook["event_playbook_id"]))
+            if context is None:
+                continue
+            if self._tag_similarity(
+                tags,
+                set(context.get("anchor_tags_json") or []),
+            ) >= EVENT_ALPHA_MATCH_THRESHOLD:
+                return playbook
+        return None
 
     def _record_match(
         self,

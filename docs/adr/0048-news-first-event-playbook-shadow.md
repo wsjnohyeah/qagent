@@ -2,6 +2,7 @@
 
 - Status: accepted
 - Date: 2026-09-16
+- Amended by: ADR 0049 (exploratory forward-only Candidate Shadow for insufficient holdouts)
 
 ## Context
 

@@ -58,6 +58,7 @@ from agentic_quant.research import (
 from agentic_quant.research_store import ResearchStore, _canonical_hash
 from agentic_quant.reference_data import ReferenceDataStore
 from agentic_quant.risk import (
+    BASELINE_EXECUTION_PROFILE_VERSION,
     RestrictionRegistry,
     RiskPolicy,
     baseline_long_exit,
@@ -69,6 +70,10 @@ from agentic_quant.risk import (
     strategy_execution_profile,
     strategy_holding_period_sessions,
     strategy_signal_risk_policy,
+)
+from agentic_quant.shadow_graduation import (
+    assess_shadow_graduation,
+    shadow_graduation_policy,
 )
 from agentic_quant.virtual_account import (
     MAIN_VIRTUAL_ACCOUNT_ID,
@@ -335,11 +340,22 @@ class ShadowRuntime:
                     .order_by(event_alpha_validations.c.created_at.desc())
                     .limit(1)
                 ).one_or_none()
+            candidate_status = str(
+                dict(gate.get("candidate_shadow") or {}).get("status") or ""
+            )
+            expected_validation_status = (
+                "INSUFFICIENT_HOLDOUT"
+                if candidate_status == "EVENT_EXPLORATORY_FORWARD"
+                else "SHADOW_ELIGIBLE"
+            )
             if (
                 latest_event_validation is None
                 or str(latest_event_validation.event_validation_id)
                 != event_validation_id
-                or str(latest_event_validation.status) != "SHADOW_ELIGIBLE"
+                or str(latest_event_validation.schema_version)
+                != str(gate.get("version"))
+                or str(latest_event_validation.status)
+                != expected_validation_status
             ):
                 raise ValueError(
                     "Event Playbook validation is stale or no longer Shadow eligible"
@@ -1353,6 +1369,7 @@ class ShadowRuntime:
                 strategy_adoptions.c.admission_tier,
                 validation_reports.c.execution_contract_sha256,
                 validation_reports.c.execution_contract_json,
+                validation_reports.c.gate_assessment,
             )
             .join(
                 strategy_specs,
@@ -1373,6 +1390,9 @@ class ShadowRuntime:
         )
         with self.engine.connect() as connection:
             values = [dict(row._mapping) for row in connection.execute(statement)]
+            deployment_ids = {
+                str(value["shadow_deployment_id"]) for value in values
+            }
             account_ids = {
                 str(value["virtual_account_id"]) for value in values
             }
@@ -1397,6 +1417,39 @@ class ShadowRuntime:
                     .group_by(shadow_deployments.c.virtual_account_id)
                 )
             }
+            evidence_rows = connection.execute(
+                select(
+                    shadow_events.c.shadow_deployment_id,
+                    shadow_events.c.sequence,
+                    shadow_events.c.event_type,
+                    shadow_events.c.realized_pnl_delta,
+                    shadow_events.c.cash_balance,
+                    shadow_events.c.payload_json,
+                )
+                .where(shadow_events.c.shadow_deployment_id.in_(deployment_ids))
+                .where(shadow_events.c.event_type.in_(("VIRTUAL_FILL_2", "mark")))
+                .order_by(
+                    shadow_events.c.shadow_deployment_id,
+                    shadow_events.c.sequence,
+                )
+            ).all()
+        graduation_evidence: dict[str, dict[str, list[Decimal]]] = defaultdict(
+            lambda: {"closed_trade_pnls": [], "marked_equity_path": []}
+        )
+        for row in evidence_rows:
+            evidence = graduation_evidence[str(row.shadow_deployment_id)]
+            if str(row.event_type) == "VIRTUAL_FILL_2":
+                evidence["closed_trade_pnls"].append(
+                    Decimal(str(row.realized_pnl_delta))
+                )
+                evidence["marked_equity_path"].append(
+                    Decimal(str(row.cash_balance))
+                )
+            elif dict(row.payload_json or {}).get("equity") is not None:
+                evidence["marked_equity_path"].append(
+                    Decimal(str(dict(row.payload_json)["equity"]))
+                )
+        observed_at = self._now()
         for value in values:
             account_id = str(value["virtual_account_id"])
             account = accounts[account_id]
@@ -1427,7 +1480,55 @@ class ShadowRuntime:
             else:
                 value["contract_status"] = "CURRENT"
                 value["contract_message"] = "Approved execution contract is current"
+            evidence = graduation_evidence[str(value["shadow_deployment_id"])]
+            value["graduation"] = assess_shadow_graduation(
+                holding_period_sessions=strategy_holding_period_sessions(
+                    dict(value.get("data_requirements_json") or {})
+                ),
+                observation_sessions=self._completed_observation_sessions(
+                    created_at=value["created_at"],
+                    observed_at=observed_at,
+                ),
+                initial_equity=Decimal(str(value["initial_cash"])),
+                current_equity=account_equity,
+                closed_trade_pnls=evidence["closed_trade_pnls"],
+                marked_equity_path=evidence["marked_equity_path"],
+                deployment_status=str(value["status"]),
+                contract_current=value["contract_status"] == "CURRENT",
+            )
+            value["graduation"]["paper_review_ready"] = bool(
+                value["graduation"]["eligible_for_early_graduation"]
+                and value["admission_tier"] == "QUALIFIED"
+                and dict(value.get("execution_contract_json") or {}).get(
+                    "execution_profile"
+                )
+                == BASELINE_EXECUTION_PROFILE_VERSION
+            )
         return values
+
+    def graduation_policy(self) -> dict[str, Any]:
+        return shadow_graduation_policy()
+
+    def _completed_observation_sessions(
+        self,
+        *,
+        created_at: datetime,
+        observed_at: datetime,
+    ) -> int:
+        created = _utc(created_at)
+        observed = _utc(observed_at)
+        assert created is not None and observed is not None
+        sessions = self.session_clock.calendar.sessions_in_range(
+            created.date().isoformat(),
+            observed.date().isoformat(),
+        )
+        return sum(
+            1
+            for session in sessions
+            if created
+            <= self.session_clock.calendar.session_close(session).to_pydatetime()
+            <= observed
+        )
 
     def deployment(self, deployment_id: str) -> dict[str, Any]:
         values = [

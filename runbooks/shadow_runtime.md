@@ -123,6 +123,20 @@ override and does not claim qualification.
   separate Phase 7 Paper runtime may mirror a newly approved plan only after an additional
   enrollment confirmation; it never converts Shadow history into broker history.
 
+## Forward-evidence graduation
+
+`shadow_graduation@0.1.0` derives a label without changing the deployment's `ACTIVE` execution
+state. A graduated sandbox therefore keeps taking valid future signals. The fast thresholds are
+five trades/seven sessions for 1-day, four/ten for 2-day, three/fifteen for 5-day, three/twenty-
+five for 10-day, and two/forty for 20-day strategies. Every one also needs at least two wins,
+positive realized net P&L, profit factor at least 1.05, maximum marked-equity drawdown no greater
+than 10%, a current execution contract, and best-trade-excluded P&L no worse than -0.5% of initial
+equity. Longer horizons remain `LONG_HORIZON_OBSERVING`.
+
+The label is available in each deployment's `graduation` object and through
+`GET /v1/shadow/graduation-policy`. It cannot by itself enroll a Candidate strategy in Paper or
+grant live-money authority.
+
 ## Inspection
 
 Use the Shadow page or:

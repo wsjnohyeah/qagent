@@ -239,9 +239,14 @@ Verify and record:
   1/2/5/10/20-session horizons, bounded current-schema Card growth, explicit availability bases,
   and no repeated assessment call when its semantic input is unchanged. Confirm
   `predictive_ml_used=false`. Any `SHADOW_ELIGIBLE` Playbook must have a current later-event
-  holdout certificate; any deployment must trace to a bullish `FORWARD_FIRST_SEEN` match created
-  after that certificate and use Candidate admission. Historical replay must never create a
-  match or deployment, and Event strategies must remain absent from Paper.
+  holdout certificate. An `INSUFFICIENT_HOLDOUT` Playbook may create only an explicitly
+  exploratory Candidate sandbox. Every deployment must trace to a bullish
+  `FORWARD_FIRST_SEEN` match created after its current certificate. `REJECTED` Playbooks and
+  historical replay must never create a deployment, one forward Card must start at most one
+  sandbox, and Event strategies must remain absent from Paper.
+- Confirm `GET /v1/shadow/graduation-policy` returns the expected versioned thresholds and that
+  deployment `graduation` labels are derived without changing `ACTIVE` execution state. A label
+  must not bypass Qualified admission, the compatible Paper profile, or manual enrollment.
 - When dynamic discovery is enabled, `GET /v1/market-scanner/status` has a recent completed
   or explicit fallback run, its raw object IDs resolve, and every coordinator job carries the
   same `universe_scan_id`. If autonomous pool admission is enabled, verify the recorded list

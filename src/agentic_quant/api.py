@@ -1475,6 +1475,10 @@ def create_app(
     ) -> list[dict[str, Any]]:
         return shadow.deployments(limit=limit)
 
+    @application.get("/v1/shadow/graduation-policy")
+    def shadow_graduation_policy() -> dict[str, Any]:
+        return shadow.graduation_policy()
+
     @application.get("/v1/shadow/account")
     def shadow_virtual_account() -> dict[str, Any]:
         value = shadow.sandbox_summary()

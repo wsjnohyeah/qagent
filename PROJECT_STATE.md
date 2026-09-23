@@ -2,6 +2,15 @@
 
 ## Current
 
+- Source now implements ADR 0049. `shadow_graduation@0.1.0` exposes a non-mutating,
+  horizon-aware fast graduation assessment from each sandbox's durable events while leaving the
+  sandbox active. Event Alpha validation `event_playbook_validation@0.2.0` distinguishes
+  discovery-qualified `INSUFFICIENT_HOLDOUT` Playbooks from deterministic `REJECTED` failures:
+  only the former may collect exploratory Candidate Shadow evidence from a genuinely new
+  `FORWARD_FIRST_SEEN` news Card. One Card starts at most one sandbox, near-duplicate hypotheses
+  reuse a Playbook family, and Event forward evidence is aggregated at the Playbook level.
+  Paper, Robinhood mutation, and live-money authority are unchanged. Exact-SHA CI and production
+  deployment are pending.
 - Source now makes Forward Shadow reuse the same point-in-time, provider-verified listing or
   post-suspension history boundary as coordinator research. This corrects the production NBIS
   counterexample where ten valid post-resumption sandboxes repeatedly degraded a Shadow tick by
@@ -17,7 +26,7 @@
   strictly Qualified and forward observation history remains short.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `37a27f9b3fda858d5e6b962748d3405dca733fbf` image, PostgreSQL, Redis, API, Shadow worker,
+  `dc5d5d74973965e826aa0184450dbbb05153ab0e` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled. The last pre-migration inspection found 106
@@ -36,16 +45,15 @@
   independent revalidation of accepted specs, scanner-pool authorization at Shadow start,
   at least 50% positive active OOS folds, profit factor at least 1.10, and a positive
   compounded OOS return after removing the largest winner,
-  a stricter Research LLM output prompt, and `llm_budget@0.4.0` with separate `$40` daily
-  technical and Event Alpha workload ceilings, an `$80` Meta-provider and combined project daily ceiling, and
-  a `$1,400` monthly ceiling. It preserves same-day spend across policy versions,
+  a stricter Research LLM output prompt, and `llm_budget@0.4.0` with `$5` per-workload
+  ceilings, a shared `$10` Meta-provider/project daily ceiling, and a `$1,400` monthly ceiling.
+  It preserves same-day spend across policy versions,
   single-attempt invalid LLM
   output handling, and leakage-safe annual ML under a six-year daily-bar target.
 - Production now runs the operator-directed Meta-only policy: `llm_routing@0.3.0` routes every
   interactive, routine, technical-research, Event, strategy-generation, and critique workload
-  to Meta `muse-spark-1.3`. `llm_budget@0.4.0` preserves the `$80/day` project ceiling and raises
-  Meta's provider ceiling to the same value so the existing technical and Event workload
-  allowances do not accidentally compete under the former `$40` Meta cap. OpenAI remains only
+  to Meta `muse-spark-1.3`. `llm_budget@0.4.0` currently limits every workload to `$5/day` and
+  makes them compete under the shared `$10/day` Meta-provider/project ceiling. OpenAI remains only
   as a dormant provider definition and historical audit label; an explicit call fails closed
   while it is absent from the effective route map. Post-rollout production evidence contains
   completed Meta calls for technical research, strategy generation, strategy critique, and
@@ -86,20 +94,19 @@
   retires at a `$8,800` marked-value floor. Explicit commission is zero while spread,
   slippage, impact, liquidity, and gap behavior remain modeled. The legacy migration is
   confirmation-gated and a deployment-time exposure boundary can stage Monday activation.
-- Production runs ADR 0048 Event Alpha: it accepts news only, clusters a 36-hour Event Episode, measures
+- Production currently runs ADR 0048 Event Alpha: it accepts news only, clusters a 36-hour Event Episode, measures
   deterministic 1/2/5/10/20-session outcomes, validates Playbooks on later unseen events, and
   can compile a qualifying future-news match into one immutable Candidate strategy in an
   isolated Shadow sandbox. Historical replay cannot trigger, the latest validation certificate
   is authoritative, and Event strategies cannot enter Paper. Schema head is `20260916_0040`.
-  A dedicated
-  `event_research` workload routes only Event Card extraction and analog synthesis to Meta
-  `muse-spark-1.3`, caps that workload at `$40/day`, and shares the `$80/day` Meta/project
-  ceiling with technical research. The first deployed cycles created four current-schema news
-  Cards, ten causally complete outcomes, and three assessments; two substantive Cards completed
-  and two empty-body news records failed before paid inference. Two completed post-rollout Event
-  calls used Meta. There is not yet a genuine Playbook, validation, or forward match, and none is
-  manufactured as a deployment test. The `$1,400` monthly project ceiling remains deployed and
-  same-period usage is reconstructed from durable reservations.
+  A dedicated `event_research` workload routes only Event Card extraction and analog synthesis
+  to Meta `muse-spark-1.3` and has a `$5/day` allowance under the shared `$10/day`
+  Meta/project ceiling. At the latest pre-ADR-0049 inspection production held 2,490
+  current-schema Cards, 29 discovery-qualified Playbooks, 18 latest validations with
+  insufficient later holdouts, 11 deterministic rejections, and no forward Event match. ADR
+  0049 source will allow only those insufficient—not rejected—Playbooks to gather future-first-
+  seen exploratory Shadow evidence after deployment. The `$1,400` monthly project ceiling
+  remains deployed and same-period usage is reconstructed from durable reservations.
 - GitHub Actions runs `35072011793` and `35072237701` passed; the latter published exact image
   `37a27f9`. Guarded production rollout used verified backup
   `/opt/agentic-quant/backups/20260916T081832Z`;

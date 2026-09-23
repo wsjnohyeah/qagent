@@ -816,6 +816,134 @@ def test_news_playbook_requires_later_holdouts_before_forward_match(
         )
 
 
+def test_discovery_qualified_playbook_can_collect_exploratory_forward_shadow(
+    settings: Settings,
+) -> None:
+    ledger, _, store, research, service = _services(settings)
+    for index, (symbol, value) in enumerate(
+        zip(
+            ("AAPL", "MSFT", "NVDA", "DELL", "ORCL"),
+            (
+                Decimal("0.03"),
+                Decimal("0.02"),
+                Decimal("0.04"),
+                Decimal("0.01"),
+                Decimal("-0.005"),
+            ),
+            strict=True,
+        )
+    ):
+        discovery = _record_card(
+            store,
+            symbol=symbol,
+            event_time=AS_OF - timedelta(days=200 - index),
+        )
+        _record_outcome(
+            store,
+            event_card_id=str(discovery["event_card_id"]),
+            total_return=value,
+            available_from=AS_OF - timedelta(days=150),
+        )
+    anchor = _record_card(
+        store,
+        symbol="SMCI",
+        event_time=AS_OF - timedelta(days=100),
+    )
+    assessment = asyncio.run(
+        service.assess_card(
+            str(anchor["event_card_id"]),
+            as_of=AS_OF - timedelta(days=90),
+        )
+    )
+    assert assessment["status"] == "PLAYBOOK_CANDIDATE"
+    validation = service.validate_playbooks(as_of=AS_OF - timedelta(days=90))[0]
+    assert validation["status"] == "INSUFFICIENT_HOLDOUT"
+
+    objects = SystemObjectStore(ledger.engine, ledger)
+    objects.ensure_defaults()
+    shadow = ShadowRuntime(
+        ledger.engine,
+        research,
+        objects,
+        risk_policy=RiskPolicy.from_yaml(settings.risk_policy_path),
+        restrictions=RestrictionRegistry.from_yaml(
+            settings.restricted_securities_path
+        ),
+    )
+    service.shadow = shadow
+    service.auto_shadow_enabled = True
+
+    trigger_time = datetime.now(UTC) + timedelta(minutes=1)
+    trigger = _record_card(
+        store,
+        symbol="AAPL",
+        event_time=trigger_time,
+        availability_basis="FORWARD_FIRST_SEEN",
+    )
+    matches = service.activate_forward_matches(
+        as_of=trigger_time + timedelta(hours=1)
+    )
+
+    assert len(matches) == 1
+    assert matches[0]["event_card_id"] == trigger["event_card_id"]
+    assert matches[0]["status"] == "SHADOW_STARTED"
+    deployment = shadow.deployment(str(matches[0]["shadow_deployment_id"]))
+    assert deployment["gate_assessment"]["candidate_shadow"]["status"] == (
+        "EVENT_EXPLORATORY_FORWARD"
+    )
+
+
+def test_equivalent_event_hypothesis_reuses_existing_playbook_family(
+    settings: Settings,
+) -> None:
+    _, _, store, _, service = _services(settings)
+    for index, (symbol, value) in enumerate(
+        zip(
+            ("AAPL", "MSFT", "NVDA", "DELL", "ORCL"),
+            (
+                Decimal("0.03"),
+                Decimal("0.02"),
+                Decimal("0.04"),
+                Decimal("0.01"),
+                Decimal("-0.005"),
+            ),
+            strict=True,
+        )
+    ):
+        discovery = _record_card(
+            store,
+            symbol=symbol,
+            event_time=AS_OF - timedelta(days=200 - index),
+        )
+        _record_outcome(
+            store,
+            event_card_id=str(discovery["event_card_id"]),
+            total_return=value,
+            available_from=AS_OF - timedelta(days=150),
+        )
+    first = _record_card(
+        store,
+        symbol="SMCI",
+        event_time=AS_OF - timedelta(days=100),
+    )
+    second = _record_card(
+        store,
+        symbol="VRT",
+        event_time=AS_OF - timedelta(days=90),
+    )
+
+    first_assessment = asyncio.run(
+        service.assess_card(str(first["event_card_id"]), as_of=AS_OF)
+    )
+    second_assessment = asyncio.run(
+        service.assess_card(str(second["event_card_id"]), as_of=AS_OF)
+    )
+
+    assert first_assessment["status"] == "PLAYBOOK_CANDIDATE"
+    assert second_assessment["status"] == "PLAYBOOK_FAMILY_EVIDENCE"
+    assert len(store.playbooks()) == 1
+
+
 def test_unprocessed_event_candidates_are_balanced_across_symbols(
     settings: Settings,
 ) -> None:
