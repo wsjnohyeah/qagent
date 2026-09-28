@@ -14,6 +14,7 @@ from sqlalchemy import update
 
 from agentic_quant.database import (
     paper_enrollments,
+    paper_runs,
     shadow_deployments,
     shadow_signal_candidates,
     shadow_trade_plans,
@@ -585,6 +586,40 @@ def _paper_fixture(
     return ledger, runtime, shadow, clock
 
 
+def test_paper_runtime_stays_broker_idle_without_active_lifecycles(
+    settings,  # type: ignore[no-untyped-def]
+) -> None:
+    upgrade_database(settings.database_url)
+    ledger = EventLedger(settings.database_url)
+    broker = _FakeBroker()
+    now = datetime(2026, 9, 28, 20, tzinfo=UTC)
+    runtime = PaperTradingRuntime(
+        ledger.engine,
+        cast(ShadowRuntime, _FakeShadow()),
+        broker_factory=lambda: cast(PaperBroker, broker),
+        enabled=True,
+        trading_mode="paper",
+        now_provider=lambda: now,
+    )
+
+    result = asyncio.run(
+        runtime.tick(trigger="idle-test", new_exposure_paused=True)
+    )
+
+    assert result["status"] == "SUCCEEDED"
+    assert result["broker_contacted"] is False
+    assert result["idle_reason"] == "NO_ACTIVE_PAPER_LIFECYCLES"
+    assert broker.opened is False
+    with ledger.engine.connect() as connection:
+        stored = connection.execute(
+            paper_runs.select().where(
+                paper_runs.c.paper_run_id == result["paper_run_id"]
+            )
+        ).one()
+    assert stored.detail_json["broker_contacted"] is False
+    assert stored.detail_json["idle_reason"] == "NO_ACTIVE_PAPER_LIFECYCLES"
+
+
 def test_paper_runtime_submits_once_reconciles_and_pause_blocks_new_exposure(
     settings,  # type: ignore[no-untyped-def]
 ) -> None:
@@ -661,6 +696,7 @@ def test_paper_runtime_submits_once_reconciles_and_pause_blocks_new_exposure(
     first = asyncio.run(
         runtime.tick(trigger="test", new_exposure_paused=False)
     )
+    assert first["broker_contacted"] is True
     assert first["orders_submitted"] == 1
     assert broker.submissions == 1
     stored = runtime.orders()[0]

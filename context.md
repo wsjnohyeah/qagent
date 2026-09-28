@@ -1,6 +1,6 @@
 # Master Project Context
 
-Last updated: 2026-09-23 PDT
+Last updated: 2026-09-28 PDT
 
 Context format: v1
 
@@ -16,7 +16,7 @@ estimated-cost ceiling; a Playbook may enter only isolated Candidate Shadow afte
 validation and a new forward-observed news match. Off-site backup/alerting and statistical/elapsed production evidence
 remain open.
 
-Current documented baseline: C117 — `Honor verified history boundaries in Shadow`
+Current documented baseline: C120 — `Isolate Paper outages from Shadow runtime`
 
 ## Purpose and authority
 
@@ -44,6 +44,12 @@ A Git commit cannot contain its own content-derived hash without changing that h
 
 ### Product state
 
+- ADR 0050 isolates broker-free Shadow continuity from Alpaca Paper availability. A scheduled
+  Paper tick with no active enrollment or incomplete order now records a broker-idle success
+  without contacting Alpaca. When a real Paper lifecycle needs reconciliation, repeated
+  provider failures remain visible and retry with bounded backoff instead of terminating the
+  shared worker. The mandatory production boot pause still applies to a genuine worker start,
+  and all Paper/live authority boundaries remain unchanged.
 - The repository contains completed Phase 0 safety and Phase 2 event/document foundations,
   a Phase 1 read-only market-data foundation with open-session verification complete, and an
   implemented Phase 3A point-in-time research vertical slice. It is not a profitable or
@@ -5754,6 +5760,33 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: observe completion of the in-flight Shadow tick and the next genuine
   first-seen news match. Graduation and Event forward-validation labels will change only when
   durable new evidence satisfies their rules; no passing output is manufactured for rollout.
+
+### C120 — `Isolate Paper outages from Shadow runtime`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-28 PDT.
+- User intent: repair the production failure mode that unexpectedly paused new broker-free
+  Shadow exposure and clarify what the persistent workers do.
+- Scope: make a Paper runtime with no active enrollment and no incomplete order record a
+  broker-idle success without contacting Alpaca; preserve broker reconciliation whenever any
+  incomplete lifecycle exists; keep repeated Paper provider failures visible with bounded
+  backoff instead of terminating the shared Shadow worker; add regression coverage, ADR 0050,
+  and update the README, deployment guide, Paper runbook, and project state.
+- Architecture/decision impact: Paper provider availability is no longer coupled to Shadow
+  process continuity. The production boot pause remains mandatory after a genuine worker
+  start, Shadow failure behavior is unchanged, and no Paper, Robinhood, or live-money
+  authority is added.
+- Validation: focused Paper tests passed (23 tests). `make release-check` passed Flake8,
+  strict mypy across 64 source files, all 240 tests, local authenticated doctor, repository
+  secret scan, rebuilt Compose doctor, and PostgreSQL Alembic zero-drift inspection.
+- Expected global state after commit: the exact image can run unused Paper infrastructure
+  without periodic broker traffic, and a future Alpaca Paper outage cannot force an unrelated
+  Shadow restart/boot pause. Production remains on `d9ab3c9` until exact-SHA publication and
+  guarded deployment; the currently stored exposure pause remains authoritative until an
+  audited resume.
+- Corrections/follow-ups: after CI publication, deploy through the guarded runbook, verify a
+  broker-idle Paper run and uninterrupted Shadow lease, then restore the already approved
+  broker-free new-exposure state through the audited confirmation path.
 
 ## Template for future commit entries
 

@@ -756,6 +756,49 @@ class PaperTradingRuntime:
         enrollment_count = len(
             [item for item in self.enrollments(limit=1_000) if item["status"] == "ACTIVE"]
         )
+        all_orders = self.orders(limit=10_000)
+        incomplete_orders = tuple(
+            item for item in all_orders if not bool(item["lifecycle_complete"])
+        )
+        # A configured Paper boundary with no enrolled strategy and no broker
+        # lifecycle to reconcile is intentionally broker-idle. Account inspection
+        # remains available through the explicit read-only probe, while the
+        # background worker cannot be destabilized by an unnecessary provider call.
+        if enrollment_count == 0 and not incomplete_orders:
+            finished_at = self._now()
+            with self.engine.begin() as connection:
+                connection.execute(
+                    insert(paper_runs).values(
+                        paper_run_id=run_id,
+                        trigger=trigger[:80],
+                        status=status,
+                        enrollment_count=0,
+                        orders_submitted=0,
+                        orders_reconciled=0,
+                        started_at=started_at,
+                        finished_at=finished_at,
+                        error_code=None,
+                        detail_json={
+                            "submission_blockers": [],
+                            "new_exposure_paused": new_exposure_paused,
+                            "broker_contacted": False,
+                            "idle_reason": "NO_ACTIVE_PAPER_LIFECYCLES",
+                        },
+                    )
+                )
+            return {
+                "paper_run_id": run_id,
+                "status": status,
+                "enrollment_count": 0,
+                "orders_submitted": 0,
+                "orders_reconciled": 0,
+                "new_exposure_paused": new_exposure_paused,
+                "submission_blockers": [],
+                "broker_contacted": False,
+                "idle_reason": "NO_ACTIVE_PAPER_LIFECYCLES",
+                "started_at": started_at,
+                "finished_at": finished_at,
+            }
         try:
             assert self.broker_factory is not None
             async with self.broker_factory() as broker:
@@ -767,7 +810,6 @@ class PaperTradingRuntime:
                 if not broker_account_id:
                     raise RuntimeError("Alpaca paper account response has no account ID")
                 self._pin_account(broker_account_id)
-                all_orders = self.orders(limit=10_000)
                 position_quantity_by_symbol = {
                     str(position.get("symbol") or "UNKNOWN").upper(): _decimal(
                         position.get("qty")
@@ -1107,6 +1149,7 @@ class PaperTradingRuntime:
                         detail_json={
                             "submission_blockers": submission_blockers,
                             "new_exposure_paused": new_exposure_paused,
+                            "broker_contacted": True,
                         },
                     )
                 )
@@ -1118,6 +1161,7 @@ class PaperTradingRuntime:
             "orders_reconciled": reconciled,
             "new_exposure_paused": new_exposure_paused,
             "submission_blockers": submission_blockers,
+            "broker_contacted": True,
             "started_at": started_at,
             "finished_at": self._now(),
         }

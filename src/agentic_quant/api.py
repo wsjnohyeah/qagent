@@ -783,7 +783,7 @@ def create_app(
                 except Exception as exc:
                     failure_streak += 1
                     delay = min(
-                        app_settings.paper_poll_seconds,
+                        max(app_settings.paper_poll_seconds * 10, 60),
                         max(1, 2 ** min(failure_streak - 1, 8)),
                     )
                     try:
@@ -797,10 +797,10 @@ def create_app(
                         )
                     except Exception:
                         pass
-                    if failure_streak >= 5:
-                        raise RuntimeError(
-                            "Paper runtime stopped after five consecutive failures"
-                        ) from exc
+                    # Paper provider availability is not a Shadow safety signal.
+                    # Keep the Paper heartbeat failed and retry with bounded
+                    # backoff, but do not terminate the shared worker process and
+                    # thereby force an unrelated Shadow boot pause.
                 try:
                     await asyncio.wait_for(stop_paper.wait(), timeout=delay)
                 except TimeoutError:

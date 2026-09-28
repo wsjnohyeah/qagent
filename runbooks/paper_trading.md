@@ -45,6 +45,9 @@ timed exit for a filled position.
 ## Runtime behavior
 
 - The Paper worker polls at `PAPER_POLL_SECONDS`.
+- With no active enrollment and no incomplete Paper order, a scheduled tick records
+  `NO_ACTIVE_PAPER_LIFECYCLES` and does not contact Alpaca. Use the explicit read-only probe
+  when an operator wants a fresh account snapshot before enrollment.
 - A frozen Shadow `TradePlan` becomes one durable Paper intent with a deterministic
   `client_order_id`.
 - Before POST, and after every uncertain response, the worker queries Alpaca by that client
@@ -67,6 +70,10 @@ timed exit for a filled position.
   unmanaged positions, enabled pipeline, and resumed global switch.
 - Global pause, Paper pipeline pause, or enrollment pause blocks new entries only.
   Reconciliation and risk-reducing exits continue so fills/cancels are not lost.
+- A Paper provider failure keeps the Paper heartbeat failed and retries with bounded backoff;
+  it does not terminate the shared process or interrupt Shadow. Incomplete Paper orders still
+  force broker reconciliation, so the isolation rule cannot hide unresolved simulated broker
+  exposure.
 
 ## Inspection
 
@@ -100,6 +107,8 @@ are `paper.enroll`, `paper.pause`, `paper.resume`, `paper.retire`, `paper.tick`,
    before creating any future enrollment.
 5. Preserve all database rows and broker payload snapshots. Never repair an incident by
    deleting order history.
+6. A repeated Paper transport failure should not coincide with a Shadow worker restart. If it
+   does, inspect the worker logs and current image: ADR 0050 fault isolation may not be deployed.
 
 No Paper order should be submitted merely to test deployment. Use fixture tests and the
 read-only account probe first; the administrator decides when to permit the first paper order.

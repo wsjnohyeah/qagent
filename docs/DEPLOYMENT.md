@@ -106,6 +106,11 @@ remain exact, and the dedicated worker must report a healthy `paper` heartbeat. 
 production data plane has no Paper enrollment, so activation cannot submit until the
 administrator separately confirms one in Control Center and resumes new exposure.
 
+A scheduled Paper tick is broker-idle when there is no active enrollment and no incomplete
+Paper order. Once a lifecycle exists, provider failures remain visible through the Paper
+heartbeat and retry with bounded backoff without terminating Shadow. The mandatory production
+boot pause remains authoritative for a genuine worker restart.
+
 When the dormant Robinhood bridge is approved, generate its Fernet key in the target secret
 manager, set the exact loopback callback shown above, and enable only
 `ROBINHOOD_MCP_BRIDGE_ENABLED`. Production Compose pins

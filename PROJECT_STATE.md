@@ -2,6 +2,13 @@
 
 ## Current
 
+- Local source implements ADR 0050 after the 2026-09-26 production incident: five consecutive
+  Alpaca Paper account timeouts no longer terminate the shared Shadow worker, and a Paper
+  runtime with no enrollment or incomplete order records a broker-idle run without network
+  access. Actual Paper lifecycles still reconcile and expose a failed heartbeat with bounded
+  retry. The production boot pause and every Paper/live authority boundary remain unchanged;
+  exact-SHA rollout and audited restoration of already-approved broker-free exposure are
+  pending.
 - Production now implements ADR 0049. `shadow_graduation@0.1.0` exposes a non-mutating,
   horizon-aware fast graduation assessment from each sandbox's durable events while leaving the
   sandbox active. Event Alpha validation `event_playbook_validation@0.2.0` distinguishes
@@ -616,3 +623,8 @@
   and carry LLM spend across budget-policy versions.
 - ADR 0041: allow configured deterministic auto-adoption/start for exact current Candidate or
   Qualified results in broker-free Shadow; preserve operator holds and every Paper/live boundary.
+- ADR 0049: derive accelerated Shadow graduation labels and allow discovery-qualified,
+  holdout-insufficient Event Playbooks to collect explicitly labeled forward evidence.
+- ADR 0050: keep scheduled Paper broker-idle when no lifecycle exists and isolate repeated
+  Paper provider failures from broker-free Shadow process continuity while preserving the
+  production boot pause and all reconciliation requirements.

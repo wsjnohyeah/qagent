@@ -618,6 +618,13 @@ cutoff late, a separately identified DAY market exit is the fail-safe. New entri
 blocked until broker-flat evidence completes the prior lifecycle, and only one lifecycle per
 symbol may be open.
 
+When there is no active Paper enrollment and no incomplete Paper order, the scheduled Paper
+runtime records a broker-idle tick without contacting Alpaca; account inspection remains an
+explicit read-only probe. If Alpaca is unavailable while a real Paper lifecycle needs
+reconciliation, the Paper heartbeat fails and retries with bounded backoff without terminating
+the broker-free Shadow runtime. A genuine production worker restart still activates the
+mandatory new-exposure pause.
+
 Submission is off by default. Staged setup is:
 
 1. Confirm an eligible current-profile Strategy and Shadow deployment, and use the Paper
@@ -633,7 +640,7 @@ The broker base URL is hard-pinned to `https://paper-api.alpaca.markets`; config
 enables Paper against the live Alpaca host fails startup. There is no `live` trading mode and
 `LIVE_TRADING_ENABLED=true` always fails. The optional Robinhood MCP bridge remains read/preview
 only under the same rule. See `runbooks/paper_trading.md`, `runbooks/robinhood_mcp.md`, ADR 0024,
-ADR 0025 and its implemented resolution in ADR 0033, and ADR 0040.
+ADR 0025 and its implemented resolution in ADR 0033, ADR 0040, and ADR 0050.
 
 ## Repository map
 
