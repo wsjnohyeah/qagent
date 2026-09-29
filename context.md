@@ -4,19 +4,15 @@ Last updated: 2026-09-28 PDT
 
 Context format: v1
 
-Current phase: the unified research, Shadow, and Alpaca Paper foundations are deployed to a
-fresh production data plane. ADR 0042 is deployed: 97 flat legacy Shadow deployments are
-retired, one unfilled plan is cancelled, nine open virtual positions await causal liquidation,
-and new isolated `$10,000` sandbox exposure cannot execute before the September 14 open.
-Paid ML + LLM research and source-specific historical backfill are
-active. Production automatically admits exact deterministic Candidate/Qualified results to
-broker-free Shadow; Paper enrollment remains separately human-confirmed and live money remains
-impossible. News-first Event Alpha is active through a dedicated Meta route and `$40/day`
-estimated-cost ceiling; a Playbook may enter only isolated Candidate Shadow after later-event
-validation and a new forward-observed news match. Off-site backup/alerting and statistical/elapsed production evidence
-remain open.
+Current phase: the unified research, isolated Shadow, Event Alpha, and Alpaca Paper
+foundations run on the production VPS from immutable image `5628469`. Deterministic
+Candidate/Qualified results are automatically admitted to broker-free Shadow while Paper
+enrollment remains separately human-confirmed and live money remains impossible. ADR 0050 is
+deployed: an unused Paper runtime is broker-idle, and Paper provider failures no longer
+terminate Shadow. Meta workloads share the operator-selected `$10/day` project ceiling.
+Off-site backup/alerting and statistical/elapsed production evidence remain open.
 
-Current documented baseline: C120 — `Isolate Paper outages from Shadow runtime`
+Current documented baseline: C121 — `Record Paper outage isolation rollout`
 
 ## Purpose and authority
 
@@ -5763,7 +5759,7 @@ lifecycle. No Paper order was used as a build or deployment test.
 
 ### C120 — `Isolate Paper outages from Shadow runtime`
 
-- Git hash: resolve from Git history after commit.
+- Git hash: `5628469f3a250ab1f7b38385521cdd124920a242`.
 - Date: 2026-09-28 PDT.
 - User intent: repair the production failure mode that unexpectedly paused new broker-free
   Shadow exposure and clarify what the persistent workers do.
@@ -5787,6 +5783,37 @@ lifecycle. No Paper order was used as a build or deployment test.
 - Corrections/follow-ups: after CI publication, deploy through the guarded runbook, verify a
   broker-idle Paper run and uninterrupted Shadow lease, then restore the already approved
   broker-free new-exposure state through the audited confirmation path.
+
+### C121 — `Record Paper outage isolation rollout`
+
+- Git hash: resolve from Git history after commit.
+- Date: 2026-09-28 PDT.
+- User intent: finish the production repair, restore autonomous broker-free Shadow exposure,
+  and leave the system in a verified operating state.
+- Scope: record C120 CI/image publication, the verified production backup, guarded deployment,
+  broker-idle Paper evidence, exact image/runtime checks, and the audited runtime-resume action.
+- Architecture/decision impact: none beyond ADR 0050. The production boot pause remains a
+  deliberate safety gate; the already approved Shadow workflow is restored only through the
+  existing two-step administrator action.
+- Validation: GitHub Actions run `36489777290` passed and published exact image
+  `5628469f3a250ab1f7b38385521cdd124920a242`. Backup
+  `/opt/agentic-quant/backups/20260928T220652Z` passed checksum, object-archive, and PostgreSQL
+  catalog verification. The guarded deploy passed migration/bootstrap plus API, Shadow,
+  Paper, coordinator, PostgreSQL, and Redis health gates. All application containers run the
+  exact image; external readiness returns 200, protected status returns 401, and
+  `LIVE_TRADING_ENABLED=false` is verified inside the worker. The deployment-record commit
+  separately passed Flake8, strict mypy across 64 source files, all 240 tests, local doctor,
+  and the repository secret scan.
+- Global state after commit: production runs C120 with zero Paper enrollments/orders. Repeated
+  scheduled Paper ticks persist `NO_ACTIVE_PAPER_LIFECYCLES` with `broker_contacted=false`;
+  worker restart count remains zero after rollout. Audited action
+  `01a0eb7d-d0dc-78a7-abcd-f18a65fad507` restored `new_exposure_paused=false`. The new Shadow
+  worker is healthy and holds a freshly renewed fenced execution lease; its first large
+  inventory tick is still in progress, so the next tick is the first one that can consume the
+  restored new-exposure state.
+- Corrections/follow-ups: observe completion latency for the 594-sandbox Shadow scan. Paper
+  fault isolation is complete; Shadow tick throughput remains a separate performance concern
+  and must not be optimized by weakening idempotency, point-in-time checks, or exit handling.
 
 ## Template for future commit entries
 

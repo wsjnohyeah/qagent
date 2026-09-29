@@ -2,13 +2,13 @@
 
 ## Current
 
-- Local source implements ADR 0050 after the 2026-09-26 production incident: five consecutive
+- Production implements ADR 0050 after the 2026-09-26 incident: five consecutive
   Alpaca Paper account timeouts no longer terminate the shared Shadow worker, and a Paper
   runtime with no enrollment or incomplete order records a broker-idle run without network
   access. Actual Paper lifecycles still reconcile and expose a failed heartbeat with bounded
-  retry. The production boot pause and every Paper/live authority boundary remain unchanged;
-  exact-SHA rollout and audited restoration of already-approved broker-free exposure are
-  pending.
+  retry. Exact image `5628469f3a250ab1f7b38385521cdd124920a242` is deployed; audited action
+  `01a0eb7d-d0dc-78a7-abcd-f18a65fad507` restored new broker-free exposure after the mandatory
+  boot pause. Every Paper/live authority boundary remains unchanged.
 - Production now implements ADR 0049. `shadow_graduation@0.1.0` exposes a non-mutating,
   horizon-aware fast graduation assessment from each sandbox's durable events while leaving the
   sandbox active. Event Alpha validation `event_playbook_validation@0.2.0` distinguishes
@@ -35,7 +35,7 @@
   strictly Qualified and forward observation history remains short.
 - The production stack is online in `production` mode at
   `https://qagent.143.110.239.251.sslip.io` on a fresh SFO3 VPS. It runs the immutable verified
-  `d9ab3c9d5f58e5e185d08af084613472aecf05b1` image, PostgreSQL, Redis, API, Shadow worker,
+  `5628469f3a250ab1f7b38385521cdd124920a242` image, PostgreSQL, Redis, API, Shadow worker,
   and independent research coordinator behind Caddy TLS. Dynamic market scanning, bounded
   Meta re-ranking, audited Scanner Trading Pool admission, paid strategy research, Shadow,
   and Alpaca Paper infrastructure are enabled. The last pre-migration inspection found 106
